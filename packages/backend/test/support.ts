@@ -73,7 +73,13 @@ export function ask(target: Target, pathname: string, options: Ask = {}): Promis
         response.on("error", reject);
       },
     );
-    request.on("error", reject);
+    // A server that answers before it has read the whole body (413) closes
+    // the connection under the rest of it; that is not the request failing.
+    const closedUnder = (error: NodeJS.ErrnoException) => error.code === "EPIPE" || error.code === "ECONNRESET";
+    request.on("error", (error: NodeJS.ErrnoException) => {
+      if (!closedUnder(error)) reject(error);
+    });
+    request.on("socket", (socket) => socket.on("error", () => {}));
     request.end(body);
   });
 }

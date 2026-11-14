@@ -283,6 +283,14 @@ describe("the sandbox's API", () => {
     });
   });
 
+  it("answers 413 to a body over the 16 MiB of the spec, and keeps none of it", async (t) => {
+    // Guards against: a sandbox that can make the backend read and keep a body of any size.
+    const { call, conversation } = await setup(t);
+    const answer = await call("/v1/replies", { json: { agent: "main", text: "x".repeat(16 * 1024 * 1024) } });
+    assert.equal(answer.status, 413);
+    assert.deepEqual(conversation.page().entries, []);
+  });
+
   it("answers 404 to a path it does not have", async (t) => {
     const { call } = await setup(t);
     assert.equal((await call("/v1/nothing")).status, 404);

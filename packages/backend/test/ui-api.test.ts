@@ -212,6 +212,33 @@ describe("the login", () => {
     assert.equal(callback.json().error, "github-denied");
   });
 
+  it("answers 502 when GitHub does not take the code", async (t) => {
+    // Guards against: a login that goes on, or is taken as GitHub being down, when the exchange is refused.
+    const env = await setup(t);
+    const start = await env.call("/auth/github/start", undefined);
+    const state = new URL(String(start.headers.location)).searchParams.get("state");
+    // GitHub never gave this code: its exchange is refused.
+    const callback = await env.call(`/auth/github/callback?code=unknown&state=${state}`, undefined);
+    assert.equal(callback.status, 502);
+    assert.equal(callback.json().error, "github-exchange-failed");
+    assert.equal(callback.headers["set-cookie"], undefined);
+  });
+
+  it("answers 429 while too many logins are under way, until they expire", async (t) => {
+    // Guards against: logins started without end filling the backend's memory (docs/backend.md: they live 10 minutes).
+    const env = await setup(t);
+    let refused: Awaited<ReturnType<typeof env.call>> | undefined;
+    for (let i = 0; i < 1000 && !refused; i++) {
+      const start = await env.call("/auth/github/start", undefined);
+      if (start.status !== 302) refused = start;
+    }
+    assert.ok(refused, "some number of logins under way is too many");
+    assert.equal(refused.status, 429);
+    assert.equal(refused.json().error, "too-many-logins");
+    env.clock.advance(10);
+    assert.equal((await env.call("/auth/github/start", undefined)).status, 302, "the expired ones make room");
+  });
+
   it("answers 502 when GitHub cannot be reached", async (t) => {
     const env = await setup(t);
     env.github.state.down = true;

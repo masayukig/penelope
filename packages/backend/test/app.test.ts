@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 import { startBackend } from "../src/app.ts";
@@ -56,6 +57,42 @@ describe("the backend", () => {
     assert.equal((await ask(ui, "/healthz")).status, 200);
     assert.equal((await ask(ui, "/api/history")).status, 401);
   });
+});
+
+describe("the backend that cannot listen", () => {
+  // Guards against: a backend that runs on without one of the Unix sockets of ADR-0014,
+  // where the sandbox could not reach it or the receivers could not hand it events.
+  // `backend serve` runs as its own process: what is looked at is that it ends.
+  for (const [which, name] of [
+    ["PENELOPE_INTAKE_SOCKET", "intake"],
+    ["PENELOPE_SANDBOX_SOCKET", "sandbox"],
+  ] as const) {
+    it(`does not start without its ${name} socket`, async (t) => {
+      const dir = tempDir(t);
+      const env: Record<string, string> = {
+        PATH: process.env.PATH ?? "",
+        PENELOPE_DATABASE: path.join(dir, "backend.sqlite"),
+        PENELOPE_SOURCES_DIR: path.join(dir, "sources"),
+        PENELOPE_MEMORY_DIR: path.join(dir, "memory"),
+        PENELOPE_INTAKE_SOCKET: path.join(dir, "intake.sock"),
+        PENELOPE_SANDBOX_SOCKET: path.join(dir, "sandbox.sock"),
+        PENELOPE_LISTEN: "127.0.0.1:0",
+        // A Unix socket's path is at most about 100 bytes; this one cannot be listened on.
+        [which]: path.join(dir, `${"s".repeat(120)}.sock`),
+      };
+      const main = fileURLToPath(new URL("../src/main.ts", import.meta.url));
+      const child = spawn(process.execPath, [main, "serve"], { env, stdio: "ignore" });
+      t.after(() => child.kill("SIGKILL"));
+      const code = await new Promise<number | null>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("the backend went on without its socket")), 20_000);
+        child.on("exit", (exitCode) => {
+          clearTimeout(timer);
+          resolve(exitCode);
+        });
+      });
+      assert.notEqual(code, 0);
+    });
+  }
 });
 
 describe("the command", () => {
