@@ -74,7 +74,7 @@ Pod の中のコンテナは網の名前空間を共有するので、TCP の待
 ## ServiceAccount の token
 
 - Pod は `automountServiceAccountToken: false`。
-- projected の token は Sentinel と backend のコンテナにだけ明示して mount する。Sentinel はそれを鍵の出どころにし、backend は A2A の送り手を確かめる TokenReview に使う（[ADR-0010](adr/0010-github-oauth-for-people-tokenreview-for-a2a.md)）。
+- projected の token は Sentinel と backend のコンテナにだけ明示して mount する。Sentinel はそれを鍵の出どころにし、backend は A2A の送り手を TokenReview で確かめるときに使う（[ADR-0010](adr/0010-github-oauth-for-people-tokenreview-for-a2a.md)、[ADR-0018](adr/0018-a2a-tasks-in-the-backend-and-replaceable-sender-checks.md)。gated の assertion だけで確かめる配置では使わない）。
 - sandbox には、サロゲートを持つ kubeconfig だけを置く。
 
 ## CA

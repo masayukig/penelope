@@ -1,7 +1,7 @@
 # 0010. 人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる
 
 - Date: 2026-11-14
-- Status: Accepted
+- Status: Accepted（Decision 項 2（A2A は ServiceAccount の token を TokenReview で確かめる）の、TokenReview だけで確かめる点と Ingress を gated の後ろに置かない点は ADR-0018 で置き換え）
 
 ## Context
 
@@ -30,6 +30,7 @@ backend には、外から 2 種類の呼び手が来る。オーナーが Web U
 - 受ける token の audience は設定で選べる。今の送り手が使っている audience も受けられるようにし、送り手を変えずにつなぐ。
 - backend の ServiceAccount に、TokenReview を呼ぶ権限を与える。
 - penelope の Ingress は、gated の後ろではないふつうの Ingress にする。
+  - 2026-11-14 追記: ADR-0018 で置き換え。gated は自分の audience の token を落として assertion に置き換えるので、gated の後ろでは今の送り手の token が backend に届かない。確かめ方を差し替えられる口にして TokenReview と gated の assertion の 2 つを持ち、最初は gated の assertion で受ける。Ingress は gated の後ろに置いてよい。
 
 ### 出ていく向きも gated を知らない
 
@@ -63,6 +64,7 @@ backend には、外から 2 種類の呼び手が来る。オーナーが Web U
 
 ## Related ADRs
 
+- Superseded by（一部）: ADR-0018 A2A の依頼は backend が Task として持って出来事にし、送り手は差し替えられる確かめ方で確かめる（Decision 項 2（A2A は ServiceAccount の token を TokenReview で確かめる）の、TokenReview だけで確かめる点と Ingress を gated の後ろに置かない点）
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく（A2A の受け口は backend の中の受信元）
 - Related: ADR-0004 本物の鍵は Sentinel が持ち、鍵の出どころは差し替えられる口にする
 - Related: ADR-0009 最初の UI は Web だけにし、新しい API と Astryx で作る
