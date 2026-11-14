@@ -29,7 +29,7 @@ interface World {
   start(script: Script): Promise<() => Promise<void>>;
 }
 
-async function world(options: { turnFold?: boolean; ownerSkills?: boolean } = {}): Promise<World> {
+async function world(options: { turnFold?: boolean; ownerSkills?: boolean; connectors?: boolean } = {}): Promise<World> {
   const root = await mkdtemp(join(tmpdir(), "runner-"));
   const home = join(root, "home");
   const memoryDir = join(root, "memory");
@@ -52,6 +52,7 @@ async function world(options: { turnFold?: boolean; ownerSkills?: boolean } = {}
     pollWaitSeconds: 1,
     turnFold: options.turnFold ?? true,
     ...(options.ownerSkills ? { ownerSkillsDir: join(root, "skills") } : {}),
+    ...(options.connectors ? { connectorsDir: join(root, "connectors") } : {}),
   };
   const calls: Call[] = [];
   const logs: string[] = [];
@@ -238,23 +239,30 @@ test("a directory of the owner's skills that is not there is passed over", async
   assert.ok(calls.length > 0, "a turn ran");
 });
 
-test("the agent's socket that the container is given reaches her shell", async () => {
-  // Guards against: a runner that gives the shell an environment of its own and drops
-  // SSH_AUTH_SOCK, the one way to her ssh keys (docs/pod.md, "ssh-agent").
-  const { fake, start, calls } = await world();
-  const before = process.env.SSH_AUTH_SOCK;
-  process.env.SSH_AUTH_SOCK = "/run/ssh-agent/agent.sock";
-  closers.push(async () => {
-    if (before === undefined) delete process.env.SSH_AUTH_SOCK;
-    else process.env.SSH_AUTH_SOCK = before;
-  });
-  await start((call) => {
-    if (call.lastRole === "user") return { calls: [{ tool: "bash", args: { command: 'echo "sock=$SSH_AUTH_SOCK"' } }] };
-    return { text: "done" };
-  });
-  fake.push(ui(1, "ssh?"));
+test("the connectors' documents are listed in her system prompt, and a broken one is logged", async () => {
+  const { fake, start, calls, logs, config } = await world({ connectors: true });
+  const dir = config.connectorsDir!;
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "github.md"), "---\nname: github\ndescription: GitHub through gh.\nhosts: [api.github.com]\n---\n\nGH_TOKEN\n");
+  await writeFile(join(dir, "broken.md"), "# no front matter\n");
+  await start(replying);
+  fake.push(ui(1, "hello"));
   await until(() => acked(fake).includes(1));
-  assert.ok(calls.some((c) => c.lastRole === "toolResult" && c.lastText.includes("sock=/run/ssh-agent/agent.sock")));
+  const prompt = calls[0]!.systemPrompt;
+  // Guards against: documents the deployment put in place that never reach her, or one left out without a word.
+  assert.ok(prompt.includes("GitHub through gh."));
+  assert.ok(prompt.includes(join(dir, "github.md")));
+  assert.ok(!prompt.includes(join(dir, "broken.md")));
+  assert.ok(logs.some((line) => line.includes(join(dir, "broken.md"))), "the broken one is logged");
+});
+
+test("a directory of connectors that is not there is passed over", async () => {
+  const { fake, start, calls } = await world({ connectors: true });
+  await start(replying);
+  fake.push(ui(1, "hello"));
+  // Guards against: a session that cannot start before the documents are put in place.
+  await until(() => acked(fake).includes(1));
+  assert.ok(!calls[0]!.systemPrompt.includes("<connectors>"));
 });
 
 test("after a restart the session goes on, and unacked events come again", async () => {

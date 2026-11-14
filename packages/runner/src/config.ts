@@ -29,6 +29,8 @@ export interface Config {
   memoryDir: string;
   /** The owner's skills, mounted read-only; left out, there are none. */
   ownerSkillsDir?: string;
+  /** The connectors' documents, one <name>.md each (ADR-0020); left out, there are none. */
+  connectorsDir?: string;
   sourcesDir: string;
   /** Pi's directory: its settings, credentials, models and skills. */
   agentDir: string;
@@ -107,6 +109,7 @@ export function readConfig(env: Env): Config {
     home,
     memoryDir: env.PENELOPE_MEMORY || "/memory",
     ...(env.PENELOPE_OWNER_SKILLS_DIR ? { ownerSkillsDir: env.PENELOPE_OWNER_SKILLS_DIR } : {}),
+    ...(env.PENELOPE_CONNECTORS_DIR ? { connectorsDir: env.PENELOPE_CONNECTORS_DIR } : {}),
     sourcesDir: env.PENELOPE_SOURCES || "/sources",
     agentDir,
     sessionDir: env.PENELOPE_SESSIONS || join(agentDir, "sessions", "main"),

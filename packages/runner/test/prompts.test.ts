@@ -143,3 +143,44 @@ test("without the owner's skills, the prompt names none", async () => {
   const prompt = systemPrompt(identity, places, await readPromptFiles(places.memory, 1000));
   assert.ok(!/'s skills/.test(prompt));
 });
+
+const github = {
+  name: "github",
+  description: "GitHub through gh & git.",
+  hosts: ["api.github.com", "github.com"],
+  path: "/etc/penelope/connectors/github.md",
+};
+
+test("the connectors are listed with their hosts and where their documents are", async () => {
+  // Guards against: a stand-in she holds without knowing which host takes it, or a document she cannot find.
+  const places = await memory({});
+  const files = await readPromptFiles(places.memory, 1000);
+  const prompt = systemPrompt(identity, places, files, { connectors: { dir: "/etc/penelope/connectors", list: [github] } });
+  assert.ok(prompt.includes("/etc/penelope/connectors"));
+  assert.ok(prompt.includes("<name>github</name>"));
+  assert.ok(prompt.includes("GitHub through gh &amp; git."), "the description, escaped");
+  assert.ok(prompt.includes("api.github.com"));
+  assert.ok(prompt.includes("github.com"));
+  assert.ok(prompt.includes("<location>/etc/penelope/connectors/github.md</location>"));
+  assert.ok(prompt.indexOf("<connectors>") < prompt.indexOf("# Memory"), "before her memory files");
+});
+
+test("without connectors the prompt has no section for them", async () => {
+  // Guards against: a section that names a directory the deployment did not give, or an empty list.
+  const places = await memory({});
+  const files = await readPromptFiles(places.memory, 1000);
+  for (const options of [{}, { connectors: { dir: "/etc/penelope/connectors", list: [] } }]) {
+    const prompt = systemPrompt(identity, places, files, options);
+    assert.ok(!prompt.includes("# Connectors"));
+    assert.ok(!prompt.includes("<connectors>"));
+    assert.ok(!prompt.includes("/etc/penelope/connectors"));
+  }
+});
+
+test("the system prompt does not say the sandbox holds no real key, since she makes her own ssh key", async () => {
+  // Guards against: a fact made untrue by ADR-0021, her own ssh key in her home.
+  const places = await memory({});
+  const prompt = systemPrompt(identity, places, await readPromptFiles(places.memory, 1000));
+  assert.ok(!prompt.includes("there are no real keys in the sandbox"));
+  assert.match(prompt, /stand-in/);
+});

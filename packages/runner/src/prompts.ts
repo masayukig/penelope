@@ -8,6 +8,7 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { Identity } from "./config.ts";
+import type { Connector } from "./connectors.ts";
 
 export interface Places {
   memory: string;
@@ -74,8 +75,32 @@ function appended(files: PromptFile[]): string {
 export const FOLDING =
   "Once a turn has ended, it is sent to the model folded: the events, your own text and your replies stay, your thinking and the output of the tools are left out, and each other tool call is cut down to one line. The record of the session keeps all of it.";
 
+const escapeXml = (text: string) =>
+  text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+
+/** The connectors, in the shape Pi lists skills in; nothing when there are none (ADR-0020). */
+function connectorsSection(connectors: { dir: string; list: Connector[] } | undefined): string {
+  if (!connectors || connectors.list.length === 0) return "";
+  const entries = connectors.list.map(
+    (c) =>
+      `  <connector>\n    <name>${escapeXml(c.name)}</name>\n    <description>${escapeXml(c.description)}</description>\n    <hosts>${c.hosts.map(escapeXml).join(" ")}</hosts>\n    <location>${escapeXml(c.path)}</location>\n  </connector>`,
+  );
+  return `\n\n# Connectors
+
+A connector is a set of hosts for which the Sentinel puts the real credential in place of the stand-in, with a document on its use: the environment variables that hold the stand-ins, the tools, and what to mind. The documents are in ${connectors.dir}, one file each, as the deployment put them; this list is as it was when this session started.
+
+<connectors>
+${entries.join("\n")}
+</connectors>`;
+}
+
 /** Her system prompt, made once for each session. */
-export function systemPrompt(identity: Identity, places: Places, files: PromptFile[], options: { folding?: boolean } = {}): string {
+export function systemPrompt(
+  identity: Identity,
+  places: Places,
+  files: PromptFile[],
+  options: { folding?: boolean; connectors?: { dir: string; list: Connector[] } } = {},
+): string {
   const { memory, sources, home } = places;
   const prompt = `You are ${identity.name}, ${identity.role}. Your owner is ${identity.owner}.
 
@@ -83,7 +108,7 @@ export function systemPrompt(identity: Identity, places: Places, files: PromptFi
 
 You run in a sandbox: a Linux container where you are the user \`agent\`, with your home at ${home}, which is also your working directory. Your home, ${memory} and the record of this session persist. The rest of the filesystem comes from the image and is reset when the container is made again. The usual development tools are installed, and you can add more.
 
-Every connection out of the sandbox goes through the Sentinel, a relay outside it. The Sentinel records the traffic and can hold a request until your owner approves it. For some hosts it opens the TLS connection and puts the real credential in place of the stand-in the sandbox holds; there are no real keys in the sandbox. The certificates it presents are issued by an internal CA, which is in the system trust store. A tool that carries its own CA bundle trusts it once pointed at the system bundle, /etc/ssl/certs/ca-certificates.crt.
+Every connection out of the sandbox goes through the Sentinel, a relay outside it. The Sentinel records the traffic and can hold a request until your owner approves it. For some hosts it opens the TLS connection and puts the real credential in place of the stand-in the sandbox holds; the sandbox is given no real keys. The certificates it presents are issued by an internal CA, which is in the system trust store. A tool that carries its own CA bundle trusts it once pointed at the system bundle, /etc/ssl/certs/ca-certificates.crt.${connectorsSection(options.connectors)}
 
 # Events and answers
 
