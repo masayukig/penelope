@@ -108,6 +108,7 @@ penelope の sandbox では、Pi の基本のツールと開発の道具が自�
 
 ## Related ADRs
 
+- Related: ADR-0020 コネクタは Sentinel の登録と使い方の文書の組にし、文書の一覧をシステムプロンプトに出す（本 ADR のコネクタは、その組のうち Sentinel に差し込むプラグインの部分になる）
 - Superseded by（一部）: ADR-0014 sandbox の loopback は sandbox に任せ、Pod の中の口は Unix socket だけで待ち受ける（Decision「私用のアドレスも素通し、loopback とリンクローカルは止める」の loopback を止める点と、リンクローカルの止め方）
 - Related: ADR-0001 1 つの Pod に backend・Sentinel・sandbox・receivers を置き、Pi ごと sandbox の中で動かす
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく

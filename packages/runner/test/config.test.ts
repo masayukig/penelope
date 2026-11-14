@@ -44,7 +44,9 @@ test("the optional settings", () => {
     PENELOPE_IMAGE_MAX_BYTES: "1000",
     PENELOPE_TURN_FOLD: "off",
     PENELOPE_OWNER_SKILLS_DIR: "/skills",
+    PENELOPE_CONNECTORS_DIR: "/etc/penelope/connectors",
   });
+  assert.equal(config.connectorsDir, "/etc/penelope/connectors");
   assert.equal(config.turnFold, false);
   assert.equal(config.ownerSkillsDir, "/skills");
   assert.equal(config.imageMaxBytes, 1000);

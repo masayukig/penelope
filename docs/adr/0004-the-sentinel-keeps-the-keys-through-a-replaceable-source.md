@@ -1,7 +1,7 @@
 # 0004. 本物の鍵は Sentinel が持ち、鍵の出どころは差し替えられる口にする
 
 - Date: 2026-11-14
-- Status: Accepted（Decision「鍵は Sentinel が持つ」の、本物の鍵を Sentinel が持つ点を、ssh の秘密鍵に限り ADR-0019 で置き換え）
+- Status: Accepted（Decision「鍵は Sentinel が持つ」の、sandbox に本物の鍵を置かない点を、エージェントが自分で作る ssh の鍵に限り ADR-0021 で置き換え）
 
 ## Context
 
@@ -73,7 +73,9 @@ penelope で鍵を差し替えに使うのは Sentinel だけである。
 
 ## Related ADRs
 
-- Superseded by（一部）: ADR-0019 ssh は別のコンテナの ssh-agent の socket で行い、鍵は sandbox に見せない（Decision「鍵は Sentinel が持つ」の、本物の鍵を Sentinel が持つ点を ssh の秘密鍵に限り）
+- Superseded by（一部）: ADR-0021 自分で作った VM への ssh の鍵は、エージェントが自分で HOME に作る（Decision「鍵は Sentinel が持つ」の、sandbox に本物の鍵を置かない点を、エージェントが自分で作る ssh の鍵に限り）
+- Related: ADR-0019 ssh は別のコンテナの ssh-agent の socket で行い、鍵は sandbox に見せない（ADR-0021 で置き換えられた。一部を置き換えていた点もそれとともに失効）
+- Related: ADR-0020 コネクタは Sentinel の登録と使い方の文書の組にし、文書の一覧をシステムプロンプトに出す
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく（backend への鍵もサロゲートにする）
 - Related: ADR-0003 sandbox の外向きはすべて Sentinel を通し、既定は素通しで記録する（鍵を差し替えるホストを開く）
 - Related: ADR-0009 最初の UI は Web だけにし、新しい API と Astryx で作る

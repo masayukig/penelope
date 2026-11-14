@@ -1,7 +1,7 @@
 # 0019. ssh は別のコンテナの ssh-agent の socket で行い、鍵は sandbox に見せない
 
 - Date: 2026-11-14
-- Status: Accepted
+- Status: Superseded by ADR-0021
 
 ## Context
 
@@ -63,6 +63,7 @@ Pod の中のコンテナは、同じ volume を mount すれば、その中の 
 
 ## Related ADRs
 
+- Superseded by: ADR-0021 自分で作った VM への ssh の鍵は、エージェントが自分で HOME に作る
 - Supersedes（一部）: ADR-0004 本物の鍵は Sentinel が持ち、鍵の出どころは差し替えられる口にする（Decision「鍵は Sentinel が持つ」の、本物の鍵を Sentinel が持つ点を ssh の秘密鍵に限り）
 - Related: ADR-0001 1 つの Pod に backend・Sentinel・sandbox・receivers を置き、Pi ごと sandbox の中で動かす
 - Related: ADR-0003 sandbox の外向きはすべて Sentinel を通し、既定は素通しで記録する

@@ -18,6 +18,7 @@ import type { Activity, ControlPayload, DeliveredEvent } from "@penelope/contrac
 import { TurnRecorder } from "./activities.ts";
 import type { Backend } from "./backend.ts";
 import type { Config } from "./config.ts";
+import { readConnectors } from "./connectors.ts";
 import { FOLD_ASK, foldExtension, TURN_END } from "./fold.ts";
 import { inlineImages } from "./images.ts";
 import {
@@ -132,7 +133,17 @@ export class Runner {
 
   private async mainPrompt(): Promise<string> {
     const files = await readPromptFiles(this.config.memoryDir, this.config.promptFileMaxBytes);
-    return systemPrompt(this.config.identity, this.places, files, { folding: this.config.turnFold });
+    const dir = this.config.connectorsDir;
+    let connectors;
+    if (dir) {
+      const { connectors: list, skipped } = await readConnectors(dir);
+      for (const { path, reason } of skipped) this.log(`connector left out: ${path} ${reason}`);
+      connectors = { dir, list };
+    }
+    return systemPrompt(this.config.identity, this.places, files, {
+      folding: this.config.turnFold,
+      ...(connectors ? { connectors } : {}),
+    });
   }
 
   /** Her session as the last run left it, or a new one. */
