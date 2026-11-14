@@ -1,7 +1,7 @@
 # 0003. sandbox の外向きはすべて Sentinel を通し、既定は素通しで記録する
 
 - Date: 2026-11-14
-- Status: Accepted
+- Status: Accepted（Decision「私用のアドレスも素通し、loopback とリンクローカルは止める」の loopback を止める点と、リンクローカルの止め方は ADR-0014 で置き換え）
 
 ## Context
 
@@ -71,7 +71,9 @@ penelope の sandbox では、Pi の基本のツールと開発の道具が自�
 
 - 名前が私用のアドレス（家の中・クラスタの中）に解決される通信も、既定の扱いに従う。私用のアドレスだけを既定で止めることはしない。守りは、後から NetworkPolicy と網の Firewall で整える。
 - sandbox の UID から同じ Pod の loopback へは直に届かないようにする。backend への道を Sentinel 越しに限るためである（ADR-0002）。
+  - 2026-11-14 追記: ADR-0014 で置き換え。loopback は止めず、Pod の中の口を Unix socket だけで待ち受けて守る。
 - リンクローカル（IPv4 の 169.254.0.0/16、IPv6 の fe80::/10）への通信は止める。クラウドの metadata の類を指すためである。
+  - 2026-11-14 追記: ADR-0014 で、Sentinel へ向け直し、Sentinel が断って記録する形にした。
 - 止めた通信も記録に残す。
 
 ### 守る対象と、失敗したときの倒し方
@@ -106,6 +108,7 @@ penelope の sandbox では、Pi の基本のツールと開発の道具が自�
 
 ## Related ADRs
 
+- Superseded by（一部）: ADR-0014 sandbox の loopback は sandbox に任せ、Pod の中の口は Unix socket だけで待ち受ける（Decision「私用のアドレスも素通し、loopback とリンクローカルは止める」の loopback を止める点と、リンクローカルの止め方）
 - Related: ADR-0001 1 つの Pod に backend・Sentinel・sandbox・receivers を置き、Pi ごと sandbox の中で動かす
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく
 - Related: ADR-0004 本物の鍵は Sentinel が持ち、鍵の出どころは差し替えられる口にする

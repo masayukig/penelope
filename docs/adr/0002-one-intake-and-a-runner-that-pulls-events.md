@@ -1,7 +1,7 @@
 # 0002. 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく
 
 - Date: 2026-11-14
-- Status: Accepted
+- Status: Accepted（Decision「runner が取りにいく」の loopback を塞ぐ点は ADR-0014 で置き換え）
 
 ## Context
 
@@ -44,6 +44,7 @@ penelope では Pi が sandbox の中で動く（ADR-0001）。出来事を sand
 - runner は、溜まった出来事をまとめて 1 ターンの入力にする。ターンの途中に届いた出来事は、Pi の steer か follow-up でそのセッションに入れる。
 - runner は Pi の出来事を購読し、途中の思考、ツールの呼び出しと結果、返事の区切り、ターンの始まりと終わりを backend へ送る。
 - runner から backend への通信も、ほかの外向きと同じく Sentinel を通る。sandbox の UID から同じ Pod の loopback へ直に届く道は塞ぐ。backend への鍵はサロゲートとして sandbox に置き、Sentinel が本物に差し替える（ADR-0003、ADR-0004）。
+  - 2026-11-14 追記: ADR-0014 で置き換え。loopback は塞がず、backend の sandbox 向けの口を Unix socket だけで待ち受けて、Sentinel を通る道に限る。
 
 ### 失敗したときの倒し方
 
@@ -82,6 +83,7 @@ penelope では Pi が sandbox の中で動く（ADR-0001）。出来事を sand
 - Related: ADR-0009 最初の UI は Web だけにし、新しい API と Astryx で作る
 - Related: ADR-0010 人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる
 - Related: ADR-0013 出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す
+- Superseded by（一部）: ADR-0014 sandbox の loopback は sandbox に任せ、Pod の中の口は Unix socket だけで待ち受ける（Decision「runner が取りにいく」の loopback を塞ぐ点）
 
 ## References
 

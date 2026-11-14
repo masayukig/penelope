@@ -30,6 +30,7 @@ natsumi では、関所が承認待ちを持ち、server のダッシュボー�
 - 守る対象は、ask の扱いのホストへの通信が、オーナーの答え無しに通らないことである。
 - 答えの無い承認待ちは、通さない側に倒す。Sentinel が止まって承認待ちが失われたときも、許していないものとして扱う。
 - Sentinel の管理口は、同じ Pod の backend からだけ届くようにする。sandbox の UID からは届かない（ADR-0003 の Decision「私用のアドレスも素通し、loopback とリンクローカルは止める」）。
+  - 2026-11-14 追記: 届かなくする仕組みは、ADR-0014 で、管理口を Unix socket だけで待ち受け、その socket を sandbox に mount しない形に置き換えた。
 
 ### 本 ADR で決定しないこと
 
@@ -57,6 +58,7 @@ natsumi では、関所が承認待ちを持ち、server のダッシュボー�
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく（答えの知らせ）
 - Related: ADR-0003 sandbox の外向きはすべて Sentinel を通し、既定は素通しで記録する（既定の扱いの ask）
 - Related: ADR-0009 最初の UI は Web だけにし、新しい API と Astryx で作る（承認の API と画面）
+- Related: ADR-0014 sandbox の loopback は sandbox に任せ、Pod の中の口は Unix socket だけで待ち受ける（管理口の待ち受け）
 - Related（natsumi、このリポジトリの外）: ADR 0096「関所が本人に聞くものの窓口をダッシュボードに置き、答えは /sources で知らせる」
 
 ## References
