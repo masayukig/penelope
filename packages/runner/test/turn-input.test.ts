@@ -54,7 +54,13 @@ test("an inline event carries its text", () => {
 });
 
 test("an inline event's attachments are listed", () => {
-  const withFile = { ...ui, attachments: ["/sources/ui/files/13-a.png", "/sources/ui/files/13-b.pdf"] };
+  const withFile = {
+    ...ui,
+    attachments: [
+      { path: "/sources/ui/files/13-a.png", mime_type: "image/png", size: 10 },
+      { path: "/sources/ui/files/13-b.pdf", mime_type: "application/pdf", size: 20 },
+    ],
+  };
   assert.equal(
     formatEvents([withFile]),
     "[seq 13] ui, 2026-11-14T09:01:00Z\nhello\nthere\nAttachments: /sources/ui/files/13-a.png, /sources/ui/files/13-b.pdf",

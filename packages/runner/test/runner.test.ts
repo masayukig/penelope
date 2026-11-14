@@ -336,7 +336,7 @@ test("the images of the owner's message go into the turn as images", async () =>
   // A 1x1 PNG.
   await writeFile(png, Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63f8cfc0f01f00050001ff89993d1d0000000049454e44ae426082", "hex"));
   await start(replying);
-  fake.push({ ...ui(1, "look"), attachments: [png] });
+  fake.push({ ...ui(1, "look"), attachments: [{ path: png, mime_type: "image/png", size: 70 }] });
   await until(() => acked(fake).includes(1));
   assert.deepEqual(calls[0]!.lastImages, ["image/png"]);
   assert.ok(calls[0]!.lastText.includes(png), "the path is in the text too");

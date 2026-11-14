@@ -17,7 +17,7 @@ function content(payload: unknown): string {
 
 function single(event: DeliveredEvent): string {
   const head = `[seq ${event.seq}] ${where(event)}, ${event.occurred_at}`;
-  const attachments = event.attachments?.length ? `\nAttachments: ${event.attachments.join(", ")}` : "";
+  const attachments = event.attachments?.length ? `\nAttachments: ${event.attachments.map((attachment) => attachment.path).join(", ")}` : "";
   if (event.inline) return `${head}\n${content(event.payload)}${attachments}`;
   return `${head}: ${event.summary}\n${place([event.appended])}${attachments}`;
 }

@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import type { DeliveredEvent } from "@penelope/contract";
+import type { DeliveredAttachment, DeliveredEvent } from "@penelope/contract";
 
 import { IMAGES_PER_INPUT, inlineImages } from "../src/images.ts";
 
-function event(seq: number, attachments: string[], inline = true): DeliveredEvent {
+function event(seq: number, attachments: DeliveredAttachment[], inline = true): DeliveredEvent {
   const base = {
     seq,
     source: "ui",
@@ -23,15 +23,24 @@ function event(seq: number, attachments: string[], inline = true): DeliveredEven
   return inline ? { ...base, inline: true, payload: { text: "t" } } : { ...base, inline: false };
 }
 
-async function files(names: Record<string, number>): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "images-"));
-  for (const [name, size] of Object.entries(names)) await writeFile(join(dir, name), Buffer.alloc(size, 1));
-  return dir;
+/** Files of `size` bytes in a new directory; the attachment says what the backend said. */
+async function dir(): Promise<(name: string, mime_type: string, size: number) => Promise<DeliveredAttachment>> {
+  const root = await mkdtemp(join(tmpdir(), "images-"));
+  return async (name, mime_type, size) => {
+    const path = join(root, name);
+    await writeFile(path, Buffer.alloc(size, 1));
+    return { path, mime_type, size };
+  };
 }
 
-test("an inline event's images are read, with their type from the name", async () => {
-  const dir = await files({ "1-a.png": 10, "1-b.JPG": 10, "1-c.pdf": 10 });
-  const images = await inlineImages([event(1, ["a.png", "b.JPG", "c.pdf"].map((n) => join(dir, `1-${n}`)))], 1000);
+test("an inline event's images are read, by the type the backend gives", async () => {
+  const file = await dir();
+  const attachments = [
+    await file("1-a.bin", "image/png", 10),
+    await file("1-b.jpg", "image/jpeg", 10),
+    await file("1-c.pdf", "application/pdf", 10),
+  ];
+  const images = await inlineImages([event(1, attachments)], 1000);
   assert.deepEqual(
     images.map((image) => image.mimeType),
     ["image/png", "image/jpeg"],
@@ -40,20 +49,30 @@ test("an inline event's images are read, with their type from the name", async (
   assert.equal(Buffer.from(images[0]!.data, "base64").length, 10);
 });
 
+test("a file named like an image whose type is not one is not read", async () => {
+  const file = await dir();
+  const images = await inlineImages([event(1, [await file("1-x.png", "application/octet-stream", 10)])], 1000);
+  assert.deepEqual(images, []);
+});
+
 test("no more than four images go into one input", async () => {
-  const names = Object.fromEntries([1, 2, 3, 4, 5, 6].map((n) => [`${n}.webp`, 5]));
-  const dir = await files(names);
-  const images = await inlineImages([event(1, Object.keys(names).map((n) => join(dir, n)))], 1000);
+  const file = await dir();
+  const attachments = await Promise.all([1, 2, 3, 4, 5, 6].map((n) => file(`${n}.webp`, "image/webp", 5)));
+  const images = await inlineImages([event(1, attachments)], 1000);
   assert.equal(images.length, IMAGES_PER_INPUT);
   assert.equal(IMAGES_PER_INPUT, 4);
 });
 
-test("an image over the limit, one that cannot be read, and those of other events are left as paths", async () => {
-  const dir = await files({ "big.png": 2000, "small.gif": 10 });
+test("an image over the limit by its size, one that cannot be read, and those of other events stay paths", async () => {
+  const file = await dir();
+  const small = await file("small.gif", "image/gif", 10);
   const images = await inlineImages(
     [
-      event(1, [join(dir, "big.png"), join(dir, "missing.png")]),
-      event(2, [join(dir, "small.gif")], false),
+      event(1, [
+        { ...small, size: 2000 },
+        { path: join(tmpdir(), "missing-image.png"), mime_type: "image/png", size: 10 },
+      ]),
+      event(2, [small], false),
     ],
     1000,
   );
