@@ -4,3 +4,5 @@ bin
 node_modules
 **/node_modules
 **/dist
+# The end-to-end test's keys, made for each run.
+e2e/.run

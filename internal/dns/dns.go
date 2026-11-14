@@ -66,8 +66,15 @@ func New(cfg Config) *Server {
 	return s
 }
 
-// ServeUDP answers queries on pc until it is closed.
+// ServeUDP answers queries on pc until it is closed. Where the platform
+// tells the address each query reached, it is answered from that address
+// (serveUDPFromDst).
 func (s *Server) ServeUDP(pc net.PacketConn) error {
+	if c, ok := pc.(*net.UDPConn); ok {
+		if served, err := s.serveUDPFromDst(c); served {
+			return err
+		}
+	}
 	buf := make([]byte, 65535)
 	for {
 		n, from, err := pc.ReadFrom(buf)

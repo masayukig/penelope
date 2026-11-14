@@ -130,6 +130,13 @@ test-netns: ## Go tests that redirect with iptables. Need root (through sudo); r
 	done
 	$(SUDO) unshare --net sh -eu -c 'ip link set lo up; for pkg in $(NETNS_PKGS); do t="bin/netns/$${pkg##*/}.test"; echo "== $$t"; "$$t" -test.count=1; done'
 
+# The end-to-end test lays the four containers of the Pod out with Docker
+# Compose, with fakes for the model and GitHub, and drives them from the UI's
+# API (e2e/README.md). It needs Docker, so `make test` never runs it.
+.PHONY: e2e
+e2e: images node_modules/.package-lock.json ## Run the Pod end to end with Docker Compose and fakes. Needs Docker.
+	PENELOPE_E2E_TAG="$(VERSION)" $(NPM) run e2e --workspace=@penelope/e2e
+
 ##@ Housekeeping
 
 .PHONY: tidy

@@ -1,0 +1,177 @@
+// The outside world of the end-to-end test (e2e/README.md), in one container:
+//
+//   :53/udp   a name server for the test's names, all of them this container
+//   :443      HTTPS, by Host: the model's API, GitHub's OAuth and API, and a
+//             host the Sentinel passes through
+//   :80       plain HTTP for the host the Sentinel passes through
+//   :8081     the control API the test reads what came here from, on loopback
+//
+// What came is kept in memory. A credential is never kept or shown: each
+// request is recorded with which credential it carried (`real`, `surrogate`,
+// `none` or `other`).
+import { createHash, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import http from "node:http";
+import https from "node:https";
+import { networkInterfaces } from "node:os";
+import process from "node:process";
+
+import { serveDns, type Lookup } from "./dns.ts";
+import { chunks, completion, type ChatMessage, script } from "./model.ts";
+
+const env = (name: string) => {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is not set`);
+  return value;
+};
+const secret = (name: string) => readFileSync(env(name), "utf8").trim();
+
+/** This container's address, which every name of the test resolves to. */
+const ADDRESS = Object.values(networkInterfaces())
+  .flat()
+  .find((entry) => entry && entry.family === "IPv4" && !entry.internal)?.address;
+if (!ADDRESS) throw new Error("the outside has no IPv4 address");
+const MODEL_KEY = secret("OUTSIDE_MODEL_KEY_FILE");
+const MODEL_SURROGATE = env("OUTSIDE_MODEL_SURROGATE");
+const CLIENT_ID = env("OUTSIDE_GITHUB_CLIENT_ID");
+const CLIENT_SECRET = secret("OUTSIDE_GITHUB_CLIENT_SECRET_FILE");
+const OWNER_ID = Number(env("OUTSIDE_OWNER_GITHUB_ID"));
+
+const MODEL = "model.example.com";
+const GITHUB = "github.com";
+const GITHUB_API = "api.github.com";
+const PLAIN = "plain.example.net";
+const NAMES = new Set([MODEL, GITHUB, GITHUB_API, PLAIN, "backend.example.com"]);
+
+type Credential = "real" | "surrogate" | "none" | "other";
+type Seen = { at: string; scheme: "https" | "http"; host: string; method: string; path: string; credential: Credential };
+type ModelCall = { at: string; credential: Credential; stream: boolean; messages: ChatMessage[] };
+
+const seen: Seen[] = [];
+const modelCalls: ModelCall[] = [];
+const lookups: Lookup[] = [];
+/** OAuth codes handed out, by code: the PKCE challenge and where they go back to. */
+const codes = new Map<string, { challenge: string; redirectUri: string }>();
+const tokens = new Set<string>();
+
+function credentialOf(request: http.IncomingMessage, real: string, surrogate?: string): Credential {
+  const header = request.headers.authorization;
+  if (!header) return "none";
+  const value = header.replace(/^(bearer|token)\s+/i, "");
+  if (value === real) return "real";
+  if (surrogate !== undefined && value === surrogate) return "surrogate";
+  return "other";
+}
+
+async function body(request: http.IncomingMessage): Promise<string> {
+  const parts: Buffer[] = [];
+  for await (const part of request) parts.push(part as Buffer);
+  return Buffer.concat(parts).toString("utf8");
+}
+
+function json(response: http.ServerResponse, status: number, value: unknown): void {
+  response.writeHead(status, { "content-type": "application/json" });
+  response.end(JSON.stringify(value));
+}
+
+const hostOf = (request: http.IncomingMessage) => (request.headers.host ?? "").replace(/:\d+$/, "").toLowerCase();
+
+async function model(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  const credential = credentialOf(request, MODEL_KEY, MODEL_SURROGATE);
+  const text = await body(request);
+  if (request.method !== "POST" || !request.url?.endsWith("/chat/completions")) return json(response, 404, { error: "not found" });
+  const parsed = JSON.parse(text) as { model: string; stream?: boolean; messages: ChatMessage[] };
+  modelCalls.push({ at: new Date().toISOString(), credential, stream: parsed.stream === true, messages: parsed.messages });
+  if (credential !== "real") return json(response, 401, { error: { message: "the model's key is not the real one" } });
+  const answer = script(parsed.messages);
+  if (!parsed.stream) return json(response, 200, completion(answer, parsed.model));
+  response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+  for (const chunk of chunks(answer, parsed.model)) response.write(chunk);
+  response.end();
+}
+
+const s256 = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
+
+async function github(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  if (request.method !== "POST" || request.url !== "/login/oauth/access_token") return json(response, 404, { error: "not found" });
+  const form = new URLSearchParams(await body(request));
+  const code = codes.get(form.get("code") ?? "");
+  codes.delete(form.get("code") ?? "");
+  const verifier = form.get("code_verifier") ?? "";
+  // GitHub answers a bad exchange with 200 and an `error`.
+  if (
+    form.get("client_id") !== CLIENT_ID ||
+    form.get("client_secret") !== CLIENT_SECRET ||
+    !code ||
+    code.redirectUri !== form.get("redirect_uri") ||
+    s256(verifier) !== code.challenge
+  ) {
+    return json(response, 200, { error: "bad_verification_code" });
+  }
+  const token = `gho_e2e_${randomBytes(16).toString("hex")}`;
+  tokens.add(token);
+  json(response, 200, { access_token: token, token_type: "bearer", scope: "" });
+}
+
+function githubApi(request: http.IncomingMessage, response: http.ServerResponse): void {
+  const token = (request.headers.authorization ?? "").replace(/^(bearer|token)\s+/i, "");
+  if (request.method !== "GET" || request.url !== "/user") return json(response, 404, { error: "not found" });
+  if (!tokens.has(token)) return json(response, 401, { message: "Bad credentials" });
+  json(response, 200, { id: OWNER_ID, login: "e2e-owner" });
+}
+
+function outside(scheme: "https" | "http") {
+  return (request: http.IncomingMessage, response: http.ServerResponse) => {
+    const host = hostOf(request);
+    seen.push({
+      at: new Date().toISOString(),
+      scheme,
+      host,
+      method: request.method ?? "",
+      path: (request.url ?? "").split("?")[0]!,
+      credential: credentialOf(request, MODEL_KEY, MODEL_SURROGATE),
+    });
+    const handle = async () => {
+      if (scheme === "https" && host === MODEL) return model(request, response);
+      if (scheme === "https" && host === GITHUB) return github(request, response);
+      if (scheme === "https" && host === GITHUB_API) return githubApi(request, response);
+      if (host === PLAIN) {
+        await body(request);
+        response.writeHead(200, { "content-type": "text/plain" });
+        return response.end(`plain over ${scheme}\n`);
+      }
+      json(response, 404, { error: `no such host here: ${host}` });
+    };
+    handle().catch((error: unknown) => {
+      process.stderr.write(`outside: ${String(error)}\n`);
+      if (!response.headersSent) json(response, 500, { error: "the fake failed" });
+      else response.end();
+    });
+  };
+}
+
+/** What the test asks: the first step of a login, and what came here. */
+async function control(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  const url = new URL(request.url ?? "/", "http://control");
+  if (request.method === "POST" && url.pathname === "/authorize") {
+    // The browser's visit to GitHub's authorize page, where the owner says yes.
+    const query = new URLSearchParams((JSON.parse(await body(request)) as { query: string }).query);
+    if (query.get("client_id") !== CLIENT_ID || query.get("code_challenge_method") !== "S256") {
+      return json(response, 400, { error: "bad authorize request" });
+    }
+    const code = randomBytes(16).toString("hex");
+    codes.set(code, { challenge: query.get("code_challenge") ?? "", redirectUri: query.get("redirect_uri") ?? "" });
+    return json(response, 200, { code, state: query.get("state"), redirect_uri: query.get("redirect_uri") });
+  }
+  if (request.method === "GET" && url.pathname === "/seen") return json(response, 200, { seen, lookups });
+  if (request.method === "GET" && url.pathname === "/model") return json(response, 200, { calls: modelCalls });
+  json(response, 404, { error: "not found" });
+}
+
+const tls = { cert: readFileSync(env("OUTSIDE_CERT_FILE")), key: readFileSync(env("OUTSIDE_KEY_FILE")) };
+https.createServer(tls, outside("https")).listen(443);
+http.createServer(outside("http")).listen(80);
+http.createServer((request, response) => void control(request, response)).listen(8081, "127.0.0.1");
+serveDns(53, NAMES, ADDRESS, (lookup) => lookups.push(lookup));
+process.stderr.write(`outside: listening on ${ADDRESS}\n`);
+for (const signal of ["SIGTERM", "SIGINT"] as const) process.once(signal, () => process.exit(0));
