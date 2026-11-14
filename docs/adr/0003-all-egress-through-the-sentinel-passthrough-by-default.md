@@ -82,7 +82,7 @@ penelope の sandbox では、Pi の基本のツールと開発の道具が自�
 
 ### 本 ADR で決定しないこと
 
-- 記録の形式と保存期間、記録の見方（委譲先: Sentinel の仕様書。実装の作業単位で `docs/` に置く）
+- 記録の形式と保存期間、記録の見方（委譲先: [Sentinel の設定と記録の仕様書](../sentinel-config.md)）
 - コネクタの差し込み口の形と、最初に作るコネクタ（委譲先: 既定を ask に切り替えるときの ADR）
 - allow・ask・deny の判定の規則の書き方（method・path などの扱い）（委譲先: 既定を ask に切り替えるときの ADR）
 - NetworkPolicy と網の Firewall の中身（委譲先: 配置のリポジトリ）
