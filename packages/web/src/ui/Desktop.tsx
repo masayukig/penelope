@@ -31,7 +31,7 @@ export function Desktop(props: ScreenProps) {
         <button type="button" className="agent-toggle" aria-expanded={open} aria-label={words.togglePanel} onClick={() => setOpen(!open)}>
           <StatusLabel status={props.status} />
           <span className="agent-toggle-name">{agent.name}</span>
-          <AgentAvatar size={36} />
+          <AgentAvatar size={36} expression={props.expression} />
         </button>
       </header>
       {place === "talk" ? <Talk {...props} /> : <Placeholder place={place} />}

@@ -60,6 +60,23 @@ export function statusWord(status: Status): string {
   }
 }
 
+/** The words of the faces of an avatar (ADR-0016). One it does not know is read as neutral. */
+const FACES: Partial<Record<string, string>> = {
+  neutral: "いつもどおり",
+  happy: "うれしい",
+  laughing: "笑っている",
+  surprised: "驚いた",
+  thinking: "考え中",
+  worried: "心配",
+  sad: "悲しい",
+  sleepy: "眠い",
+  angry: "怒っている",
+};
+
+export function faceWord(expression: string): string {
+  return FACES[expression] ?? FACES.neutral!;
+}
+
 const SOURCES: Partial<Record<string, string>> = { cron: "予約", self: "自分から", a2a: "A2A", control: "制御", ui: "オーナー" };
 
 export function sourceWord(source: Source): string {

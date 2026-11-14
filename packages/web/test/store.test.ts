@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import type { Activity, HistoryEntry, StreamEvent } from "@penelope/contract";
 
-import { type Action, currentFlow, expressionOf, initialState, reduce, type State, statusOf } from "../src/model/store.ts";
+import { type Action, currentFlow, faceOf, FACE_RESET_MS, initialState, reduce, type State, statusOf } from "../src/model/store.ts";
 
 const T = "turn-1";
 const run = (actions: Action[], state: State = initialState) => actions.reduce(reduce, state);
@@ -32,6 +32,20 @@ describe("the conversation's timeline", () => {
     assert.deepEqual(ids(s), ["m-1", "r-1", "r-2"]);
   });
 
+  it("keeps lines of the same time in the order the history gave them", () => {
+    const at = "2026-11-14T09:00:00Z";
+    const s = run([
+      {
+        type: "history",
+        entries: [
+          { kind: "agent", id: "r-2", at, text: "second", agent: "main" },
+          { kind: "agent", id: "r-1", at, text: "first", agent: "main" },
+        ],
+      },
+    ]);
+    assert.deepEqual(ids(s), ["r-1", "r-2"]);
+  });
+
   // Every connection replays what the backend kept (Last-Event-ID: 0), and
   // the history is read again after it: a reply must still show once.
   it("shows a reply once, whether it came by the history, the stream, or both again", () => {
@@ -54,14 +68,18 @@ describe("the conversation's timeline", () => {
     assert.equal(s.before, undefined);
   });
 
-  // The avatar shows the face of her latest reply.
-  it("takes the expression from the latest reply that has one", () => {
+  // The avatar shows the face of her latest reply for a while, then goes
+  // back to neutral, as natsumi's does (ADR-0016).
+  it("shows the face of her latest reply, and neutral again once it has been shown a while", () => {
     const s = run([
-      stream(reply("r-1", "2026-11-14T09:00:00Z", { expression: "calm" })),
-      stream(reply("r-2", "2026-11-14T09:01:00Z")),
+      stream(reply("r-1", "2026-11-14T09:00:00Z", { expression: "worried" })),
+      stream(reply("r-2", "2026-11-14T09:01:00Z", { expression: "happy" })),
+      stream(reply("r-3", "2026-11-14T09:01:30Z")),
     ]);
-    assert.equal(expressionOf(s), "calm");
-    assert.equal(expressionOf(initialState), undefined);
+    const since = Date.parse("2026-11-14T09:01:00Z");
+    assert.equal(faceOf(s, since + 1_000), "happy");
+    assert.equal(faceOf(s, since + FACE_RESET_MS + 1_000), undefined);
+    assert.equal(faceOf(initialState, since), undefined);
   });
 });
 

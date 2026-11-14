@@ -90,7 +90,7 @@ function FlowLine({ item, all }: { item: FlowItem; all: FlowItem[] }) {
             </Code>
           </span>
           {result ? (
-            <Collapsible defaultIsOpen={false} trigger={result.is_error ? words.resultError : words.result}>
+            <Collapsible defaultIsOpen={false} chevronPosition="start" trigger={<span className="flow-label">{result.is_error ? words.resultError : words.result}</span>}>
               <CodeBlock code={result.output} maxHeight={220} width="100%" isWrapped size="sm" hasLanguageLabel={false} />
             </Collapsible>
           ) : null}

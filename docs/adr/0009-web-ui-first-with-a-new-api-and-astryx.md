@@ -27,7 +27,7 @@ penelope の UI は backend と分けて作る（オーナーの求め）。UI �
 - Web UI は React 19 と Astryx で作る。Astryx は Beta なので、版を固定する。
 - エージェントの名前とアイコンは、設定から表示する。決め打ちの名前を UI に残さない（ADR-0001）。
 - 最初の Web UI にアバターは出さない。返事の API には表情（expression）の欄を残し、後でアバターを足せるようにする。
-  - 2026-11-14 追記: ADR-0016 で置き換え。オーナーが画面を詰めた結果、最初の Web UI からアバターと expression を出す。返事の API の expression の欄は変わらない。
+  - 2026-11-14 追記: ADR-0016 で置き換え。オーナーが画面を詰めた結果、最初の Web UI からアバターを表情ごとの絵で出す。返事の API の expression の欄は変わらない。
 
 ### 画面の合意の進め方
 
@@ -63,7 +63,7 @@ penelope の UI は backend と分けて作る（オーナーの求め）。UI �
 - Related: ADR-0003 sandbox の外向きはすべて Sentinel を通し、既定は素通しで記録する
 - Related: ADR-0005 承認待ちは Sentinel が持ち、オーナーは Web UI で答える
 - Related: ADR-0010 人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる
-- Superseded by（一部）: ADR-0016 最初の Web UI からアバターと expression を出し、アバターは 1 つの部品に閉じる（Decision「Astryx と React 19」の、最初の Web UI にアバターを出さない点）
+- Superseded by（一部）: ADR-0016 最初の Web UI からアバターを表情ごとの絵で出し、アバターは 1 つの部品に閉じる（Decision「Astryx と React 19」の、最初の Web UI にアバターを出さない点）
 
 ## References
 

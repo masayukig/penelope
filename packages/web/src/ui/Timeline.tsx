@@ -10,7 +10,7 @@ import { Fragment, useState } from "react";
 
 import type { AgentItem, LocalFile, OwnerItem, TimelineItem } from "../model/store.ts";
 import { AgentAvatar, useAgent } from "./agent.tsx";
-import { dayOf, sourceWord, timeOf, words } from "./words.ts";
+import { dayOf, faceWord, sourceWord, timeOf, words } from "./words.ts";
 
 export function Timeline({ items, busy, onOlder }: { items: TimelineItem[]; busy: boolean; onOlder?: (() => Promise<void>) | undefined }) {
   const [shown, setShown] = useState<LocalFile | undefined>(undefined);
@@ -48,9 +48,9 @@ function Reply({ item }: { item: AgentItem }) {
   const trigger = item.trigger !== undefined && item.trigger.source !== "ui" ? item.trigger : undefined;
   const name = (
     <span className="reply-name">
-      <AgentAvatar size={24} />
+      <AgentAvatar size={24} expression={item.expression} />
       <strong>{agent.name}</strong>
-      {item.expression !== undefined ? <span className="reply-expression">{item.expression}</span> : null}
+      {item.expression !== undefined ? <span className="reply-expression">{faceWord(item.expression)}</span> : null}
       {trigger ? <Badge label={`${sourceWord(trigger.source)} ・ ${trigger.summary}`} /> : null}
     </span>
   );

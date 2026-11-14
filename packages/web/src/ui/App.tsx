@@ -10,7 +10,7 @@ import type { AgentResponse } from "@penelope/contract";
 
 import { type Api, createApi, type Fetch, Unauthorized } from "../model/api.ts";
 import { Outbox } from "../model/outbox.ts";
-import { currentFlow, expressionOf, initialState, reduce, statusOf } from "../model/store.ts";
+import { currentFlow, FACE_RESET_MS, faceOf, initialState, reduce, statusOf } from "../model/store.ts";
 import { openStream } from "../model/stream.ts";
 import { AgentContext } from "./agent.tsx";
 import { Desktop } from "./Desktop.tsx";
@@ -91,6 +91,8 @@ export function App({ fetch, sleep }: AppProps) {
     [api, before],
   );
 
+  // Read the clock again when the face shown would go back to neutral.
+  const now = useClock(faceOf(state, Date.now()) === undefined ? undefined : FACE_RESET_MS);
   const status = statusOf(state);
   const busy = status.kind === "thinking" || status.kind === "tool";
   const screen = {
@@ -101,7 +103,7 @@ export function App({ fetch, sleep }: AppProps) {
     onOlder,
     status,
     flow: currentFlow(state),
-    expression: expressionOf(state),
+    expression: faceOf(state, now),
     onLogout: () => {
       void api.logout().finally(() => dispatch({ type: "unauthorized" }));
     },
@@ -116,6 +118,17 @@ export function App({ fetch, sleep }: AppProps) {
       </InternationalizationProvider>
     </Theme>
   );
+}
+
+/** The time now, read again every `everyMs` while it is given. */
+function useClock(everyMs: number | undefined): number {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (everyMs === undefined) return;
+    const timer = setInterval(() => setNow(Date.now()), Math.min(everyMs, 15_000));
+    return () => clearInterval(timer);
+  }, [everyMs]);
+  return Math.max(now, Date.now());
 }
 
 function useMediaQuery(query: string): boolean {

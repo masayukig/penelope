@@ -68,7 +68,8 @@ export type Action =
 export function reduce(state: State, action: Action): State {
   switch (action.type) {
     case "history": {
-      const items = merge(state.items, action.entries.map(fromHistory));
+      // A page comes newest first; taken oldest first, lines of the same time keep their order.
+      const items = merge(state.items, [...action.entries].reverse().map(fromHistory));
       // The first page sets where the older pages start; reading it again
       // (after the stream comes back) leaves the paging where it is.
       const before = action.older || !state.historyRead ? action.before : state.before;
@@ -190,11 +191,18 @@ export function currentFlow(state: State): FlowItem[] {
   return flow;
 }
 
-/** The face of her latest reply that has one. */
-export function expressionOf(state: State): string | undefined {
+/** How long the face of a reply is shown before the avatar goes back to neutral: natsumi's three minutes. */
+export const FACE_RESET_MS = 3 * 60_000;
+
+/**
+ * The face the avatar shows now: that of her latest reply that has one,
+ * until it has been shown for FACE_RESET_MS. Undefined is neutral.
+ */
+export function faceOf(state: State, now: number): string | undefined {
   for (let i = state.items.length - 1; i >= 0; i--) {
     const item = state.items[i]!;
-    if (item.kind === "agent" && item.expression !== undefined) return item.expression;
+    if (item.kind !== "agent" || item.expression === undefined) continue;
+    return now - Date.parse(item.at) < FACE_RESET_MS ? item.expression : undefined;
   }
   return undefined;
 }

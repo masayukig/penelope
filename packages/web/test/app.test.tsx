@@ -41,6 +41,24 @@ describe("the Web UI", () => {
     assert.equal(document.title, "Kestrel");
   });
 
+  // ADR-0016: the avatar changes its face with the expression; a word it has no face for shows neutral.
+  it("draws each reply with its own face, and the panel with the latest one", async () => {
+    const backend = new FakeBackend();
+    backend.agent = { name: "Iris", icons: { neutral: "/faces/neutral", happy: "/faces/happy", worried: "/faces/worried" } };
+    backend.history = [
+      { kind: "agent", id: "r-1", at: new Date(Date.now() - 60_000).toISOString(), text: "hmm", agent: "main", expression: "worried" },
+      { kind: "agent", id: "r-2", at: new Date().toISOString(), text: "done", agent: "main", expression: "happy" },
+      { kind: "agent", id: "r-3", at: new Date().toISOString(), text: "odd", agent: "main", expression: "no-such-face" },
+    ];
+    start(backend);
+    await backend.connected();
+    await waitFor(() => within(timeline()).getByText("odd"));
+    const faces = [...timeline().querySelectorAll("img")].map((img) => img.getAttribute("src"));
+    assert.deepEqual(faces, ["/faces/worried", "/faces/happy", "/faces/neutral"]);
+    // The latest reply with a face it knows of is "no-such-face": the panel shows neutral for it.
+    assert.deepEqual([...panel().querySelectorAll("img")].map((img) => img.getAttribute("src")), ["/faces/neutral"]);
+  });
+
   it("asks for a login when there is no session, naming her there too", async () => {
     const backend = new FakeBackend();
     backend.signedIn = false;
