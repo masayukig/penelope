@@ -120,3 +120,26 @@ test("the system prompt says that other agents ask over A2A and how they are ans
   assert.ok(prompt.includes("`a2a`"));
   assert.ok(prompt.includes("`reply_to_agent`"));
 });
+
+test("the owner's skills are named with their place, which she cannot change", async () => {
+  // Guards against: skills she finds listed without knowing where they are, or taking them for hers to edit.
+  const places = { ...(await memory({})), ownerSkills: "/skills" };
+  const files = await readPromptFiles(places.memory, 1000);
+  const prompts: [string, string][] = [
+    [systemPrompt(identity, places, files), "your owner's skills"],
+    [curatorSystemPrompt(identity, places), `${identity.owner}'s skills`],
+  ];
+  for (const [prompt, whose] of prompts) {
+    const line = prompt.split("\n").find((l) => l.includes("/skills/"));
+    assert.ok(line, "a line names /skills/");
+    assert.match(line, /read-only/);
+    assert.ok(line.includes(`${places.memory}/skills/`), "beside the skills of the memory");
+    assert.ok(line.includes(whose), whose);
+  }
+});
+
+test("without the owner's skills, the prompt names none", async () => {
+  const places = await memory({});
+  const prompt = systemPrompt(identity, places, await readPromptFiles(places.memory, 1000));
+  assert.ok(!/'s skills/.test(prompt));
+});

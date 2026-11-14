@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -29,7 +29,7 @@ interface World {
   start(script: Script): Promise<() => Promise<void>>;
 }
 
-async function world(options: { turnFold?: boolean } = {}): Promise<World> {
+async function world(options: { turnFold?: boolean; ownerSkills?: boolean } = {}): Promise<World> {
   const root = await mkdtemp(join(tmpdir(), "runner-"));
   const home = join(root, "home");
   const memoryDir = join(root, "memory");
@@ -51,6 +51,7 @@ async function world(options: { turnFold?: boolean } = {}): Promise<World> {
     imageMaxBytes: 1_000_000,
     pollWaitSeconds: 1,
     turnFold: options.turnFold ?? true,
+    ...(options.ownerSkills ? { ownerSkillsDir: join(root, "skills") } : {}),
   };
   const calls: Call[] = [];
   const logs: string[] = [];
@@ -180,6 +181,61 @@ test("the system prompt is hers, with her memory after it", async () => {
   assert.ok(calls[0]!.systemPrompt.includes(config.identity.name));
   assert.ok(calls[0]!.systemPrompt.includes(config.identity.role));
   assert.ok(calls[0]!.systemPrompt.includes("毎朝 CI を見る。"));
+});
+
+/** Writes skills/<name>/SKILL.md under `dir`, one for each name. */
+async function skills(dir: string, described: Record<string, string>): Promise<void> {
+  for (const [name, description] of Object.entries(described)) {
+    await mkdir(join(dir, name), { recursive: true });
+    await writeFile(join(dir, name, "SKILL.md"), `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`);
+  }
+}
+
+test("the owner's skills are listed beside the memory's, and the owner's wins a name in both", async () => {
+  const { fake, start, calls, config } = await world({ ownerSkills: true });
+  await skills(config.ownerSkillsDir!, { porkadot: "Porkadot of the owner." });
+  await skills(join(config.memoryDir, "skills"), { porkadot: "Her own porkadot.", diary: "Her own diary." });
+  await start(replying);
+  fake.push(ui(1, "hello"));
+  await until(() => acked(fake).includes(1));
+  const prompt = calls[0]!.systemPrompt;
+  // Guards against: the owner's skills not reaching her, or her own copy of one taking its place.
+  assert.ok(prompt.includes(join(config.ownerSkillsDir!, "porkadot", "SKILL.md")));
+  assert.ok(prompt.includes("Porkadot of the owner."));
+  assert.ok(!prompt.includes("Her own porkadot."));
+  assert.ok(prompt.includes("Her own diary."), "the memory's skills are still listed");
+});
+
+test("a read-only directory of the owner's skills is read and left as it was", async () => {
+  const { fake, start, calls, config } = await world({ ownerSkills: true });
+  const dir = config.ownerSkillsDir!;
+  await skills(dir, { vmapi: "Vmapi of the owner." });
+  const file = join(dir, "vmapi", "SKILL.md");
+  const before = { content: await readFile(file, "utf8"), mtime: (await stat(file)).mtimeMs };
+  await chmod(file, 0o444);
+  await chmod(join(dir, "vmapi"), 0o555);
+  await chmod(dir, 0o555);
+  closers.push(async () => {
+    await chmod(dir, 0o755);
+    await chmod(join(dir, "vmapi"), 0o755);
+  });
+  await start(replying);
+  fake.push(ui(1, "hello"));
+  await until(() => acked(fake).includes(1));
+  // Guards against: a runner that needs to write where the owner's skills are mounted read-only.
+  assert.ok(calls[0]!.systemPrompt.includes("Vmapi of the owner."));
+  assert.deepEqual(await readdir(dir), ["vmapi"]);
+  assert.deepEqual(await readdir(join(dir, "vmapi")), ["SKILL.md"]);
+  assert.deepEqual({ content: await readFile(file, "utf8"), mtime: (await stat(file)).mtimeMs }, before);
+});
+
+test("a directory of the owner's skills that is not there is passed over", async () => {
+  const { fake, start, calls } = await world({ ownerSkills: true });
+  await start(replying);
+  fake.push(ui(1, "hello"));
+  // Guards against: a session that cannot start before the owner's skills are put in place.
+  await until(() => acked(fake).includes(1));
+  assert.ok(calls.length > 0, "a turn ran");
 });
 
 test("after a restart the session goes on, and unacked events come again", async () => {

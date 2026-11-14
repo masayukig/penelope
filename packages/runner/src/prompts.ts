@@ -13,6 +13,8 @@ export interface Places {
   memory: string;
   sources: string;
   home: string;
+  /** The owner's skills, read-only; left out when there are none. */
+  ownerSkills?: string;
 }
 
 /** The memory files the system prompt carries, in this order. */
@@ -44,13 +46,18 @@ export async function readPromptFiles(memoryDir: string, maxBytes: number): Prom
   return files;
 }
 
-const MEMORY_SHAPE = (memory: string) => `- personality.md: the personality and the way of talking.
+/** `owner` is how the prompt names the owner: "your owner" for her, the name for the curator. */
+const MEMORY_SHAPE = ({ memory, ownerSkills }: Places, owner: string) => `- personality.md: the personality and the way of talking.
 - always.md: what is kept in mind at all times.
 - handoff.md: what one session leaves for the next.
 - INDEX.md: the index of the memory.
 - diary/YYYY-MM-DD.md: what happened on each day.
 - archive/: older facts, in summaries.
-- skills/<name>/SKILL.md: skills. Those in ${memory}/skills/ are listed at the end of the system prompt of each new session.
+- skills/<name>/SKILL.md: skills. Those in ${memory}/skills/ are listed at the end of the system prompt of each new session.${
+  ownerSkills
+    ? ` So are ${owner}'s skills, in ${ownerSkills}/, which is read-only; where a name is in both, the one listed is ${owner}'s.`
+    : ""
+}
 - Any other file: one topic each.`;
 
 function appended(files: PromptFile[]): string {
@@ -88,7 +95,7 @@ The text of your turn reaches no one. Your owner hears from you through the \`re
 
 ${memory} is your long-term memory: Markdown files in a git repository.
 
-${MEMORY_SHAPE(memory)}
+${MEMORY_SHAPE(places, "your owner")}
 
 What you change in ${memory} is committed by the backend at the end of each turn. You can read its history; ${memory}/.git is read-only for you. Each night the session ends: in a last turn you write handoff.md, then a curator reorganises the memory, and a new session starts from it.
 
@@ -119,7 +126,7 @@ You run in the same sandbox as ${identity.name}, as the user \`agent\`, with the
 
 ${memory} is ${identity.name}'s long-term memory: Markdown files in a git repository.
 
-${MEMORY_SHAPE(memory)}
+${MEMORY_SHAPE(places, identity.owner)}
 
 ${identity.name} reads personality.md, always.md and handoff.md in full at the start of every session, and the rest when it is needed, usually starting from INDEX.md. The memory serves ${identity.name} when what they know can be found when it is needed, and what is found is current.
 

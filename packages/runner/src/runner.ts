@@ -107,7 +107,12 @@ export class Runner {
         }),
       ],
     };
-    this.places = { memory: options.config.memoryDir, sources: options.config.sourcesDir, home: options.config.home };
+    this.places = {
+      memory: options.config.memoryDir,
+      sources: options.config.sourcesDir,
+      home: options.config.home,
+      ...(options.config.ownerSkillsDir ? { ownerSkills: options.config.ownerSkillsDir } : {}),
+    };
   }
 
   /** Runs until `signal` aborts. */

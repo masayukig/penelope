@@ -43,8 +43,10 @@ test("the optional settings", () => {
     PENELOPE_POLL_WAIT_SECONDS: "5",
     PENELOPE_IMAGE_MAX_BYTES: "1000",
     PENELOPE_TURN_FOLD: "off",
+    PENELOPE_OWNER_SKILLS_DIR: "/skills",
   });
   assert.equal(config.turnFold, false);
+  assert.equal(config.ownerSkillsDir, "/skills");
   assert.equal(config.imageMaxBytes, 1000);
   assert.deepEqual(config.model, { provider: "anthropic", id: "claude-opus-5-5" });
   assert.equal(config.thinkingLevel, "high");
