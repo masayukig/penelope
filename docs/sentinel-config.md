@@ -1,7 +1,7 @@
 # Sentinel の設定と記録の仕様
 
 Sentinel の設定の形と、通信の記録の形を決める。方針は
-[ADR-0003](adr/0003-all-egress-through-the-sentinel-passthrough-by-default.md)・[ADR-0004](adr/0004-the-sentinel-keeps-the-keys-through-a-replaceable-source.md)・[ADR-0005](adr/0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md)・[ADR-0014](adr/0014-sandbox-loopback-left-open-and-pod-ports-on-unix-sockets.md) にある。
+[ADR-0003](adr/0003-all-egress-through-the-sentinel-passthrough-by-default.md)・[ADR-0004](adr/0004-the-sentinel-keeps-the-keys-through-a-replaceable-source.md)・[ADR-0005](adr/0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md)・[ADR-0014](adr/0014-sandbox-loopback-left-open-and-pod-ports-on-unix-sockets.md)・[ADR-0020](adr/0020-connectors-with-a-usage-document-listed-in-the-prompt.md) にある。
 Go の型は Sentinel の実装が持ち、この文書に合わせる。
 
 具体的なホスト名・鍵の置き場所・サロゲートの値は、配置のリポジトリの設定にだけ書く。ここの例はすべて架空である。
@@ -38,7 +38,7 @@ Go の型は Sentinel の実装が持ち、この文書に合わせる。
 | `upstream` | | 上流の宛先。省けば `name` を名前解決した先へ `port` の TLS で送る（下の「上流」） |
 | `upstream_ca` | | 上流の証明書を確かめる CA のファイル。省けばシステムの CA |
 | `credentials` | | 鍵の差し替えの一覧（下の「鍵の差し替え」） |
-| `connector` | | コネクタの名前。省けばコネクタ無し |
+| `connector` | | コネクタのプラグインの名前。省けばプラグイン無し |
 | `connector_config` | | コネクタごとの設定。形はコネクタが決める |
 
 - 特定のホストを特別扱いするコードは書かない。クラスタの API server も、backend も、登録の 1 件である。
@@ -52,14 +52,14 @@ Go の型は Sentinel の実装が持ち、この文書に合わせる。
 - sandbox からの通信は、どの場合も sandbox との間では Sentinel の CA の証明書で TLS を終端する。
 - backend の sandbox 向けの口は、この欄で backend の Unix socket を指して登録する（[ADR-0014](adr/0014-sandbox-loopback-left-open-and-pod-ports-on-unix-sockets.md)）。
 
-### コネクタ
+### コネクタのプラグイン
 
-- コネクタは、1 つのホストに特化した判定や処理を差し込むプラグインである（[ADR-0003](adr/0003-all-egress-through-the-sentinel-passthrough-by-default.md)）。判定、そのホストに特有の鍵の扱い（body に鍵を含める要求や署名など、差し替えでは扱えないもの。[ADR-0004](adr/0004-the-sentinel-keeps-the-keys-through-a-replaceable-source.md)）、記録を詳しくすることを受け持つ。
-- **最初の版の Sentinel はコネクタを 1 つも持たない。** `connector` が書かれた登録があれば、「知らないコネクタ」として起動しない（黙って無視しない）。動いている最中の読み直しなら、前の設定のまま動き続ける（[ADR-0003](adr/0003-all-egress-through-the-sentinel-passthrough-by-default.md) の Decision「守る対象と、失敗したときの倒し方」）。
+- コネクタ（ホストの登録と使い方の文書の組。下の「コネクタの文書」）のうち、Sentinel に差し込むのがプラグインである。プラグインは、1 つのホストに特化した判定や処理を差し込む（[ADR-0003](adr/0003-all-egress-through-the-sentinel-passthrough-by-default.md)）。判定、そのホストに特有の鍵の扱い（body に鍵を含める要求や署名など、差し替えでは扱えないもの。[ADR-0004](adr/0004-the-sentinel-keeps-the-keys-through-a-replaceable-source.md)）、記録を詳しくすることを受け持つ。
+- **最初の版の Sentinel はプラグインを 1 つも持たない。** `connector` が書かれた登録があれば、「知らないプラグイン」として起動しない（黙って無視しない）。動いている最中の読み直しなら、前の設定のまま動き続ける（[ADR-0003](adr/0003-all-egress-through-the-sentinel-passthrough-by-default.md) の Decision「守る対象と、失敗したときの倒し方」）。
 
 未決:
 
-- コネクタの差し込み口（Go の interface）の形。最初のコネクタを作るときに決める。
+- プラグインの差し込み口（Go の interface）の形。最初のプラグインを作るときに決める。
 
 ### 鍵の差し替え
 
@@ -124,6 +124,40 @@ allow: []
 - それ以外の通信と、1 秒のうちに何も送らない通信（相手から先に話す手順のもの）は、読まずに素通しする。
 - 開いた通信は、sandbox との間で HTTP/1.1 だけを話し、上流へも HTTP/1.1 で送る。Upgrade（WebSocket・SPDY）はそのまま中継し、応答は届いたぶんから順に返す。
 - Sentinel が自分で返す応答には `Penelope-Sentinel` ヘッダ（`deny` か `error`）を付ける。上流の応答に同じ名前のヘッダがあれば取り除く。
+
+## コネクタの文書
+
+コネクタは、ホストの登録（1 つ以上）と、その使い方の文書 1 つの組である（[ADR-0020](adr/0020-connectors-with-a-usage-document-listed-in-the-prompt.md)）。文書は配置が Sentinel の設定の隣に持ち、sandbox に読み取りで置く。runner はその一覧をエージェントのシステムプロンプトに出す。
+
+- 置き場所: sandbox の 1 つのディレクトリ。runner には環境変数 `PENELOPE_CONNECTORS_DIR` で伝える。配置の既定は `/etc/penelope/connectors/`。設定が無ければ、runner はコネクタを読まない。
+- ファイル: コネクタごとに `<名前>.md` を 1 つ、ディレクトリの直下に置く。`.` で始まる名前、`.md` でないもの、ディレクトリは読まない。リンクは辿る（ConfigMap の mount の形）。
+- 先頭の front matter（YAML）:
+
+| 欄 | 必須 | 中身 |
+| --- | --- | --- |
+| `name` | ○ | コネクタの名前。ファイルの名前の `.md` の前と同じにする |
+| `description` | ○ | 何に使うかの 1〜2 文。一覧にそのまま載る |
+| `hosts` | ○ | 使うホストの登録の `name` の一覧（1 つ以上）。一覧にそのまま載る |
+
+- 本文は自由な Markdown である。サロゲートを持つ環境変数や設定ファイル、使う道具（`gh`・`kubectl`・`vmctl`・`curl` の例）、注意を書く。鍵の値とサロゲートの値は書かない。
+- runner は、新しいセッションを始めるたびにディレクトリを読み、名前の順に、名前・説明・ホスト・ファイルの場所をシステムプロンプトの「Connectors」の節に出す。本文は出さない。
+- ディレクトリが無い、または読めるファイルが 1 つも無ければ、節そのものを出さない。
+- front matter が無い・YAML として読めない・必須の欄が欠ける・`name` がファイルの名前と違うファイルは一覧から外し、runner の標準エラーに `connector left out: <パス> <理由>` と 1 行書く。ほかのファイルは一覧に載せる。
+- 登録と文書の対応（文書の `hosts` が設定の `hosts` にあり、鍵を差し替える登録がどれかの文書の `hosts` にあること）は、配置のリポジトリが確かめる。Sentinel も runner も確かめない。
+
+例（架空の値）:
+
+```markdown
+---
+name: github
+description: GitHub の API と git の HTTPS。gh と git で使う。
+hosts:
+  - api.github.com
+  - github.com
+---
+
+`GH_TOKEN` にサロゲートがある。gh はそのまま使える。git の HTTPS は gh の認証の手伝いを使う。
+```
 
 ## 登録の無いホストへのサロゲート
 
