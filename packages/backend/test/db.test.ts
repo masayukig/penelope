@@ -44,4 +44,37 @@ describe("the database", () => {
     );
     assert.equal((db.prepare("SELECT COUNT(*) AS n FROM scratch").get() as { n: number }).n, 0);
   });
+
+  it("keeps an inner transaction with the outer one, and drops both when the outer throws", (t) => {
+    // Guards against: a task the A2A inbox keeps without the event it became, or the event without its task.
+    const db = openDatabase(path.join(tempDir(t), "a.sqlite"));
+    t.after(() => db.close());
+    db.exec("CREATE TABLE scratch (x INTEGER)");
+    const count = () => (db.prepare("SELECT COUNT(*) AS n FROM scratch").get() as { n: number }).n;
+    assert.throws(() =>
+      transaction(db, () => {
+        db.prepare("INSERT INTO scratch (x) VALUES (1)").run();
+        transaction(db, () => db.prepare("INSERT INTO scratch (x) VALUES (2)").run());
+        throw new Error("no");
+      }),
+    );
+    assert.equal(count(), 0);
+
+    transaction(db, () => {
+      db.prepare("INSERT INTO scratch (x) VALUES (1)").run();
+      assert.throws(() =>
+        transaction(db, () => {
+          db.prepare("INSERT INTO scratch (x) VALUES (2)").run();
+          throw new Error("inner");
+        }),
+      );
+    });
+    assert.equal(count(), 1, "the inner one that threw is dropped, the outer one kept");
+
+    transaction(db, () => {
+      db.prepare("INSERT INTO scratch (x) VALUES (3)").run();
+      transaction(db, () => db.prepare("INSERT INTO scratch (x) VALUES (4)").run());
+    });
+    assert.equal(count(), 3, "both are kept when neither throws");
+  });
 });

@@ -5,6 +5,11 @@ import { mkdirSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 
+import { a2aHandler } from "./a2a/endpoint.ts";
+import { GatedAssertion } from "./a2a/gated.ts";
+import { Inbox } from "./a2a/inbox.ts";
+import { type SenderCheck, Senders } from "./a2a/senders.ts";
+import { TokenReview } from "./a2a/tokenreview.ts";
 import type { Config } from "./config.ts";
 import { Conversation } from "./conversation.ts";
 import { openDatabase } from "./db.ts";
@@ -46,11 +51,12 @@ export async function startBackend(
   const scheduler = new Scheduler(schedules, queue, { now, timeZone: config.timeZone, nightly: config.nightly, log });
   const memory = new Memory(config.memoryDir, config.gitAuthor);
   const sessions = new LoginSessions(db, { now });
+  const inbox = new Inbox(db, queue, { now, limits: config.a2a?.limits ?? { deadlineMs: 24 * 3_600_000, maxOpenTasks: 3 } });
   const login = new GitHubLogin({ settings: config.github, ...(githubEndpoints ? { endpoints: githubEndpoints } : {}), sessions, now, log });
 
   const intake = await listenUnix(intakeHandler(queue, { log }), config.intakeSocket, log);
   const sandbox = await listenUnix(
-    sandboxHandler({ token: config.sandboxToken, queue, conversation, schedules, memory, now, log }),
+    sandboxHandler({ token: config.sandboxToken, queue, conversation, schedules, memory, inbox, now, log }),
     config.sandboxSocket,
     log,
   );
@@ -65,6 +71,7 @@ export async function startBackend(
       publicUrl: config.publicUrl,
       agent: config.agent,
       web: webHandler({ dir: config.webDir, agent: config.agent }),
+      ...(config.a2a === undefined ? {} : { a2a: a2aOf(config.a2a, config.agent.name, inbox, now, log) }),
       now,
     }),
     config.listen.host,
@@ -75,6 +82,7 @@ export async function startBackend(
 
   if (config.sandboxToken === undefined) log("backend: no PENELOPE_SANDBOX_TOKEN_FILE; the sandbox's API refuses every request");
   if (config.github === undefined) log("backend: no GitHub login set up; no one can sign in to the UI");
+  if (config.a2a === undefined) log("backend: no A2A senders; /a2a/ is closed");
   const port = (ui.address() as AddressInfo).port;
   log(`backend: intake on ${config.intakeSocket}, sandbox's API on ${config.sandboxSocket}, UI on ${config.listen.host}:${port}`);
 
@@ -86,4 +94,18 @@ export async function startBackend(
       db.close();
     },
   };
+}
+
+/** The A2A way in of the settings: the checks they chose, onto one allow-list. */
+function a2aOf(settings: NonNullable<Config["a2a"]>, name: string, inbox: Inbox, now: () => number, log: (line: string) => void) {
+  const checks: SenderCheck[] = [];
+  if (settings.gated) checks.push(new GatedAssertion({ ...settings.gated, now, log }));
+  if (settings.tokenReview) checks.push(new TokenReview(settings.tokenReview.kubernetes, settings.tokenReview.audiences));
+  return a2aHandler({
+    inbox,
+    checks,
+    senders: new Senders(settings.senders),
+    card: { name, description: settings.description, url: settings.url },
+    log,
+  });
 }

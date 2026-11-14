@@ -6,6 +6,7 @@ import type http from "node:http";
 
 import type { Activity, AgentId, DeliveredEvent, ScheduleWhen } from "@penelope/contract";
 
+import { type Inbox, InboxRefusal } from "./a2a/inbox.ts";
 import type { Conversation } from "./conversation.ts";
 import { isTime } from "./envelope.ts";
 import { type Handler, HttpError, readJson, sendEmpty, sendJson } from "./http.ts";
@@ -26,13 +27,15 @@ export type SandboxOptions = {
   conversation: Conversation;
   schedules: Schedules;
   memory: Memory;
+  /** The tasks other agents sent over A2A, which her replies close or ask in. */
+  inbox: Inbox;
   now: () => number;
   maxBytes?: number;
   log?: (line: string) => void;
 };
 
 export function sandboxHandler(options: SandboxOptions): Handler {
-  const { queue, conversation, schedules, memory, now } = options;
+  const { queue, conversation, schedules, memory, inbox, now } = options;
   const log = options.log ?? console.error;
   const maxBytes = options.maxBytes ?? DEFAULT_SANDBOX_BYTES;
   const expected = options.token === undefined || options.token === "" ? undefined : digest(options.token);
@@ -86,6 +89,19 @@ export function sandboxHandler(options: SandboxOptions): Handler {
           ...(in_reply_to === undefined ? {} : { in_reply_to: in_reply_to as number }),
         });
         sendJson(response, 201, reply);
+        return;
+      }
+      case "POST /v1/a2a/replies": {
+        const { in_reply_to, state, text } = withAgent(await body());
+        if (!Number.isSafeInteger(in_reply_to)) throw new HttpError(400, "in_reply_to must be the seq of an a2a event");
+        if (state !== "completed" && state !== "input-required") throw new HttpError(400, "state must be completed or input-required");
+        if (text !== undefined && typeof text !== "string") throw new HttpError(400, "text must be a string");
+        try {
+          sendJson(response, 200, inbox.reply({ in_reply_to: in_reply_to as number, state, ...(text === undefined ? {} : { text }) }));
+        } catch (error) {
+          if (!(error instanceof InboxRefusal)) throw error;
+          throw new HttpError(error.kind === "no-such-event" ? 404 : error.kind === "closed" ? 409 : 400, error.message);
+        }
         return;
       }
       case "POST /v1/activity": {
@@ -144,7 +160,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
       sendEmpty(response, 204);
       return;
     }
-    const known = ["/v1/events/ack", "/v1/self-events", "/v1/replies", "/v1/activity", "/v1/turns/end", "/v1/schedules", "/v1/sessions/rotated"];
+    const known = ["/v1/events/ack", "/v1/self-events", "/v1/replies", "/v1/a2a/replies", "/v1/activity", "/v1/turns/end", "/v1/schedules", "/v1/sessions/rotated"];
     if (known.includes(url.pathname)) throw new HttpError(405, "not this method");
     throw new HttpError(404, "no such path");
   };

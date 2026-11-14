@@ -9,6 +9,7 @@ import path from "node:path";
 
 import type { AgentResponse, PostMessageResponse } from "@penelope/contract";
 
+import { isA2APath } from "./a2a/endpoint.ts";
 import { type AgentSettings, ICON_TYPES } from "./config.ts";
 
 import type { Conversation } from "./conversation.ts";
@@ -43,6 +44,8 @@ export type UiOptions = {
   maxBytes?: number;
   /** The Web UI's files, served for everything else. Until it is built, nothing is. */
   web?: Handler;
+  /** The A2A way in, under /a2a/, which checks its senders itself. Without it, /a2a/ is not found. */
+  a2a?: Handler;
 };
 
 export function uiHandler(options: UiOptions): Handler {
@@ -85,6 +88,11 @@ export function uiHandler(options: UiOptions): Handler {
       return;
     }
 
+    if (isA2APath(url.pathname)) {
+      if (options.a2a === undefined) throw new HttpError(404, "no A2A way in here");
+      await options.a2a(request, response);
+      return;
+    }
     if (!url.pathname.startsWith("/api/")) {
       await web(request, response);
       return;

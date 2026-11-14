@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 
 import type { StreamEvent } from "@penelope/contract";
 
+import { Inbox } from "../src/a2a/inbox.ts";
 import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
 import { Feed } from "../src/feed.ts";
@@ -39,9 +40,10 @@ async function setup(t: { after: (fn: () => void | Promise<void>) => void }, tok
   mkdirSync(memoryDir);
   const memory = new Memory(memoryDir, { name: "penelope-backend", email: "backend@penelope.invalid" });
   const schedules = new Schedules(db, { now: Date.now, timeZone: "UTC" });
+  const inbox = new Inbox(db, queue, { now: Date.now, limits: { deadlineMs: 86_400_000, maxOpenTasks: 3 } });
   const socketPath = path.join(dir, "sandbox.sock");
   const server = await listenUnix(
-    sandboxHandler({ token, queue, conversation, schedules, memory, now: Date.now, log: () => {} }),
+    sandboxHandler({ token, queue, conversation, schedules, memory, inbox, now: Date.now, log: () => {} }),
     socketPath,
   );
   t.after(async () => {
@@ -50,7 +52,7 @@ async function setup(t: { after: (fn: () => void | Promise<void>) => void }, tok
   });
   const call = (pathname: string, options: Ask = {}) =>
     ask({ socketPath }, pathname, { ...options, headers: { authorization: `Bearer ${TOKEN}`, ...options.headers } });
-  return { queue, conversation, streamed, memoryDir, call, socketPath };
+  return { queue, conversation, streamed, memoryDir, call, socketPath, inbox };
 }
 
 const self = (id: string) => ({ agent: "main", id, summary: `note ${id}`, payload: { id } });
@@ -295,5 +297,34 @@ describe("the sandbox's API", () => {
     const { call } = await setup(t);
     assert.equal((await call("/v1/nothing")).status, 404);
     assert.equal((await call("/v1/replies")).status, 405);
+  });
+
+  describe("A2A replies", () => {
+    it("answers in the task of the a2a event it names, and says what became of the task", async (t) => {
+      // Guards against: her answer to another agent not reaching its task.
+      const { call, inbox, queue } = await setup(t);
+      const task = inbox.receive("claude", { text: "Restart it?", messageId: "m-1" });
+      const [event] = queue.take({ after: 0 });
+      const asked = await call("/v1/a2a/replies", { method: "POST", json: { agent: "main", in_reply_to: event!.seq, state: "input-required", text: "Which one?" } });
+      assert.equal(asked.status, 200);
+      assert.deepEqual(asked.json(), { task_id: task.taskId, state: "input-required" });
+      assert.equal(inbox.task("claude", task.taskId)!.messages.at(-1)!.text, "Which one?");
+    });
+
+    it("refuses a reply to an event that is no A2A task's, to a closed task, and a question without text", async (t) => {
+      // Guards against: a reply that goes nowhere taken as sent, so that she believes the agent has it.
+      const { call, inbox, queue } = await setup(t);
+      inbox.receive("claude", { text: "hello", messageId: "m-1" });
+      const [event] = queue.take({ after: 0 });
+      const reply = (body: Record<string, unknown>) => call("/v1/a2a/replies", { method: "POST", json: { agent: "main", ...body } });
+      assert.equal((await reply({ in_reply_to: 9999, state: "completed" })).status, 404);
+      assert.equal((await reply({ in_reply_to: event!.seq, state: "input-required" })).status, 400);
+      assert.equal((await reply({ in_reply_to: event!.seq, state: "failed" })).status, 400);
+      assert.equal((await reply({ state: "completed" })).status, 400);
+      assert.equal((await reply({ in_reply_to: event!.seq, state: "completed" })).status, 200);
+      const again = await reply({ in_reply_to: event!.seq, state: "completed", text: "more" });
+      assert.equal(again.status, 409);
+      assert.match(again.json().error, /completed/);
+    });
   });
 });
