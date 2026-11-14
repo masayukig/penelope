@@ -91,6 +91,11 @@ export class Conversation {
     }
   }
 
+  /** The turn is over: the agent waits for events again. */
+  turnEnded(agent: AgentId): void {
+    this.feed.publish({ event: "state", data: { agent, state: "waiting" } });
+  }
+
   sessionRotated(agent: AgentId): void {
     this.db.prepare("INSERT INTO session_rotations (agent, at) VALUES (?, ?)").run(agent, iso(this.now()));
   }
