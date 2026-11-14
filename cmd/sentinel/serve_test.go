@@ -299,7 +299,9 @@ func TestASIGHUPReadsTheConfigurationAgain(t *testing.T) {
 	}()
 	stop := func() {
 		cancel()
-		<-done
+		if err := <-done; err != nil {
+			t.Errorf("serve = %v, want nil when stopped", err)
+		}
 	}
 	select {
 	case <-listening:
