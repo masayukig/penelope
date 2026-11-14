@@ -9,7 +9,7 @@ ADR-0009 の Decision「Astryx と React 19」は、最初の Web UI にアバ�
 
 その後、オーナーは Claude design で画面を詰め、アバターと expression を最初の版から出すと決めた。決まった見た目は、このリポジトリの `docs/design/`（デザインの手引きと、採用した画面）にある。手引きでは、アバターは PC の右のパネル、PC の上の帯、スマートフォンで上に浮く位置、下からのシート、返事の名前の横、ログインの画面に出る。expression は、アバターに添える文字の札と、返事の名前の横の文字で示す。
 
-手引きを決めた時点では、アバターは固定のアイコン 1 枚に expression の札を添え、expression ごとに絵を差し替えないとしていた。その後オーナーは、natsumi と同じように、表情ごとに絵を切り替えると決めた。natsumi には、ペネロペの表情のアイコンが 9 種（neutral・happy・laughing・surprised・thinking・worried・sad・sleepy・angry）あり、natsumi のアバターは表情を一定の時間見せると neutral に戻る。
+手引きを決めた時点では、アバターは固定のアイコン 1 枚に expression の札を添え、expression ごとに絵を差し替えないとしていた。その後オーナーは、natsumi と同じように、表情ごとに絵を切り替えると決めた。natsumi には、ペネロペの表情のアイコンが 9 種（neutral・happy・laughing・surprised・thinking・worried・sad・sleepy・angry）あり、natsumi のアバターは、考えている最中は thinking になり、ほかの表情は一定の時間見せると neutral に戻る。
 
 オーナーは、ゆくゆくはアバターを 3D のモデルなどに替えたいと考えている。
 
@@ -20,12 +20,12 @@ ADR-0009 の Decision「Astryx と React 19」は、最初の Web UI にアバ�
 - 最初の Web UI から、アバターと expression を出す。どこにどの大きさで出すかは `docs/design/` の手引きに従う。
 - アバターの絵は、expression ごとに差し替える。絵は、backend の設定で選んだアバターの表情のアイコンである。コードは特定のアバターに依存しない（ADR-0001）。
 - expression の語は、アバターの表情の 9 種（neutral・happy・laughing・surprised・thinking・worried・sad・sleepy・angry）とする。知らない語や、アバターに無い表情は neutral として出す。
-- 返事に添えるアバターは、その返事の expression の絵にする。エージェントの今の姿として出すアバターは、いちばん新しい返事の expression の絵にし、一定の時間がたつと neutral に戻す。
+- 返事に添えるアバターは、その返事の expression の絵にする。エージェントの今の姿として出すアバターは、ターンの最中は thinking の絵にし、出来事を待っているときは、いちばん新しい返事の expression の絵にして、一定の時間がたつと neutral に戻す。
 - アバターは Web UI の中の 1 つの部品に閉じる。部品が受け取るのは expression と大きさだけで、絵と名前は設定から入る。絵の描き方を替えるときは、この部品の中だけを替え、画面の側は変えない。
 
 ### 本 ADR で決定しないこと
 
-- neutral に戻るまでの時間、考えている最中に thinking の絵を出すか（委譲先: `docs/design/` の手引きの「6. アバター」と「まだ決めていないこと」）
+- neutral に戻るまでの時間（委譲先: `docs/design/` の手引きの「6. アバター」と「まだ決めていないこと」）
 - アバターのファイルの形と、設定での選び方（委譲先: [backend の仕様書](../backend.md) の「設定」と [UI 向けの API の仕様書](../ui-api.md) の「エージェント」）
 - 3D のモデルなどに替える時期と方式（委譲先: そのときの ADR）
 - Mac・iPhone のアプリでのアバター（委譲先: ADR-0009 の「本 ADR で決定しないこと」の、つなぎ直す時期の ADR）

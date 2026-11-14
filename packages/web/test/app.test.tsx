@@ -59,6 +59,22 @@ describe("the Web UI", () => {
     assert.deepEqual([...panel().querySelectorAll("img")].map((img) => img.getAttribute("src")), ["/faces/neutral"]);
   });
 
+  it("shows her thinking face in the panel while she is in a turn, and her reply's face again after it", async () => {
+    const backend = new FakeBackend();
+    backend.agent = { name: "Iris", icons: { neutral: "/faces/neutral", happy: "/faces/happy", thinking: "/faces/thinking" } };
+    backend.history = [{ kind: "agent", id: "r-1", at: new Date().toISOString(), text: "done", agent: "main", expression: "happy" }];
+    start(backend);
+    await backend.connected();
+    const panelFaces = () => [...panel().querySelectorAll("img")].map((img) => img.getAttribute("src"));
+    await waitFor(() => assert.deepEqual(panelFaces(), ["/faces/happy"]));
+    await act(async () => backend.send({ event: "state", data: { agent: "main", state: "thinking" } }));
+    await waitFor(() => assert.deepEqual(panelFaces(), ["/faces/thinking"]));
+    // The reply's own face does not change with her state.
+    assert.deepEqual([...timeline().querySelectorAll("img")].map((img) => img.getAttribute("src")), ["/faces/happy"]);
+    await act(async () => backend.send({ event: "state", data: { agent: "main", state: "waiting" } }));
+    await waitFor(() => assert.deepEqual(panelFaces(), ["/faces/happy"]));
+  });
+
   it("asks for a login when there is no session, naming her there too", async () => {
     const backend = new FakeBackend();
     backend.signedIn = false;

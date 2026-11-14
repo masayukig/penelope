@@ -81,6 +81,18 @@ describe("the conversation's timeline", () => {
     assert.equal(faceOf(s, since + FACE_RESET_MS + 1_000), undefined);
     assert.equal(faceOf(initialState, since), undefined);
   });
+
+  // While she is in a turn the avatar thinks, as natsumi's does; back to
+  // waiting, it shows the face of her latest reply again.
+  it("thinks while she is in a turn, using a tool or not, and shows her latest face again once she waits", () => {
+    const now = Date.parse("2026-11-14T09:01:10Z");
+    let s = run([stream(reply("r-1", "2026-11-14T09:01:00Z", { expression: "happy" })), stream(state("thinking"))]);
+    assert.equal(faceOf(s, now), "thinking");
+    s = run([stream(activity({ kind: "tool_call", at: "2026-11-14T09:01:05Z", turn_id: T, call_id: "c-1", name: "bash", arguments: {} }))], s);
+    assert.equal(faceOf(s, now), "thinking");
+    s = run([stream(state("waiting"))], s);
+    assert.equal(faceOf(s, now), "happy");
+  });
 });
 
 describe("what the agent is doing", () => {

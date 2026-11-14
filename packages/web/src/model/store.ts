@@ -194,11 +194,17 @@ export function currentFlow(state: State): FlowItem[] {
 /** How long the face of a reply is shown before the avatar goes back to neutral: natsumi's three minutes. */
 export const FACE_RESET_MS = 3 * 60_000;
 
+/** The face of the avatar while she is in a turn, as natsumi's. */
+export const THINKING_FACE = "thinking";
+
 /**
- * The face the avatar shows now: that of her latest reply that has one,
- * until it has been shown for FACE_RESET_MS. Undefined is neutral.
+ * The face the avatar shows now: thinking while she is in a turn; else that
+ * of her latest reply that has one, until it has been shown for
+ * FACE_RESET_MS. Undefined is neutral.
  */
 export function faceOf(state: State, now: number): string | undefined {
+  const status = statusOf(state).kind;
+  if (status === "thinking" || status === "tool") return THINKING_FACE;
   for (let i = state.items.length - 1; i >= 0; i--) {
     const item = state.items[i]!;
     if (item.kind !== "agent" || item.expression === undefined) continue;

@@ -91,7 +91,7 @@ export function App({ fetch, sleep }: AppProps) {
     [api, before],
   );
 
-  // Read the clock again when the face shown would go back to neutral.
+  // Read the clock again while the face shown would go back to neutral.
   const now = useClock(faceOf(state, Date.now()) === undefined ? undefined : FACE_RESET_MS);
   const status = statusOf(state);
   const busy = status.kind === "thinking" || status.kind === "tool";
