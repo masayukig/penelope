@@ -80,14 +80,10 @@ Pod の中のコンテナは網の名前空間を共有するので、TCP の待
 ## CA
 
 - Sentinel の CA の公開の証明書を、sandbox のシステムの信頼の置き場に入れ、Node と Python がシステムの束を使うよう環境変数を設定する（[ADR-0003](adr/0003-all-egress-through-the-sentinel-passthrough-by-default.md) の Decision「CA は image で信頼させる」）。
-
-- 公開の証明書は、起動のときに volume から足す。CA の鍵を Pod ごとに作る形でも、Secret に置く形でも同じ image で済むためである。
-  - 公開の証明書（PEM、拡張子 `.crt`）を sandbox の `/etc/penelope/ca/` に読み取りで mount する。
+- CA の証明書と鍵は Secret に置き、Sentinel のコンテナにだけ mount する。Sentinel は設定の `ca.cert`・`ca.key` でそのファイルを読む（[sentinel-config.md](sentinel-config.md)）。CA は Pod を作り直しても変わらない。
+- sandbox は公開の証明書を、image を作るときではなく、起動のときに volume から足す。image は配置ごとの CA を持たず、すべての配置で 1 つにできる（[ADR-0011](adr/0011-a-full-dev-image-and-a-generic-user-home.md)）。
+  - 公開の証明書（PEM、拡張子 `.crt`）だけを sandbox の `/etc/penelope/ca/` に読み取りで mount する。CA の鍵の入った Secret をそのまま sandbox に mount しない（証明書だけの ConfigMap か、Secret の `items` で証明書だけを選ぶ）。
   - image の entrypoint が、runner を動かす前に、Debian の束（image が `/usr/share/penelope/ca-certificates.crt` に写しておくもの）とその証明書をつないで、システムの束 `/etc/ssl/certs/ca-certificates.crt` に書く。この束は image でユーザー `agent` が書けるようにしてある。Pi のモデルへの最初の通信より前に入る。
   - `SSL_CERT_FILE`・`NODE_EXTRA_CA_CERTS`・`REQUESTS_CA_BUNDLE` は image でシステムの束を指す。
   - sandbox のルートのファイルシステムは書けるままにする（`readOnlyRootFilesystem` にしない）。
   - `/etc/penelope/ca/` に証明書が無ければ、束は Debian のままである。
-
-未決:
-
-- CA の鍵を Pod ごとに作るか、Secret に置くか（Sentinel の作業単位で決める）。どちらでも、公開の証明書を上の場所に mount する。

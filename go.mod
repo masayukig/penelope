@@ -8,6 +8,11 @@ tool (
 )
 
 require (
+	go.yaml.in/yaml/v3 v3.0.5
+	golang.org/x/sys v0.49.0
+)
+
+require (
 	4d63.com/gocheckcompilerdirectives v1.4.0 // indirect
 	4d63.com/gochecknoglobals v0.2.2 // indirect
 	charm.land/lipgloss/v2 v2.0.6 // indirect
@@ -205,11 +210,9 @@ require (
 	go.augendre.info/fatcontext v0.10.1 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20260811152304-ee035b5b010f // indirect
 	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/telemetry v0.0.0-20261010193011-f71dc92da45e // indirect
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect

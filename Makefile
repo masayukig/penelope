@@ -25,6 +25,10 @@ NPM ?= npm
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS ?= -s -w -X main.version=$(VERSION)
 
+# The Go packages with tests behind the netns build tag, and how to get root.
+NETNS_PKGS ?= ./internal/origdst ./internal/proxy
+SUDO ?= sudo
+
 ##@ General
 
 .PHONY: help
@@ -114,6 +118,17 @@ test-go: ## Unit tests of the Go module.
 .PHONY: test-ts
 test-ts: node_modules/.package-lock.json ## Unit tests of every npm workspace, with node --test.
 	$(NPM) test
+
+# The tests behind the netns build tag redirect real connections with
+# iptables, so they need root. They run, through sudo, in a network namespace
+# of their own that is thrown away afterwards.
+.PHONY: test-netns
+test-netns: ## Go tests that redirect with iptables. Need root (through sudo); run in a network namespace of their own.
+	mkdir -p bin/netns
+	for pkg in $(NETNS_PKGS); do \
+		$(GO) test -c -tags netns -o "bin/netns/$$(basename "$$pkg").test" "$$pkg"; \
+	done
+	$(SUDO) unshare --net sh -eu -c 'ip link set lo up; for pkg in $(NETNS_PKGS); do t="bin/netns/$${pkg##*/}.test"; echo "== $$t"; "$$t" -test.count=1; done'
 
 ##@ Housekeeping
 
