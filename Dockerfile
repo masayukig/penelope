@@ -23,6 +23,7 @@ WORKDIR /src
 # Sentinel imports and not the tools go.mod also lists.
 COPY go.mod go.sum ./
 COPY cmd ./cmd
+COPY internal ./internal
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
