@@ -297,15 +297,21 @@ export class Runner {
   private async nightly(seq: number): Promise<void> {
     await this.turnOf(this.session!, reflectionInput(this.places), [], false);
 
-    const curator = await openSession(
-      { ...this.setup, tools: [] },
-      curatorSystemPrompt(this.config.identity, this.places),
-      curatorManager(this.config),
-    );
+    // A curator that fails is recorded and passed over: the next night can
+    // tidy again, and the day's session does not go on (docs/sandbox-api.md).
     try {
-      await this.turnOf(curator, curatorInput(this.places, today()), [], false);
-    } finally {
-      curator.dispose();
+      const curator = await openSession(
+        { ...this.setup, tools: [] },
+        curatorSystemPrompt(this.config.identity, this.places),
+        curatorManager(this.config),
+      );
+      try {
+        await this.turnOf(curator, curatorInput(this.places, today()), [], false);
+      } finally {
+        curator.dispose();
+      }
+    } catch (error) {
+      this.log(`the curator could not start: ${(error as Error).message}`);
     }
 
     const state = { file: await newSessionFile(this.config), nightly: seq };
