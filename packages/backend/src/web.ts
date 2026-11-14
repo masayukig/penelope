@@ -8,8 +8,10 @@ import path from "node:path";
 import { type AgentSettings, ICON_TYPES } from "./config.ts";
 import { type Handler, sendError } from "./http.ts";
 
-/** Where the icon of the settings is served (docs/ui-api.md). */
-export const AGENT_ICON_PATH = "/api/agent/icon";
+/** Where each face of the avatar is served, by expression (docs/ui-api.md). */
+export const AGENT_ICONS_PATH = "/api/agent/icons/";
+/** The face the home screen shows. */
+const HOME_FACE = "neutral";
 /** The icon the build carries, for when the settings have none. */
 const BUILT_ICON = "/icon.svg";
 
@@ -70,10 +72,12 @@ export function webHandler({ dir, agent }: { dir: string; agent: AgentSettings }
 }
 
 function manifestOf(agent: AgentSettings) {
+  const face = agent.icons[HOME_FACE] === undefined ? Object.keys(agent.icons)[0] : HOME_FACE;
+  const file = face === undefined ? undefined : agent.icons[face];
   const icon =
-    agent.iconFile === undefined
+    face === undefined || file === undefined
       ? { src: BUILT_ICON, type: "image/svg+xml", sizes: "any" }
-      : { src: AGENT_ICON_PATH, type: ICON_TYPES[path.extname(agent.iconFile).toLowerCase()], sizes: "any" };
+      : { src: `${AGENT_ICONS_PATH}${face}`, type: ICON_TYPES[path.extname(file).toLowerCase()], sizes: "any" };
   return {
     name: agent.name,
     short_name: agent.name,

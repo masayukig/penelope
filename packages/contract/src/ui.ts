@@ -33,6 +33,6 @@ export type StreamEvent =
 export type AgentResponse = {
   /** The agent's name, from the backend's settings. */
   name: string;
-  /** Where its icon is served, when one is set. */
-  icon?: string;
+  /** Where each face of her avatar is served, by expression, when an avatar is chosen. */
+  icons?: Record<string, string>;
 };

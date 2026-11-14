@@ -22,7 +22,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 - callback の断りの `error` は、`invalid-state`・`login-expired`・`invalid-request`（`400`）、`github-denied`・`account-not-allowed`（`403`）、`github-exchange-failed`・`github-unavailable`（`502`）、`too-many-logins`（`429`）のどれか。
 - 戻る先は `/` に決めてあり、要求の中身では変わらない。
 - `GET /healthz` は認証なしで `200` を返す（配置の確かめのため）。
-- `GET /api/agent` と `GET /api/agent/icon` は認証なしで読める（「エージェント」）。ログインの画面とホーム画面のアイコンが、ログインの前にエージェントの名前とアイコンを出すためである。この 2 つにはそれ以外のものを載せない。
+- `GET /api/agent` と `GET /api/agent/icons/<表情>` は認証なしで読める（「エージェント」）。ログインの画面とホーム画面のアイコンが、ログインの前にエージェントの名前とアイコンを出すためである。この 2 つにはそれ以外のものを載せない。
 - `/api/` と `/auth/` のほかの道は、Web UI の静的ファイルを配る場所である（「Web UI の配り方」）。
 
 ## 口の一覧
@@ -32,7 +32,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 | `POST /api/messages` | オーナーのメッセージを送る |
 | `GET /api/history?before=` | 会話の履歴 |
 | `GET /api/stream` | 返事・途中経過・状態の流れ（SSE） |
-| `GET /api/agent`・`GET /api/agent/icon` | エージェントの名前とアイコン（認証なし） |
+| `GET /api/agent`・`GET /api/agent/icons/<表情>` | エージェントの名前と表情のアイコン（認証なし） |
 | `GET /api/approvals`・`POST /api/approvals/<id>` | 承認（後の波） |
 
 ## メッセージを送る
@@ -75,14 +75,15 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 
 ## エージェント
 
-- `GET /api/agent` は `{name, icon?}`。`name` は backend の設定のエージェントの名前（`PENELOPE_AGENT_NAME`）。`icon` は、設定にアイコンのファイル（`PENELOPE_AGENT_ICON_FILE`）があるときだけあり、その画像を配る道（`/api/agent/icon`）である。
-- UI はエージェントの名前とアイコンをここから取る。コードと UI に決め打ちの名前を書かない（[ADR-0001](adr/0001-one-pod-with-pi-inside-the-sandbox.md)）。アイコンが無ければ、UI は build に含めた汎用のアイコンを出す。
-- `GET /api/agent/icon` は設定のファイルを、拡張子の画像の型で返す。設定に無いか読めなければ `404`。
+- `GET /api/agent` は `{name, icons?}`。`name` は backend の設定のエージェントの名前（[backend.md](backend.md) の `PENELOPE_AGENT_NAME`、無ければアバターの名前）。`icons` は、設定でアバターを選んでいるとき（`PENELOPE_AVATAR`）だけあり、表情（expression）ごとの画像の道（`/api/agent/icons/<表情>`）を持つ。
+- UI はエージェントの名前とアイコンをここから取る。コードと UI に決め打ちの名前を書かない（[ADR-0001](adr/0001-one-pod-with-pi-inside-the-sandbox.md)）。
+- UI はアバターを表情ごとの画像で出す（[ADR-0016](adr/0016-show-the-avatar-and-expression-from-the-first-web-ui.md)）。表情が無いとき、アバターに無い表情のときは `neutral` の画像を出し、それも無ければ build に含めた汎用のアイコンを出す。
+- `GET /api/agent/icons/<表情>` はその表情の画像を、拡張子の画像の型で返す。無い表情、読めない画像は `404`。
 
 ## Web UI の配り方
 
 - `/api/` と `/auth/` のほかの道では、backend が `PENELOPE_WEB_DIR` にある Web UI の build（`packages/web` の `dist/`）を配る。`/` は `index.html` である。無いファイルは `404`。
-- `/manifest.webmanifest` は backend がその場で作る。名前はエージェントの名前、アイコンは設定のアイコン（無ければ build の `icon.svg`）である。ホーム画面に置いて開くため（PWA）。
+- `/manifest.webmanifest` は backend がその場で作る。名前はエージェントの名前、アイコンはアバターの `neutral` の画像（無ければ build の `icon.svg`）である。ホーム画面に置いて開くため（PWA）。
 - `assets/` の下のファイルは中身で名前が決まるので、長く cache させる。ほかは毎回確かめさせる。
 
 ## 承認（後の波）

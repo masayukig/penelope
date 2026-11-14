@@ -35,8 +35,12 @@ export type Config = {
   webDir: string;
 };
 
-/** What the UI shows of the agent: the deployment's, never the code's (ADR-0001). */
-export type AgentSettings = { name: string; iconFile: string | undefined };
+/**
+ * What the UI shows of the agent: the deployment's, never the code's
+ * (ADR-0001). `icons` holds the file of each face of her avatar, by
+ * expression; none when no avatar is chosen.
+ */
+export type AgentSettings = { name: string; icons: Readonly<Record<string, string>> };
 
 /** The image types an icon may be, by its extension. */
 export const ICON_TYPES: Readonly<Record<string, string>> = {
@@ -132,10 +136,7 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
     };
   }
 
-  const iconFile = get("PENELOPE_AGENT_ICON_FILE");
-  if (iconFile !== undefined && ICON_TYPES[path.extname(iconFile).toLowerCase()] === undefined) {
-    throw new ConfigError(`PENELOPE_AGENT_ICON_FILE must end in one of ${Object.keys(ICON_TYPES).join(", ")}`);
-  }
+  const avatar = avatarOf(get("PENELOPE_AVATARS_DIR") ?? "/app/avatars", get("PENELOPE_AVATAR"), readFile);
 
   return {
     databasePath: get("PENELOPE_DATABASE") ?? "/var/lib/penelope/backend.sqlite",
@@ -169,9 +170,35 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
       name: get("PENELOPE_GIT_AUTHOR_NAME") ?? "penelope-backend",
       email: get("PENELOPE_GIT_AUTHOR_EMAIL") ?? "backend@penelope.invalid",
     },
-    agent: { name: get("PENELOPE_AGENT_NAME") ?? "Agent", iconFile },
+    agent: { name: get("PENELOPE_AGENT_NAME") ?? avatar?.name ?? "Agent", icons: avatar?.icons ?? {} },
     webDir: get("PENELOPE_WEB_DIR") ?? "/app/web",
   };
+}
+
+/**
+ * The avatar named `id` under `dir`: its avatar.json gives her name and the
+ * image of each face, relative to its own directory.
+ */
+function avatarOf(dir: string, id: string | undefined, readFile: (file: string) => string): { name: string | undefined; icons: Record<string, string> } | undefined {
+  if (id === undefined) return undefined;
+  if (!/^[a-z0-9][a-z0-9._-]*$/.test(id)) throw new ConfigError("PENELOPE_AVATAR must be the name of a directory: lower-case letters, digits, ., _ and -");
+  const root = path.resolve(dir, id);
+  const file = path.join(root, "avatar.json");
+  let avatar: { name?: unknown; icons?: unknown };
+  try {
+    avatar = JSON.parse(readFile(file)) as typeof avatar;
+  } catch (error) {
+    throw new ConfigError(`PENELOPE_AVATAR: ${file} cannot be read: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const icons: Record<string, string> = {};
+  for (const [expression, relative] of Object.entries((avatar.icons ?? {}) as Record<string, unknown>)) {
+    const icon = typeof relative === "string" ? path.resolve(root, relative) : "";
+    if (!icon.startsWith(`${root}${path.sep}`) || ICON_TYPES[path.extname(icon).toLowerCase()] === undefined) {
+      throw new ConfigError(`PENELOPE_AVATAR: the icon of ${expression} in ${file} must be an image inside ${root}`);
+    }
+    icons[expression] = icon;
+  }
+  return { name: typeof avatar.name === "string" && avatar.name.trim() !== "" ? avatar.name.trim() : undefined, icons };
 }
 
 /** `host:port`, the host in brackets when it is IPv6. */

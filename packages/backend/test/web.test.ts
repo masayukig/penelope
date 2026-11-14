@@ -8,7 +8,7 @@ import { close, listenTcp } from "../src/http.ts";
 import { webHandler } from "../src/web.ts";
 import { ask, tempDir } from "./support.ts";
 
-async function setup(t: { after: (fn: () => void | Promise<void>) => void }, { built = true, iconFile = undefined as string | undefined } = {}) {
+async function setup(t: { after: (fn: () => void | Promise<void>) => void }, { built = true, icons = {} as Record<string, string> } = {}) {
   const root = tempDir(t);
   const dir = path.join(root, "web");
   mkdirSync(dir);
@@ -20,7 +20,7 @@ async function setup(t: { after: (fn: () => void | Promise<void>) => void }, { b
     writeFileSync(path.join(dir, "assets", "app.css"), "body{}");
     writeFileSync(path.join(dir, "icon.svg"), "<svg/>");
   }
-  const server = await listenTcp(webHandler({ dir, agent: { name: "Iris", iconFile } }), "127.0.0.1", 0);
+  const server = await listenTcp(webHandler({ dir, agent: { name: "Iris", icons } }), "127.0.0.1", 0);
   t.after(() => close(server));
   return { target: { port: (server.address() as AddressInfo).port } };
 }
@@ -72,12 +72,12 @@ describe("the Web UI's files", () => {
     assert.deepEqual(manifest.icons.map((icon: { src: string }) => icon.src), ["/icon.svg"]);
   });
 
-  it("puts the icon from the settings in the manifest when there is one", async (t) => {
-    const { target } = await setup(t, { iconFile: "/config/face.png" });
+  it("puts the avatar's neutral face in the manifest when there is one", async (t) => {
+    const { target } = await setup(t, { icons: { neutral: "/avatars/iris/icons/neutral.webp", happy: "/avatars/iris/icons/happy.webp" } });
     const manifest = (await ask(target, "/manifest.webmanifest")).json();
     assert.deepEqual(
       manifest.icons.map((icon: { src: string; type: string }) => [icon.src, icon.type]),
-      [["/api/agent/icon", "image/png"]],
+      [["/api/agent/icons/neutral", "image/webp"]],
     );
   });
 });

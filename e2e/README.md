@@ -50,7 +50,7 @@ make e2e
 
 `test/e2e.test.ts` が、1 つの Pod で順に通す。
 
-1. GitHub の OAuth でログインする。backend が Web UI の build（ページ、script、styles）を配り、エージェントの名前（`/api/agent` と manifest）が設定から来る。メッセージを送る。sandbox の runner がターンを回し、返事が履歴と流れ（SSE）に届く。途中経過（`turn_start`・`tool_call`・`tool_result`・`message`・`turn_end`）と状態（`thinking`・`waiting`）が流れに乗る。モデルにはサロゲートではなく本物の鍵が届く。
+1. GitHub の OAuth でログインする。backend が Web UI の build（ページ、script、styles）を配り、エージェントの名前（`/api/agent` と manifest）と、選んだアバターの表情の画像が設定から来る。メッセージを送る。sandbox の runner がターンを回し、返事が履歴と流れ（SSE）に届く。途中経過（`turn_start`・`tool_call`・`tool_result`・`message`・`turn_end`）と状態（`thinking`・`waiting`）が流れに乗る。モデルにはサロゲートではなく本物の鍵が届く。
 2. ターンの終わりに `/memory` がコミットされる（`Turn <turn_id>` と `Agent: main`）。sandbox は `/memory/.git` に書けず、履歴は読める。
 3. 2 つめのターンのモデルへの入力で、1 つめのターンが畳まれている（出来事・地の文・`reply` は残り、ほかの呼び出しは 1 行、道具の出力は無い）。
 4. sandbox の外向きが Sentinel を通り、記録に残る。素通し（`plain.example.net`）、開く宛先（モデルと backend）、名前解決、登録の無いホストへのサロゲート・リンクローカル・受け口へ直に届いた通信を断る。sandbox の loopback は向け直されず、記録にも残らない。

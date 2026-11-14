@@ -19,7 +19,7 @@ import type { LoginSessions, Session } from "./login/sessions.ts";
 import type { Queue } from "./queue.ts";
 import type { Attachment } from "./sources.ts";
 import { iso } from "./time.ts";
-import { AGENT_ICON_PATH } from "./web.ts";
+import { AGENT_ICONS_PATH } from "./web.ts";
 
 export const SESSION_COOKIE = "penelope_session";
 /** A message with its files: 64 MiB in all by default. */
@@ -93,22 +93,27 @@ export function uiHandler(options: UiOptions): Handler {
     // Read without a login: the login screen and the home screen show who
     // she is. Nothing else is here (docs/ui-api.md).
     if (route === "GET /api/agent") {
-      sendJson(response, 200, {
-        name: agent.name,
-        ...(agent.iconFile === undefined ? {} : { icon: AGENT_ICON_PATH }),
-      } satisfies AgentResponse);
+      const icons = Object.fromEntries(Object.keys(agent.icons).map((expression) => [expression, `${AGENT_ICONS_PATH}${encodeURIComponent(expression)}`]));
+      sendJson(response, 200, { name: agent.name, ...(Object.keys(icons).length === 0 ? {} : { icons }) } satisfies AgentResponse);
       return;
     }
-    if (route === `GET ${AGENT_ICON_PATH}`) {
-      if (agent.iconFile === undefined) throw new HttpError(404, "no icon is set");
+    if (request.method === "GET" && url.pathname.startsWith(AGENT_ICONS_PATH)) {
+      let expression = "";
+      try {
+        expression = decodeURIComponent(url.pathname.slice(AGENT_ICONS_PATH.length));
+      } catch {
+        // Not a name of any face: answered as one that is not there.
+      }
+      const file = Object.hasOwn(agent.icons, expression) ? agent.icons[expression] : undefined;
+      if (file === undefined) throw new HttpError(404, "no such face");
       let body: Buffer;
       try {
-        body = await readFile(agent.iconFile);
+        body = await readFile(file);
       } catch {
-        throw new HttpError(404, "the icon cannot be read");
+        throw new HttpError(404, "the face cannot be read");
       }
       response.writeHead(200, {
-        "content-type": ICON_TYPES[path.extname(agent.iconFile).toLowerCase()] ?? "application/octet-stream",
+        "content-type": ICON_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream",
         "content-length": body.length,
         "cache-control": "no-cache",
       });

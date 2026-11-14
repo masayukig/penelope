@@ -63,7 +63,7 @@ async function setup(
   {
     configured = true,
     publicUrl = "http://penelope.example.com",
-    agent = { name: "Iris", iconFile: undefined as string | undefined },
+    agent = { name: "Iris", icons: {} as Record<string, string> },
   } = {},
 ) {
   const dir = tempDir(t);
@@ -307,30 +307,33 @@ describe("the UI's API", () => {
   // anyone signs in, and the name comes from the settings (ADR-0001).
   describe("the agent", () => {
     it("is named from the settings, without a session", async (t) => {
-      const env = await setup(t, { agent: { name: "Iris", iconFile: undefined } });
+      const env = await setup(t, { agent: { name: "Iris", icons: {} } });
       const answer = await env.call("/api/agent", undefined);
       assert.equal(answer.status, 200);
       assert.deepEqual(answer.json(), { name: "Iris" });
-      assert.equal((await env.call("/api/agent/icon", undefined)).status, 404);
+      assert.equal((await env.call("/api/agent/icons/neutral", undefined)).status, 404);
     });
 
-    it("serves the icon the settings point to, without a session", async (t) => {
+    // The avatar changes its face with the expression of her replies (ADR-0016).
+    it("serves each face of the avatar the settings chose, without a session", async (t) => {
       const dir = tempDir(t);
-      const iconFile = path.join(dir, "face.png");
-      const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-      writeFileSync(iconFile, png);
-      const env = await setup(t, { agent: { name: "Iris", iconFile } });
+      const faces = { neutral: Buffer.from("RIFF-neutral"), happy: Buffer.from("RIFF-happy") };
+      for (const [name, body] of Object.entries(faces)) writeFileSync(path.join(dir, `${name}.webp`), body);
+      const icons = { neutral: path.join(dir, "neutral.webp"), happy: path.join(dir, "happy.webp") };
+      const env = await setup(t, { agent: { name: "Iris", icons } });
       const agent = (await env.call("/api/agent", undefined)).json();
-      assert.equal(agent.name, "Iris");
-      const icon = await env.call(agent.icon, undefined);
-      assert.equal(icon.status, 200);
-      assert.equal(icon.headers["content-type"], "image/png");
-      assert.equal(icon.text, png.toString("utf8"));
+      assert.deepEqual(Object.keys(agent.icons).sort(), ["happy", "neutral"]);
+      const happy = await env.call(agent.icons.happy, undefined);
+      assert.equal(happy.status, 200);
+      assert.equal(happy.headers["content-type"], "image/webp");
+      assert.equal(happy.text, "RIFF-happy");
+      assert.equal((await env.call("/api/agent/icons/angry", undefined)).status, 404);
     });
 
     it("gives nothing else away without a session", async (t) => {
       const env = await setup(t);
       assert.equal((await env.call("/api/agent/other", undefined)).status, 401);
+      assert.equal((await env.call("/api/agent/icons/../../history", undefined)).status, 401);
     });
   });
 
