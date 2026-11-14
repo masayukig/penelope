@@ -8,3 +8,16 @@ sandbox から外へ出る通信は、返事も含めてすべて Sentinel を�
 出来事（オーナーの発言、Slack、webhook、予約した時刻、ほかのエージェントからの頼み）は backend の 1 つの取り込み口に集まり、記憶は git の Markdown として育ちます。
 
 設計の判断は [docs/adr/](docs/adr/README.md) にあります。
+
+## 開発
+
+入口は `Makefile` です。ターゲットの一覧は `make help` で出ます。
+
+```sh
+make help
+make test     # Go と TypeScript の単体テスト（それぞれのツールチェーンだけで通る）
+make images   # Dockerfile の target ごとの image
+```
+
+Go（Sentinel）と Node（ほかの部品）の版は、`go.mod` と `.github/workflows/ci.yml` の `setup-node` にあります。
+リポジトリの形とテストの層は [AGENTS.md](AGENTS.md) にあります。
