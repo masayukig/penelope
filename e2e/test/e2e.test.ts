@@ -140,6 +140,23 @@ describe("the Pod end to end", () => {
     await stream.open(browser.cookie!);
   }));
 
+  it("serves the Web UI from the backend, named from the settings", track(async () => {
+    // Guards against: the backend's image without the built UI, or the UI not learning the agent's name from the settings.
+    const page = await browser.request("/");
+    assert.equal(page.status, 200);
+    assert.match(page.headers["content-type"] ?? "", /^text\/html/);
+    const script = /src="(\/assets\/[^"]+\.js)"/.exec(page.text)?.[1];
+    const styles = /href="(\/assets\/[^"]+\.css)"/.exec(page.text)?.[1];
+    assert.ok(script && styles, "the page loads its script and its styles");
+    for (const asset of [script, styles]) assert.equal((await browser.request(asset)).status, 200, asset);
+    // The login screen and the home screen read these before anyone signs in.
+    const agent = new Browser().json<{ name: string }>("/api/agent");
+    assert.equal(agent.status, 200);
+    assert.equal(agent.body.name, "E2E Agent");
+    const manifest = JSON.parse((await new Browser().request("/manifest.webmanifest")).text) as { name: string };
+    assert.equal(manifest.name, "E2E Agent");
+  }));
+
   it("makes a turn of the owner's message and streams the reply and what happened", track(async () => {
     // Guards against: a message not reaching a turn, the reply or the activity not reaching the UI, or the model getting the surrogate.
     await send("E2E-TURN-1 こんにちは");
