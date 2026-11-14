@@ -41,7 +41,7 @@ async function setup(t: { after: (fn: () => void | Promise<void>) => void }, tok
   const schedules = new Schedules(db, { now: Date.now, timeZone: "UTC" });
   const socketPath = path.join(dir, "sandbox.sock");
   const server = await listenUnix(
-    sandboxHandler({ token, queue, conversation, schedules, memory, now: Date.now }),
+    sandboxHandler({ token, queue, conversation, schedules, memory, now: Date.now, log: () => {} }),
     socketPath,
   );
   t.after(async () => {

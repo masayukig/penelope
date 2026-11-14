@@ -24,7 +24,7 @@ async function setup(t: { after: (fn: () => void | Promise<void>) => void }, max
     redeliverMs: 300_000,
   });
   const socketPath = path.join(dir, "intake.sock");
-  const server = await listenUnix(intakeHandler(queue, maxBytes === undefined ? {} : { maxBytes }), socketPath);
+  const server = await listenUnix(intakeHandler(queue, { log: () => {}, ...(maxBytes === undefined ? {} : { maxBytes }) }), socketPath);
   t.after(async () => {
     await new Promise((resolve) => server.close(resolve));
     db.close();

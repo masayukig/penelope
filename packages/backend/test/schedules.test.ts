@@ -25,7 +25,7 @@ function setup(t: { after: (fn: () => void) => void }, start = "2026-11-14T08:30
     redeliverMs: 300_000,
   });
   const schedules = new Schedules(db, { now: clock.now, timeZone: "UTC" });
-  const scheduler = new Scheduler(schedules, queue, { now: clock.now, timeZone: "UTC", nightly: "0 4 * * *" });
+  const scheduler = new Scheduler(schedules, queue, { now: clock.now, timeZone: "UTC", nightly: "0 4 * * *", log: () => {} });
   return { clock, queue, schedules, scheduler, sourcesDir };
 }
 
@@ -162,5 +162,5 @@ function setupAgain(t: { after: (fn: () => void) => void }, clock: FakeClock, qu
   const db = openDatabase(":memory:");
   t.after(() => db.close());
   const schedules = new Schedules(db, { now: clock.now, timeZone: "UTC" });
-  return { scheduler: new Scheduler(schedules, queue, { now: clock.now, timeZone: "UTC", nightly: "0 4 * * *" }) };
+  return { scheduler: new Scheduler(schedules, queue, { now: clock.now, timeZone: "UTC", nightly: "0 4 * * *", log: () => {} }) };
 }
