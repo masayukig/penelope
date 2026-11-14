@@ -81,6 +81,7 @@ penelope では Pi が sandbox の中で動く（ADR-0001）。出来事を sand
 - Related: ADR-0008 プロンプトは事実と環境だけを伝え、やり方は任せる
 - Related: ADR-0009 最初の UI は Web だけにし、新しい API と Astryx で作る
 - Related: ADR-0010 人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる
+- Related: ADR-0013 出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す
 
 ## References
 
