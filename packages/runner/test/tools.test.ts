@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { after, before, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
@@ -10,12 +10,13 @@ import { FakeBackend, TOKEN } from "./fake-backend.ts";
 let fake: FakeBackend;
 let tools: Map<string, ToolDefinition>;
 
-before(async () => {
+// Each test has a backend of its own, so that what one sent is not seen by the next.
+beforeEach(async () => {
   fake = new FakeBackend();
   const backend = new Backend({ url: await fake.url, token: TOKEN, agent: "main" });
   tools = new Map(backendTools(backend).map((tool) => [tool.name, tool]));
 });
-after(() => fake.close());
+afterEach(() => fake.close());
 
 async function call(name: string, params: Record<string, unknown>): Promise<string> {
   const tool = tools.get(name);
