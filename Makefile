@@ -53,6 +53,16 @@ build-go: ## Build the Sentinel into bin/.
 build-ts: node_modules/.package-lock.json ## Compile every npm workspace into its dist/.
 	$(NPM) run build
 
+# The targets of the Dockerfile, one image each.
+IMAGES ?= sentinel backend receivers sandbox
+
+.PHONY: images
+images: ## Build every image for this machine's platform, as penelope-<target>:$(VERSION).
+	for target in $(IMAGES); do \
+		docker build --target "$$target" --build-arg VERSION="$(VERSION)" \
+			--tag "penelope-$$target:$(VERSION)" . ; \
+	done
+
 ##@ Check
 
 # gofmt is given the module's package directories rather than `.`, so that it

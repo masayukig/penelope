@@ -1,0 +1,6 @@
+# The build stages install and compile for themselves.
+.git
+bin
+node_modules
+**/node_modules
+**/dist
