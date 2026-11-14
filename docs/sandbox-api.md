@@ -63,7 +63,7 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 ## 返事
 
 - body は `{agent, text, expression?, in_reply_to?}`。
-  - `expression`: 表情。欄だけを持つ。最初の Web UI は表示しない（[ADR-0009](adr/0009-web-ui-first-with-a-new-api-and-astryx.md)）。
+  - `expression`: 表情。Web UI はアバターをこの表情の絵で出す（[ADR-0016](adr/0016-show-the-avatar-and-expression-from-the-first-web-ui.md)）。
   - `in_reply_to`: 答えている出来事の `seq`。ターンの `<events>` の行の `seq` である（`batch` のまとめなら `seqs` の 1 つ）。
 - 応答は `201` と `{id}`。backend は会話の履歴に残し、UI の流れへ送る（[ui-api.md](ui-api.md)）。
 

@@ -36,9 +36,14 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_INLINE_SOURCES` | `ui` | inline の受信元（`,` で区切る）。`control` は書かなくても常に inline |
 | `PENELOPE_GIT_AUTHOR_NAME` | `penelope-backend` | `/memory` のコミットの作者の名前 |
 | `PENELOPE_GIT_AUTHOR_EMAIL` | `backend@penelope.invalid` | 同じくメールアドレス |
+| `PENELOPE_AVATAR` | なし | UI に出すアバターの名前。`PENELOPE_AVATARS_DIR` の下の、この名前のディレクトリを読む（[ui-api.md](ui-api.md) の「エージェント」） |
+| `PENELOPE_AVATARS_DIR` | `/app/avatars` | アバターの置き場所。image にはリポジトリの `assets/avatars/` が入っている |
+| `PENELOPE_AGENT_NAME` | アバターの名前、それも無ければ `Agent` | UI に出すエージェントの名前。アバターの `avatar.json` の名前より優先する |
+| `PENELOPE_WEB_DIR` | `/app/web` | Web UI の build の場所。image ではここに入っている |
 
 - GitHub のログインは、`PENELOPE_GITHUB_CLIENT_ID`・`PENELOPE_GITHUB_CLIENT_SECRET_FILE`・`PENELOPE_OWNER_GITHUB_ID` の 3 つと `PENELOPE_PUBLIC_URL` が揃ったときだけ動く。3 つのどれも無ければ、ログインは無く、誰も入れない（[ADR-0010](adr/0010-github-oauth-for-people-tokenreview-for-a2a.md)）。一部だけあるときは、設定の誤りとして起動しない。
 - 数は分の整数で、0 より大きいもの。
+- アバターのディレクトリは `avatar.json` を持つ。`avatar.json` は、名前（`name`）と、表情ごとのアイコンの画像の場所（`icons`、ディレクトリからの相対の場所）を持つ。画像の拡張子は `.png`・`.jpg`・`.jpeg`・`.gif`・`.webp`・`.svg` のどれかで、ディレクトリの外は指せない。読めないとき、形が違うときは起動しない。
 - `batch` の待ちは、N・M のほか、`now` の出来事を初めて渡すときにも終わる。そのとき待っている `batch` の出来事は、起きている時間の外でも、`now` の出来事と一緒に渡す（[events.md](events.md) の「いつ渡すか」）。
 
 ## 状態

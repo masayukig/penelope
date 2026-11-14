@@ -19,7 +19,12 @@ export function backendTools(backend: Backend): ToolDefinition[] {
       "Send a message to your owner. It is the only way your words reach them; the text of your turn is not shown to anyone.",
     parameters: Type.Object({
       text: Type.String({ description: "The message." }),
-      expression: Type.Optional(Type.String({ description: "The expression of your face as you say it." })),
+      expression: Type.Optional(
+        Type.String({
+          description:
+            "The expression of your face as you say it. The owner's screen has a face for each of: neutral, happy, laughing, surprised, thinking, worried, sad, sleepy, angry.",
+        }),
+      ),
       in_reply_to: Type.Optional(Type.Integer({ description: "The seq of the event this answers." })),
     }),
     async execute(_id, params) {

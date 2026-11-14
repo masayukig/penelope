@@ -1,0 +1,356 @@
+/* Astryx's layers in their order, then what the screens add
+   (docs/design/README.md). The theme is neutral; the one override is the
+   Japanese faces after its Figtree, which has no Japanese glyphs (9). */
+@import "@astryxdesign/core/reset.css";
+@import "@astryxdesign/core/astryx.css";
+@import "@astryxdesign/theme-neutral/theme.css";
+@import "@astryxdesign/theme-neutral/fonts.css";
+
+:root {
+  --font-family-body: Figtree, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  --font-family-heading: Figtree, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-background-body);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-body);
+}
+
+.muted {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+/* The avatar with its expression under it. */
+.agent-avatar {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The state: a dot and its word. */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-secondary);
+}
+.status-large {
+  color: var(--color-text-primary);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+/* PC */
+.desktop-main {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.desktop-header {
+  flex: none;
+  height: 56px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.agent-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 4px 10px 4px 12px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.agent-toggle:hover {
+  background: var(--color-neutral);
+}
+.agent-toggle-name {
+  font-weight: 600;
+  font-size: 16px;
+}
+.talk {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The agent now: the right panel and the phone's sheet. */
+.agent-now {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.stage {
+  padding: 24px 0 16px;
+  display: flex;
+  justify-content: center;
+  border-radius: var(--radius-container);
+  background: var(--color-background-body);
+}
+.approvals h2 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.now {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.now-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.now-agent {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+.flow {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.flow-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.flow-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.flow-tool {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+.flow-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+.flow-divider::before,
+.flow-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+.flow-interrupt {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: var(--radius-element);
+  background: var(--color-info-muted);
+  color: var(--color-on-info-muted);
+}
+.flow-interrupt .flow-label {
+  color: inherit;
+}
+.folded {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+.folded.open {
+  display: block;
+}
+
+/* The timeline */
+.reply-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.reply-name strong {
+  color: var(--color-text-primary);
+}
+.owner-text {
+  white-space: pre-wrap;
+}
+.owner-files {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.owner-image {
+  width: 200px;
+  height: 128px;
+}
+.dots {
+  display: inline-flex;
+  gap: 5px;
+  padding: 6px 0;
+}
+.dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--color-text-secondary);
+  animation: dots 1.2s infinite ease-in-out;
+}
+.dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes dots {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dots span {
+    animation: none;
+  }
+}
+
+/* The field */
+.composer-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.composer-files {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 4px;
+}
+.composer-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Phone */
+.phone {
+  position: relative;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  font-size: 16px;
+}
+.phone .talk {
+  padding-top: 132px;
+}
+.phone-float {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: calc(env(safe-area-inset-top) + 8px) 8px 0;
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: start;
+  justify-items: center;
+  pointer-events: none;
+}
+.phone-float > * {
+  pointer-events: auto;
+}
+.phone-avatar {
+  display: flex;
+  justify-content: center;
+  min-height: 44px;
+  padding: 2px 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  filter: drop-shadow(0 4px 8px rgb(0 0 0 / 15%));
+}
+.status-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--color-neutral);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.status-strip .status {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+.status-strip-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-code);
+  font-size: 12px;
+}
+
+/* Login */
+.login {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+.login h1 {
+  margin: 0 0 16px;
+  font-size: 28px;
+  font-weight: 600;
+}

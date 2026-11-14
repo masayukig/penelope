@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -59,7 +60,11 @@ async function fakeGitHub(t: { after: (fn: () => Promise<void>) => void }) {
 
 async function setup(
   t: { after: (fn: () => void | Promise<void>) => void },
-  { configured = true, publicUrl = "http://penelope.example.com" } = {},
+  {
+    configured = true,
+    publicUrl = "http://penelope.example.com",
+    agent = { name: "Iris", icons: {} as Record<string, string> },
+  } = {},
 ) {
   const dir = tempDir(t);
   const db = openDatabase(path.join(dir, "backend.sqlite"));
@@ -81,7 +86,7 @@ async function setup(
     : undefined;
   const login = new GitHubLogin({ settings, endpoints: github.endpoints, sessions, now: Date.now, log: () => {} });
   const server = await listenTcp(
-    uiHandler({ queue, conversation, feed, login, sessions, ownerId: settings?.ownerId, publicUrl, now: Date.now }),
+    uiHandler({ queue, conversation, feed, login, sessions, ownerId: settings?.ownerId, publicUrl, agent, now: Date.now }),
     "127.0.0.1",
     0,
   );
@@ -295,6 +300,40 @@ describe("the UI's API", () => {
       await reader.open(env.target, "/api/stream", { cookie: env.signIn(), "last-event-id": "1" });
       await reader.waitFor(1);
       assert.deepEqual(reader.events.map((e) => e.id), ["2"]);
+    });
+  });
+
+  // The login screen and the home screen's icon show who she is before
+  // anyone signs in, and the name comes from the settings (ADR-0001).
+  describe("the agent", () => {
+    it("is named from the settings, without a session", async (t) => {
+      const env = await setup(t, { agent: { name: "Iris", icons: {} } });
+      const answer = await env.call("/api/agent", undefined);
+      assert.equal(answer.status, 200);
+      assert.deepEqual(answer.json(), { name: "Iris" });
+      assert.equal((await env.call("/api/agent/icons/neutral", undefined)).status, 404);
+    });
+
+    // The avatar changes its face with the expression of her replies (ADR-0016).
+    it("serves each face of the avatar the settings chose, without a session", async (t) => {
+      const dir = tempDir(t);
+      const faces = { neutral: Buffer.from("RIFF-neutral"), happy: Buffer.from("RIFF-happy") };
+      for (const [name, body] of Object.entries(faces)) writeFileSync(path.join(dir, `${name}.webp`), body);
+      const icons = { neutral: path.join(dir, "neutral.webp"), happy: path.join(dir, "happy.webp") };
+      const env = await setup(t, { agent: { name: "Iris", icons } });
+      const agent = (await env.call("/api/agent", undefined)).json();
+      assert.deepEqual(Object.keys(agent.icons).sort(), ["happy", "neutral"]);
+      const happy = await env.call(agent.icons.happy, undefined);
+      assert.equal(happy.status, 200);
+      assert.equal(happy.headers["content-type"], "image/webp");
+      assert.equal(happy.text, "RIFF-happy");
+      assert.equal((await env.call("/api/agent/icons/angry", undefined)).status, 404);
+    });
+
+    it("gives nothing else away without a session", async (t) => {
+      const env = await setup(t);
+      assert.equal((await env.call("/api/agent/other", undefined)).status, 401);
+      assert.equal((await env.call("/api/agent/icons/../../history", undefined)).status, 401);
     });
   });
 

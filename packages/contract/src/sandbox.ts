@@ -59,7 +59,7 @@ export type SelfEventRequest = FromAgent & { id: string; summary: string; payloa
 /** `POST /v1/replies`: a reply to the owner. */
 export type ReplyRequest = FromAgent & {
   text: string;
-  /** The face to show. Only the field for now; the avatar comes later. */
+  /** The face to show: the Web UI puts the latest one beside the avatar (ADR-0016). */
   expression?: string;
   /** The `seq` of the event it answers. */
   in_reply_to?: number;
