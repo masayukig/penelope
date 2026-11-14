@@ -1,5 +1,5 @@
-// The tools that reach the backend: the reply to the owner, her schedules and
-// events to herself. Each only calls the backend's API (docs/sandbox-api.md);
+// The tools that reach the backend: the reply to the owner, the answer to an
+// agent that asked over A2A, her schedules and events to herself. Each only calls the backend's API (docs/sandbox-api.md);
 // their descriptions state what they do (ADR-0008).
 
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -30,6 +30,24 @@ export function backendTools(backend: Backend): ToolDefinition[] {
     async execute(_id, params) {
       const { id } = await backend.reply(params);
       return text(`Sent (id ${id}).`);
+    },
+  });
+
+  const replyToAgent = defineTool({
+    name: "reply_to_agent",
+    label: "Reply to an agent",
+    description:
+      "Answer another agent in the A2A task of an `a2a` event. The event's stream is the agent's name, and its payload has the agent's text and the task. `completed` closes the task, with the text as its answer when you give one. `input-required` asks the agent the text and keeps the task open; the agent's answer comes as another `a2a` event of the same task. The agent fetches what you send from its task; your owner does not see it. A task the agent has not written to within the backend's deadline fails, and can no longer be answered.",
+    parameters: Type.Object({
+      in_reply_to: Type.Integer({ description: "The seq of an `a2a` event of the task." }),
+      state: Type.Union([Type.Literal("completed"), Type.Literal("input-required")], {
+        description: "completed: close the task. input-required: ask the agent, and wait for its answer.",
+      }),
+      text: Type.Optional(Type.String({ description: "The answer, or the question. Needed for input-required." })),
+    }),
+    async execute(_id, params) {
+      const task = await backend.a2aReply(params);
+      return text(`Sent: the task is ${task.state}.`);
     },
   });
 
@@ -91,5 +109,5 @@ export function backendTools(backend: Backend): ToolDefinition[] {
     },
   });
 
-  return [reply, scheduleAdd, scheduleList, scheduleRemove, selfEvent] as ToolDefinition[];
+  return [reply, replyToAgent, scheduleAdd, scheduleList, scheduleRemove, selfEvent] as ToolDefinition[];
 }

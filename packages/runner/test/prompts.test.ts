@@ -112,3 +112,11 @@ test("the system prompt says what the fields of <events> are", async () => {
     assert.ok(prompt.includes(`\`${field}\``), field);
   }
 });
+
+test("the system prompt says that other agents ask over A2A and how they are answered", async () => {
+  // Guards against: an \`a2a\` event she cannot tell from the others, or an agent answered with \`reply\`, which only her owner reads.
+  const places = await memory({});
+  const prompt = systemPrompt(identity, places, await readPromptFiles(places.memory, 1000));
+  assert.ok(prompt.includes("`a2a`"));
+  assert.ok(prompt.includes("`reply_to_agent`"));
+});

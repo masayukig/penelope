@@ -139,6 +139,10 @@ export class FakeBackend {
       return answer(204);
     }
     if (key === "POST /v1/replies") return answer(201, { id: `r-${++this.replies}` });
+    if (key === "POST /v1/a2a/replies") {
+      const { in_reply_to, state } = body as { in_reply_to: number; state: string };
+      return in_reply_to === 404 ? answer(404, { error: "the event 404 is not a message of an A2A task" }) : answer(200, { task_id: "t-1", state });
+    }
     if (key === "POST /v1/schedules") {
       const { agent, reason, cron, at } = body as Schedule;
       const schedule = { id: `s-${this.schedules.length + 1}`, agent, reason, ...(cron ? { cron } : { at }) } as Schedule;

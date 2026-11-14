@@ -181,6 +181,14 @@ test("a compaction summary passes as it is", () => {
   assert.deepEqual(roles(messages), ["compactionSummary", "assistant", "user"]);
 });
 
+test("an ended turn keeps her answers to other agents whole, as it keeps her replies", () => {
+  // Guards against: what she told an agent over A2A folded away, so that she forgets she answered it.
+  const answer = call("call_9", "reply_to_agent", { in_reply_to: 7, state: "completed", text: "Two alerts, both resolved." });
+  const { messages } = foldTurns([user("go"), assistant(answer), result("call_9", "reply_to_agent", "Sent: the task is completed."), marker()]);
+  assert.deepEqual((messages[1] as { content: unknown }).content, [answer]);
+  assert.deepEqual((messages[2] as { content: unknown }).content, [{ type: "text", text: "Sent: the task is completed." }]);
+});
+
 test("a reply that has no result is folded like any other call", () => {
   const { messages } = foldTurns([user("go"), assistant(call("c1", "reply", { text: "hi" })), marker()]);
   // Guards against: a tool call left without its result, which a provider refuses.
