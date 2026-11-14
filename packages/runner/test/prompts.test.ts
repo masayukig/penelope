@@ -95,3 +95,13 @@ test("the request before folding names no way to answer it", () => {
     "This turn is about to be folded. Write anything from it you want to keep. No tool runs while you answer.",
   );
 });
+
+test("the system prompt says what the fields of <events> are", async () => {
+  // Guards against: an input of JSON lines whose fields she has to guess, such as which number `reply` answers to.
+  const places = await memory({});
+  const prompt = systemPrompt(identity, places, await readPromptFiles(places.memory, 1000));
+  assert.match(prompt, /<events>/);
+  for (const field of ["seq", "source", "stream", "delivery", "occurred_at", "summary", "text", "attachments", "appended", "kind", "count", "seqs", "in_reply_to"]) {
+    assert.ok(prompt.includes(`\`${field}\``), field);
+  }
+});

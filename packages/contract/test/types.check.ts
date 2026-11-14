@@ -25,7 +25,10 @@ import type {
   SessionRotatedRequest,
   SourcesLine,
   StreamEvent,
+  TurnBatch,
   TurnEndRequest,
+  TurnEvent,
+  TurnLine,
 } from "../src/index.ts";
 
 // --- The envelope (docs/events.md) ---
@@ -165,6 +168,50 @@ export const schedules = { schedules: [schedule] } satisfies ScheduleListRespons
 export const rotated = { agent: "main" } satisfies SessionRotatedRequest;
 
 export const error = { error: "seqs must be a list of integers" } satisfies ErrorBody;
+
+// --- The input of a turn (docs/events.md, "ターンに入る形") ---
+
+export const turnNotice = {
+  seq: 12,
+  source: "slack",
+  stream: "ops",
+  delivery: "now",
+  occurred_at: "2026-11-14T09:00:00Z",
+  summary: "#ops: a mention",
+  appended: { path: "/sources/slack/ops/2026-11-14.jsonl", lines: [3, 3] },
+} satisfies TurnEvent;
+
+export const turnInline = {
+  seq: 13,
+  source: "ui",
+  delivery: "now",
+  occurred_at: "2026-11-14T09:01:00Z",
+  summary: "hello",
+  text: "hello",
+  attachments: [{ path: "/sources/ui/files/13-screenshot.png", mime_type: "image/png", size: 48213 }],
+} satisfies TurnEvent;
+
+export const turnBatch = {
+  kind: "batch",
+  source: "slack",
+  stream: "ops",
+  count: 2,
+  seqs: [20, 22],
+  summary: "message 20\nmessage 22",
+  appended: [{ path: "/sources/slack/ops/2026-11-14.jsonl", lines: [4, 5] }],
+} satisfies TurnBatch;
+
+export const turnLines = [turnNotice, turnInline, turnBatch, { ...turnNotice, agent: "main" }] satisfies TurnLine[];
+
+// @ts-expect-error an event carries its text or where it was appended, not both
+export const turnBoth = { ...turnNotice, text: "hello" } satisfies TurnEvent;
+const { appended: _appended, ...appendedLeftOut } = turnNotice;
+// @ts-expect-error an event carries one of them
+export const turnNeither = appendedLeftOut satisfies TurnEvent;
+// @ts-expect-error a batch names the seq of each event in it
+export const batchWithoutSeqs = { ...turnBatch, seqs: undefined } satisfies TurnBatch;
+// @ts-expect-error a single event is not a batch
+export const eventAsBatch = { ...turnNotice, kind: "batch" } satisfies TurnLine;
 
 // --- The UI's API (docs/ui-api.md) ---
 
