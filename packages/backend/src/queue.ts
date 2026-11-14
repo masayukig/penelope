@@ -198,9 +198,18 @@ export class Queue {
     return awake.isAwake(end) ? end : awake.nextStart(end);
   }
 
+  /**
+   * Releases the held batch when it is due, or when a now event is about to
+   * be handed over for the first time: the batch then goes with it, whatever
+   * the time, so that the turn sees what led up to it.
+   */
   private releaseBatch(now: number): void {
     const end = this.batchEnd();
-    if (end !== undefined && end <= now) {
+    if (end === undefined) return;
+    const nowWaiting = this.db
+      .prepare("SELECT 1 FROM events WHERE delivery = 'now' AND delivered_ms IS NULL AND acked_ms IS NULL LIMIT 1")
+      .get();
+    if (end <= now || nowWaiting !== undefined) {
       this.db.prepare("UPDATE events SET due_ms = ? WHERE delivery = 'batch' AND due_ms IS NULL").run(now);
     }
   }

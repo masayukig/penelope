@@ -239,21 +239,43 @@ describe("the queue", () => {
       assert.deepEqual(seqs(queue.take({ after: 0 })), [1, 2]);
     });
 
-    it("does not hold back a now event that came after it", (t) => {
+    it("goes with a now event, in seq order, when one comes while it is held", (t) => {
       const { queue } = setup(t);
-      queue.accept(event());
-      queue.accept(event({ delivery: "now" }));
-      assert.deepEqual(seqs(queue.take({ after: 0 })), [2]);
+      queue.accept(event({ source: "slack", stream: "ops" }));
+      queue.accept(event({ source: "github" }));
+      queue.accept(event({ source: "slack", stream: "ops", delivery: "now" }));
+      assert.deepEqual(seqs(queue.take({ after: 0 })), [1, 2, 3]);
     });
 
-    it("is handed over even when the runner already took a later seq", (t) => {
-      const { queue, clock } = setup(t);
+    it("goes with a now event even outside the awake hours", (t) => {
+      const { queue } = setup(t, "2026-11-14T23:30:00Z");
       queue.accept(event());
+      assert.deepEqual(queue.take({ after: 0 }), []);
       queue.accept(event({ delivery: "now" }));
-      assert.deepEqual(seqs(queue.take({ after: 0 })), [2]);
-      queue.ack([2]);
+      assert.deepEqual(seqs(queue.take({ after: 0 })), [1, 2]);
+    });
+
+    it("that starts after a now event was handed over waits again", (t) => {
+      const { queue, clock } = setup(t);
+      queue.accept(event({ delivery: "now" }));
+      assert.deepEqual(seqs(queue.take({ after: 0 })), [1]);
+      queue.ack([1]);
+      queue.accept(event());
+      assert.deepEqual(queue.take({ after: 1 }), []);
       clock.advance(5);
-      assert.deepEqual(seqs(queue.take({ after: 2 })), [1]);
+      assert.deepEqual(seqs(queue.take({ after: 1 })), [2]);
+    });
+
+    it("is not sent along when a now event is only handed over again", (t) => {
+      const { queue, clock } = setup(t);
+      queue.accept(event({ delivery: "now" }));
+      queue.take({ after: 0 });
+      queue.accept(event());
+      // The runner restarted: the now event comes again, the batch keeps waiting.
+      assert.deepEqual(seqs(queue.take({ after: 0 })), [1]);
+      queue.ack([1]);
+      clock.advance(5);
+      assert.deepEqual(seqs(queue.take({ after: 1 })), [2]);
     });
 
     it("that would end outside the awake hours waits for the morning", (t) => {
