@@ -429,9 +429,9 @@ describe("the UI's API", () => {
     assert.equal((await env.call("/healthz", undefined)).status, 200);
   });
 
-  it("has nothing else to serve until the Web UI is built", async (t) => {
+  // What is not under /api/ is the Web UI's (web.test.ts); an API path it does not have is 404, not a page.
+  it("answers 404 to an API path it does not have", async (t) => {
     const env = await setup(t);
-    assert.equal((await env.call("/", undefined)).status, 404);
     assert.equal((await env.call("/api/nothing", env.signIn())).status, 404);
   });
 });

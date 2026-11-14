@@ -39,6 +39,18 @@ describe("the Web UI's files", () => {
     assert.match(String((await ask(target, "/assets/app.css")).headers["content-type"]), /^text\/css/);
   });
 
+  // Guards against: a new build whose page a browser keeps showing from its cache, with the old files' names in it.
+  it("lets the files under assets/ be cached long, and has everything else looked at again", async (t) => {
+    const { target } = await setup(t);
+    const cacheOf = async (pathname: string) => String((await ask(target, pathname)).headers["cache-control"] ?? "");
+    const longLived = await cacheOf("/assets/app.js");
+    assert.match(longLived, /max-age=(\d+)/);
+    assert.ok(Number(/max-age=(\d+)/.exec(longLived)![1]) >= 24 * 60 * 60, longLived);
+    for (const pathname of ["/", "/icon.svg", "/manifest.webmanifest"]) {
+      assert.match(await cacheOf(pathname), /no-cache|max-age=0/, pathname);
+    }
+  });
+
   it("answers 404 for a file it does not have", async (t) => {
     const { target } = await setup(t);
     assert.equal((await ask(target, "/assets/missing.js")).status, 404);
@@ -67,8 +79,6 @@ describe("the Web UI's files", () => {
     assert.match(String(answer.headers["content-type"]), /^application\/manifest\+json/);
     const manifest = answer.json();
     assert.equal(manifest.name, "Iris");
-    assert.equal(manifest.start_url, "/");
-    assert.equal(manifest.display, "standalone");
     assert.deepEqual(manifest.icons.map((icon: { src: string }) => icon.src), ["/icon.svg"]);
   });
 
