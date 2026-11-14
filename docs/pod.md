@@ -80,8 +80,8 @@ Pod の中のコンテナは網の名前空間を共有するので、TCP の待
 ## CA
 
 - Sentinel の CA の公開の証明書を、sandbox のシステムの信頼の置き場に入れ、Node と Python がシステムの束を使うよう環境変数を設定する（[ADR-0003](adr/0003-all-egress-through-the-sentinel-passthrough-by-default.md) の Decision「CA は image で信頼させる」）。
+- CA の証明書と鍵は Secret に置き、Sentinel のコンテナにだけ mount する。Sentinel は設定の `ca.cert`・`ca.key` でそのファイルを読む（[sentinel-config.md](sentinel-config.md)）。CA は Pod を作り直しても変わらない。
 
 未決:
 
 - 公開の証明書を image を作るときに入れるか、起動のときに volume から足すか（sandbox の image の作業単位で決める）。
-- CA の鍵を Pod ごとに作るか、Secret に置くか（Sentinel の作業単位で決める）。前者なら、起動のときに volume から足す形になる。
