@@ -238,6 +238,25 @@ test("a directory of the owner's skills that is not there is passed over", async
   assert.ok(calls.length > 0, "a turn ran");
 });
 
+test("the agent's socket that the container is given reaches her shell", async () => {
+  // Guards against: a runner that gives the shell an environment of its own and drops
+  // SSH_AUTH_SOCK, the one way to her ssh keys (docs/pod.md, "ssh-agent").
+  const { fake, start, calls } = await world();
+  const before = process.env.SSH_AUTH_SOCK;
+  process.env.SSH_AUTH_SOCK = "/run/ssh-agent/agent.sock";
+  closers.push(async () => {
+    if (before === undefined) delete process.env.SSH_AUTH_SOCK;
+    else process.env.SSH_AUTH_SOCK = before;
+  });
+  await start((call) => {
+    if (call.lastRole === "user") return { calls: [{ tool: "bash", args: { command: 'echo "sock=$SSH_AUTH_SOCK"' } }] };
+    return { text: "done" };
+  });
+  fake.push(ui(1, "ssh?"));
+  await until(() => acked(fake).includes(1));
+  assert.ok(calls.some((c) => c.lastRole === "toolResult" && c.lastText.includes("sock=/run/ssh-agent/agent.sock")));
+});
+
 test("after a restart the session goes on, and unacked events come again", async () => {
   const { fake, start, calls } = await world();
   const stop = await start(replying);
