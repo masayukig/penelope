@@ -10,6 +10,8 @@ const files: Record<string, string> = {
   "/avatars/escape/avatar.json": JSON.stringify({ name: "Out", icons: { neutral: "../../secrets/github-secret.webp" } }),
   "/avatars/text/avatar.json": JSON.stringify({ name: "Text", icons: { neutral: "icons/neutral.txt" } }),
   "/avatars/broken/avatar.json": "{",
+  "/sa/token": "backend-sa-token\n",
+  "/sa/ca.crt": "-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n",
 };
 const read = (file: string) => {
   const content = files[file];
@@ -40,6 +42,7 @@ describe("the configuration", () => {
       gitAuthor: { name: "penelope-backend", email: "backend@penelope.invalid" },
       agent: { name: "Agent", icons: {} },
       webDir: "/app/web",
+      a2a: undefined,
     });
   });
 
@@ -142,5 +145,78 @@ describe("the configuration", () => {
   it("refuses an empty secret", () => {
     files["/secrets/empty"] = "\n";
     assert.throws(() => loadConfig({ PENELOPE_SANDBOX_TOKEN_FILE: "/secrets/empty" }, read), ConfigError);
+  });
+
+  describe("the A2A way in", () => {
+    const base = { PENELOPE_PUBLIC_URL: "https://penelope.example.com", PENELOPE_A2A_SENDERS: "agents/claude, natsumi/natsumi" };
+    const gated = { PENELOPE_A2A_AUTH: "gated-assertion", PENELOPE_A2A_GATED_ISSUER: "https://auth.example.com", PENELOPE_A2A_GATED_JWKS_URL: "https://auth.example.com/__gated/jwks.json" };
+    const cluster = { KUBERNETES_SERVICE_HOST: "10.0.0.1", KUBERNETES_SERVICE_PORT: "443", PENELOPE_KUBERNETES_TOKEN_FILE: "/sa/token", PENELOPE_KUBERNETES_CA_FILE: "/sa/ca.crt" };
+
+    it("is closed without senders", () => {
+      // Guards against: the way in opened by a check set up with nobody allowed (ADR-0010).
+      assert.equal(loadConfig({ ...gated, PENELOPE_PUBLIC_URL: "https://penelope.example.com" }, read).a2a, undefined);
+    });
+
+    it("checks gated's assertion for the public host, with the limits' defaults", () => {
+      const { a2a } = loadConfig({ ...base, ...gated }, read);
+      assert.deepEqual(a2a, {
+        senders: ["agents/claude", "natsumi/natsumi"],
+        gated: { issuer: "https://auth.example.com", jwksUrl: "https://auth.example.com/__gated/jwks.json", audience: "penelope.example.com" },
+        tokenReview: undefined,
+        description: "",
+        url: "https://penelope.example.com/a2a/",
+        limits: { deadlineMs: 24 * 3_600_000, maxOpenTasks: 3 },
+      });
+    });
+
+    it("reviews tokens with the API server of the cluster it runs in, for the audiences set", () => {
+      const { a2a } = loadConfig({ ...base, ...cluster, PENELOPE_A2A_AUTH: "tokenreview", PENELOPE_A2A_AUDIENCES: "https://penelope.example.com, https://auth.example.com" }, read);
+      assert.deepEqual(a2a?.tokenReview, {
+        kubernetes: { url: "https://10.0.0.1:443", tokenFile: "/sa/token", ca: files["/sa/ca.crt"] },
+        audiences: ["https://penelope.example.com", "https://auth.example.com"],
+      });
+      assert.equal(a2a?.gated, undefined);
+    });
+
+    it("may check both ways at once, and reads the limits and the description", () => {
+      const { a2a } = loadConfig(
+        {
+          ...base,
+          ...gated,
+          ...cluster,
+          PENELOPE_A2A_AUTH: "gated-assertion,tokenreview",
+          PENELOPE_A2A_AUDIENCES: "https://penelope.example.com",
+          PENELOPE_KUBERNETES_URL: "https://kubernetes.example.com:6443",
+          PENELOPE_A2A_DESCRIPTION: "The cluster's operator.",
+          PENELOPE_A2A_DEADLINE_HOURS: "6",
+          PENELOPE_A2A_MAX_OPEN_TASKS: "1",
+        },
+        read,
+      );
+      assert.ok(a2a?.gated && a2a.tokenReview);
+      assert.equal(a2a.tokenReview.kubernetes.url, "https://kubernetes.example.com:6443");
+      assert.deepEqual(a2a.tokenReview.audiences, ["https://penelope.example.com"]);
+      assert.equal(a2a.description, "The cluster's operator.");
+      assert.deepEqual(a2a.limits, { deadlineMs: 6 * 3_600_000, maxOpenTasks: 1 });
+    });
+
+    it("does not start with senders but no way to check them, or a check it cannot make", () => {
+      // Guards against: a way in that lets everyone in, or nobody, without saying so at the start.
+      for (const env of [
+        { ...base },
+        { ...base, PENELOPE_A2A_AUTH: "password" },
+        { ...base, PENELOPE_A2A_AUTH: "gated-assertion" },
+        { ...base, ...gated, PENELOPE_PUBLIC_URL: undefined },
+        { ...base, PENELOPE_A2A_AUTH: "tokenreview", PENELOPE_A2A_AUDIENCES: "https://penelope.example.com" },
+        { ...base, ...cluster, PENELOPE_A2A_AUTH: "tokenreview", PENELOPE_A2A_AUDIENCES: "https://penelope.example.com", PENELOPE_KUBERNETES_TOKEN_FILE: "/sa/missing" },
+        // Without an audience of its own, the API server's would let in the token every Pod of the ServiceAccount is given.
+        { ...base, ...cluster, PENELOPE_A2A_AUTH: "tokenreview" },
+        { ...base, ...gated, PENELOPE_A2A_SENDERS: "claude" },
+        { ...base, ...gated, PENELOPE_A2A_SENDERS: "a/claude,b/claude" },
+        { ...base, ...gated, PENELOPE_A2A_MAX_OPEN_TASKS: "0" },
+      ]) {
+        assert.throws(() => loadConfig(env, read), ConfigError, JSON.stringify(env));
+      }
+    });
   });
 });

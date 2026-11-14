@@ -28,6 +28,7 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 | `POST /v1/events/ack` | 済んだ出来事を知らせる |
 | `POST /v1/self-events` | 自分宛ての出来事を入れる |
 | `POST /v1/replies` | オーナーへの返事 |
+| `POST /v1/a2a/replies` | A2A の Task に返す |
 | `POST /v1/activity` | 途中経過 |
 | `POST /v1/turns/end` | ターンの終わり |
 | `GET /v1/schedules?agent=`・`POST /v1/schedules`・`DELETE /v1/schedules/<id>` | 予約 |
@@ -66,6 +67,15 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
   - `expression`: 表情。Web UI はアバターをこの表情の絵で出す（[ADR-0016](adr/0016-show-the-avatar-and-expression-from-the-first-web-ui.md)）。
   - `in_reply_to`: 答えている出来事の `seq`。ターンの `<events>` の行の `seq` である（`batch` のまとめなら `seqs` の 1 つ）。
 - 応答は `201` と `{id}`。backend は会話の履歴に残し、UI の流れへ送る（[ui-api.md](ui-api.md)）。
+
+## A2A の Task に返す
+
+- body は `{agent, in_reply_to, state, text?}`（型は `A2AReplyRequest`）。
+  - `in_reply_to`: 答える `a2a` の出来事の `seq`（[events.md](events.md) の「A2A の出来事」）。Task の依頼の出来事でも、聞き返しへの答えの出来事でもよい。
+  - `state`: `completed` は Task を閉じる。`text` は任意で、あれば送り手への答えになる。`input-required` は送り手に `text` を聞き返し、Task を開いたまま答えを待つ。`text` は必須。
+- 応答は `200` と `{task_id, state}`（型は `A2AReplyResponse`）。送り手は `GetTask` で読みに来る（[a2a.md](a2a.md)）。
+- `in_reply_to` が `a2a` の出来事の `seq` でなければ `404`、Task が閉じていれば（`completed`・`failed`・`rejected`）`409`、聞き返しに `text` が無ければ `400`。どれも Task は変わらない。
+- 返事はオーナーとの会話の履歴には入らない。
 
 ## 途中経過
 

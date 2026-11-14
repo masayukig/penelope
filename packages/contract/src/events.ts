@@ -61,3 +61,16 @@ export type CronPayload = { schedule_id: string; reason: string };
 
 /** The body of every 4xx and 5xx answer of the backend. */
 export type ErrorBody = { error: string };
+
+/**
+ * The payload of an `a2a` event: a message another agent sent over A2A
+ * (docs/a2a.md). `request` opens a task; `answer` is the agent's answer to her
+ * question in a task that was `input-required`. The stream is the sender's name.
+ */
+export type A2APayload = {
+  kind: "request" | "answer";
+  task_id: string;
+  context_id: string;
+  message_id: string;
+  text: string;
+};

@@ -30,10 +30,12 @@ make e2e
 
 `outside` のコンテナ 1 つが、Pod の外を受け持つ（`outside/`）。
 
-- 名前解決: テストの名前（`model.example.com`・`backend.example.com`・`plain.example.net`・`github.com`・`api.github.com`）を自分のアドレスで答え、ほかは無いと答える。Pod のすべてのコンテナの `resolv.conf` はこれを指す（クラスタの DNS に当たる）。テストはマシンの外に出ない。
+- 名前解決: テストの名前（`model.example.com`・`backend.example.com`・`plain.example.net`・`github.com`・`api.github.com`・`kubernetes.example.com`・`auth.example.com`）を自分のアドレスで答え、ほかは無いと答える。Pod のすべてのコンテナの `resolv.conf` はこれを指す（クラスタの DNS に当たる）。テストはマシンの外に出ない。
 - モデル: Pi の `openai-completions` が話す chat completions の偽物。テストの印（`E2E-TURN-1` など）を見て、決まった返事と道具の呼び出し（`write`・`bash`・`reply`）を返す。受けた入力をすべて覚え、`Authorization` が本物の鍵だったか（Sentinel が差し替えたか）を記録する。
 - GitHub の OAuth と API: token の交換（client secret と PKCE を確かめる）と `/user`。
 - 素通しの宛先: `plain.example.net`（HTTPS と平文の HTTP）。
+- クラスタの API server の TokenReview（`kubernetes.example.com`）: backend 自身の ServiceAccount の token（`kube-token`）で尋ねられたときだけ答える。A2A の送り手の token（`sender-token`、`system:serviceaccount:e2e:claude`）と、allow-list に無い ServiceAccount の token（`stranger-token`）を知っている。
+- gated（`auth.example.com`）: assertion に署名する鍵の JWKS を配り、テストが頼むと、その鍵で assertion に署名する（gated が token を落として assertion に置き換えた呼び出しの代わり）。
 - 制御の口: テストが偽物の受けたものを読む。outside のコンテナの loopback だけで待ち受ける。
 
 テストは backend の UI 向けの API と偽物の制御の口を、`outside` のコンテナの中から呼ぶ（`outside/client.ts`）。オーナーのブラウザが Pod の外にいるのと同じ形で、テストを動かすマシンにポートを公開しない。
@@ -43,7 +45,8 @@ make e2e
 - **GitHub の宛先**: backend の GitHub の宛先は設定で変えられない（`github.com` と `api.github.com` に決めてある）。テストのために設定を足さず、偽物の名前解決がこの 2 つの名前を偽物に向け、backend にだけ偽物の CA を `NODE_EXTRA_CA_CERTS` で信頼させる。backend の UID の外向きは向け直されないので、本番と同じ宛先のまま偽物に届く。sandbox も同じ名前解決を見るのが Pod とのずれである（このテストでは sandbox は GitHub を使わない）。
 - **網**: `pod` と `outside` は Docker の既定の bridge に置き、アドレスは Docker が付ける。テストは `outside` を立ててから `resolv.conf` を書き、`pod` を立ててから backend の公開の URL を決め、残りを立てる。ユーザー定義の網は使わない（コンテナどうしが届かないマシンがあった）。IPv6 の向け直しの規則は入れるが、網は IPv4 だけである。
 - **volume の持ち主**: Pod は `fsGroup` で共有の volume を 1 つのグループに置く。ここでは `volumes` のコンテナが持ち主を UID ごとに決める。
-- **ServiceAccount の token と kubeconfig**: クラスタが無いので、どのコンテナにも無い。
+- **ServiceAccount の token と kubeconfig**: クラスタが無いので、どのコンテナにも無い。backend の TokenReview のための token は、偽の API server が知っている値（`kube-token`）を mount し、API server の名前と CA は設定で偽物に向ける。
+- **gated**: 前段の gated は置かない。送り手の呼び出しは backend に直に届き、gated の assertion の呼び出しは、テストが偽の gated に署名させた assertion を自分で付ける。
 - **夜の切り替え**: テストは最後に backend を作り直し、`PENELOPE_NIGHTLY_CRON` を毎分（`* * * * *`）にして次の切り替えを待つ。起動にかかった時間や今の時刻に左右されない。取り込み口は `control` の出来事を断るので、外から夜を起こす道は無い。
 
 ## 通すシナリオ
@@ -56,4 +59,5 @@ make e2e
 4. sandbox の外向きが Sentinel を通り、記録に残る。素通し（`plain.example.net`）、開く宛先（モデルと backend）、名前解決、登録の無いホストへのサロゲート・リンクローカル・受け口へ直に届いた通信を断る。sandbox の loopback は向け直されず、記録にも残らない。
 5. sandbox に本物の鍵が無い。取り込み口の socket が見えない。backend の UI 向けの口に loopback で届いても、ログインを求められる。
 6. receivers から取り込み口へ出来事を入れ、`/sources` に追記される。重複は受けたことになり、`control` は断られる。`batch` は待ち、後から来た `now` が待っている `batch` を連れて 1 つのターンに届く。
-7. 夜の制御の出来事で、振り返り → 整理係 → 新しいセッションが回り、`handoff.md` と整理係の変えたものがコミットされる。新しいセッションのシステムプロンプトに `handoff.md` が入り、前の日の会話は無い。次の切り替えの後も、ターンは回り続ける。
+7. ほかのエージェントが A2A で頼む。token なしで Agent Card が読める。allow-list に無い ServiceAccount は、TokenReview でも gated の assertion でも断られる。送り手が ServiceAccount の token で頼み（TokenReview）、ターンが `reply_to_agent` で聞き返し、送り手が gated の assertion で答え、ターンが閉じた答えを送り手が `GetTask` で読む。依頼と答えは `/sources/a2a/claude/` に追記され、API server には backend 自身の token で尋ねている。
+8. 夜の制御の出来事で、振り返り → 整理係 → 新しいセッションが回り、`handoff.md` と整理係の変えたものがコミットされる。新しいセッションのシステムプロンプトに `handoff.md` が入り、前の日の会話は無い。次の切り替えの後も、ターンは回り続ける。

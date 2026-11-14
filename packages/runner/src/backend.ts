@@ -3,6 +3,8 @@
 // real token in its place.
 
 import type {
+  A2AReplyRequest,
+  A2AReplyResponse,
   Activity,
   AgentId,
   DeliveredEvent,
@@ -64,6 +66,10 @@ export class Backend {
 
   async reply(reply: Without<ReplyRequest>): Promise<ReplyResponse> {
     return (await this.post("/v1/replies", reply)) as ReplyResponse;
+  }
+
+  async a2aReply(reply: Without<A2AReplyRequest>): Promise<A2AReplyResponse> {
+    return (await this.post("/v1/a2a/replies", reply)) as A2AReplyResponse;
   }
 
   async selfEvent(event: Without<SelfEventRequest>): Promise<void> {

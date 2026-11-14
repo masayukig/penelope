@@ -9,7 +9,7 @@ import { describe, it } from "node:test";
 import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
 import { Feed } from "../src/feed.ts";
-import { close, listenTcp } from "../src/http.ts";
+import { close, type Handler, listenTcp, sendJson } from "../src/http.ts";
 import { GitHubLogin, type GitHubSettings } from "../src/login/github.ts";
 import { LoginSessions } from "../src/login/sessions.ts";
 import { Queue } from "../src/queue.ts";
@@ -64,6 +64,8 @@ async function setup(
     configured = true,
     publicUrl = "http://penelope.example.com",
     agent = { name: "Iris", icons: {} as Record<string, string> },
+    a2a = undefined as Handler | undefined,
+    web = undefined as Handler | undefined,
   } = {},
 ) {
   const dir = tempDir(t);
@@ -88,7 +90,7 @@ async function setup(
     : undefined;
   const login = new GitHubLogin({ settings, endpoints: github.endpoints, sessions, now, log: () => {} });
   const server = await listenTcp(
-    uiHandler({ queue, conversation, feed, login, sessions, ownerId: settings?.ownerId, publicUrl, agent, now }),
+    uiHandler({ queue, conversation, feed, login, sessions, ownerId: settings?.ownerId, publicUrl, agent, now, ...(a2a ? { a2a } : {}), ...(web ? { web } : {}) }),
     "127.0.0.1",
     0,
   );
@@ -433,5 +435,28 @@ describe("the UI's API", () => {
   it("answers 404 to an API path it does not have", async (t) => {
     const env = await setup(t);
     assert.equal((await env.call("/api/nothing", env.signIn())).status, 404);
+  });
+
+  describe("the A2A way in", () => {
+    const web: Handler = async (_request, response) => sendJson(response, 200, { page: true });
+
+    it("is handed /a2a and what is under it, without a login", async (t) => {
+      // Guards against: the senders' calls going to the Web UI, or asked for the owner's cookie.
+      const a2a: Handler = async (request, response) => sendJson(response, 200, { a2a: request.url });
+      const { call } = await setup(t, { a2a, web });
+      for (const pathname of ["/a2a", "/a2a/", "/a2a/.well-known/agent-card.json"]) {
+        const answer = await call(pathname, undefined);
+        assert.deepEqual(answer.json(), { a2a: pathname });
+      }
+      assert.deepEqual((await call("/a2another", undefined)).json(), { page: true });
+    });
+
+    it("is not found while it is closed, rather than the Web UI's page", async (t) => {
+      // Guards against: a sender reading the page as an Agent Card, or taking a closed way in for an open one.
+      const { call } = await setup(t, { web });
+      const answer = await call("/a2a/.well-known/agent-card.json", undefined);
+      assert.equal(answer.status, 404);
+      assert.equal(typeof answer.json().error, "string");
+    });
   });
 });
