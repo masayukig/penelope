@@ -1,6 +1,8 @@
 // The backend's settings, from environment variables (docs/backend.md).
 // Secrets are read from files, named by the variables, so that their values
 // never sit in the environment.
+import path from "node:path";
+
 import type { Delivery } from "@penelope/contract";
 
 import { cronOf } from "./schedules.ts";
@@ -28,6 +30,22 @@ export type Config = {
   builtinDelivery: Record<"ui" | "cron" | "a2a" | "self", Delivery>;
   inline: Set<string>;
   gitAuthor: { name: string; email: string };
+  agent: AgentSettings;
+  /** Where the built Web UI is. */
+  webDir: string;
+};
+
+/** What the UI shows of the agent: the deployment's, never the code's (ADR-0001). */
+export type AgentSettings = { name: string; iconFile: string | undefined };
+
+/** The image types an icon may be, by its extension. */
+export const ICON_TYPES: Readonly<Record<string, string>> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
 };
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -114,6 +132,11 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
     };
   }
 
+  const iconFile = get("PENELOPE_AGENT_ICON_FILE");
+  if (iconFile !== undefined && ICON_TYPES[path.extname(iconFile).toLowerCase()] === undefined) {
+    throw new ConfigError(`PENELOPE_AGENT_ICON_FILE must end in one of ${Object.keys(ICON_TYPES).join(", ")}`);
+  }
+
   return {
     databasePath: get("PENELOPE_DATABASE") ?? "/var/lib/penelope/backend.sqlite",
     sourcesDir: get("PENELOPE_SOURCES_DIR") ?? "/sources",
@@ -146,6 +169,8 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
       name: get("PENELOPE_GIT_AUTHOR_NAME") ?? "penelope-backend",
       email: get("PENELOPE_GIT_AUTHOR_EMAIL") ?? "backend@penelope.invalid",
     },
+    agent: { name: get("PENELOPE_AGENT_NAME") ?? "Agent", iconFile },
+    webDir: get("PENELOPE_WEB_DIR") ?? "/app/web",
   };
 }
 

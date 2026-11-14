@@ -22,7 +22,8 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 - callback の断りの `error` は、`invalid-state`・`login-expired`・`invalid-request`（`400`）、`github-denied`・`account-not-allowed`（`403`）、`github-exchange-failed`・`github-unavailable`（`502`）、`too-many-logins`（`429`）のどれか。
 - 戻る先は `/` に決めてあり、要求の中身では変わらない。
 - `GET /healthz` は認証なしで `200` を返す（配置の確かめのため）。
-- `/api/` と `/auth/` のほかの道は、Web UI の静的ファイルを配る場所である（P6b で中身を入れる。それまでは `404`）。
+- `GET /api/agent` と `GET /api/agent/icon` は認証なしで読める（「エージェント」）。ログインの画面とホーム画面のアイコンが、ログインの前にエージェントの名前とアイコンを出すためである。この 2 つにはそれ以外のものを載せない。
+- `/api/` と `/auth/` のほかの道は、Web UI の静的ファイルを配る場所である（「Web UI の配り方」）。
 
 ## 口の一覧
 
@@ -31,6 +32,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 | `POST /api/messages` | オーナーのメッセージを送る |
 | `GET /api/history?before=` | 会話の履歴 |
 | `GET /api/stream` | 返事・途中経過・状態の流れ（SSE） |
+| `GET /api/agent`・`GET /api/agent/icon` | エージェントの名前とアイコン（認証なし） |
 | `GET /api/approvals`・`POST /api/approvals/<id>` | 承認（後の波） |
 
 ## メッセージを送る
@@ -46,6 +48,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 
 - 返事とオーナーのメッセージを、新しい順に返す。応答は `{entries, before?}`。`before` は次の（より古い）ページを取るための不透明な cursor で、最後のページには無い。
 - 1 件は `kind`（`owner` か `agent`）・`id`・`at`・`text` を持つ。`agent` のものは、さらに `agent`（エージェントの ID）と `expression` を持つ。
+- `agent` のものは、答えている出来事（返事の `in_reply_to`）を backend が知っていれば、`trigger` として、その出来事の `source` と `summary` を持つ。出来事の `payload` は載せない。UI はこれを、エージェントが何をきっかけに話したかの札にする。
 
 - 1 ページは 50 件。backend の渡していない `before` は `400`。
 - 途中経過は履歴に含めない。途中経過は流れだけで送る。過去の途中経過を見る画面は後の波。
@@ -63,11 +66,24 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 - 細かさは、sandbox 向けの口と同じくブロックが閉じるごと。トークンごとの流れが UI に要るなら、後で足す。
 
 - SSE の `id` に連番を付ける。つなぎ直したときに `Last-Event-ID` があれば、その後のものから送り直す。backend が覚えているのは最近の 1000 件だけで、backend が再起動すると連番は 1 から数え直す。足りなければ UI が履歴を読み直す。
+- Web UI は、最初につなぐときも、つなぎ直すときも `Last-Event-ID: 0` を付け、覚えている分をすべて受け取り直す。今の状態と今のターンの途中経過を、その中の最後の `state` と最後の `turn_start` から後で知るためである（状態だけを返す口は無い）。backend の再起動で連番が戻っても、これなら取りこぼさない。返事は `id` で履歴と重ねる。
 - 25 秒ごとに SSE のコメントを送り、つながりを保つ。
 
 未決:
 
 - オーナー自身のメッセージを流れにも送るか（複数のタブで見ているとき）。今は送らない（`StreamEvent` にオーナーのメッセージの形が無い）。
+
+## エージェント
+
+- `GET /api/agent` は `{name, icon?}`。`name` は backend の設定のエージェントの名前（`PENELOPE_AGENT_NAME`）。`icon` は、設定にアイコンのファイル（`PENELOPE_AGENT_ICON_FILE`）があるときだけあり、その画像を配る道（`/api/agent/icon`）である。
+- UI はエージェントの名前とアイコンをここから取る。コードと UI に決め打ちの名前を書かない（[ADR-0001](adr/0001-one-pod-with-pi-inside-the-sandbox.md)）。アイコンが無ければ、UI は build に含めた汎用のアイコンを出す。
+- `GET /api/agent/icon` は設定のファイルを、拡張子の画像の型で返す。設定に無いか読めなければ `404`。
+
+## Web UI の配り方
+
+- `/api/` と `/auth/` のほかの道では、backend が `PENELOPE_WEB_DIR` にある Web UI の build（`packages/web` の `dist/`）を配る。`/` は `index.html` である。無いファイルは `404`。
+- `/manifest.webmanifest` は backend がその場で作る。名前はエージェントの名前、アイコンは設定のアイコン（無ければ build の `icon.svg`）である。ホーム画面に置いて開くため（PWA）。
+- `assets/` の下のファイルは中身で名前が決まるので、長く cache させる。ほかは毎回確かめさせる。
 
 ## 承認（後の波）
 

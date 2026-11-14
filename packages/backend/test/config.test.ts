@@ -34,6 +34,8 @@ describe("the configuration", () => {
       builtinDelivery: { ui: "now", cron: "now", a2a: "now", self: "now" },
       inline: new Set(["ui", "control"]),
       gitAuthor: { name: "penelope-backend", email: "backend@penelope.invalid" },
+      agent: { name: "Agent", iconFile: undefined },
+      webDir: "/app/web",
     });
   });
 
@@ -61,6 +63,9 @@ describe("the configuration", () => {
         PENELOPE_INLINE_SOURCES: "ui, self",
         PENELOPE_GIT_AUTHOR_NAME: "backend",
         PENELOPE_GIT_AUTHOR_EMAIL: "backend@example.com",
+        PENELOPE_AGENT_NAME: " Iris ",
+        PENELOPE_AGENT_ICON_FILE: "/config/icon.png",
+        PENELOPE_WEB_DIR: "/srv/web",
       },
       read,
     );
@@ -82,6 +87,9 @@ describe("the configuration", () => {
     // control is always inline: the runner needs what it says.
     assert.deepEqual(config.inline, new Set(["ui", "self", "control"]));
     assert.deepEqual(config.gitAuthor, { name: "backend", email: "backend@example.com" });
+    // The name and the icon are the deployment's: nothing in the code names her (ADR-0001).
+    assert.deepEqual(config.agent, { name: "Iris", iconFile: "/config/icon.png" });
+    assert.equal(config.webDir, "/srv/web");
   });
 
   it("takes the time zone from TZ when it has none of its own", () => {
@@ -109,6 +117,8 @@ describe("the configuration", () => {
       { PENELOPE_OWNER_GITHUB_ID: "someone" },
       { PENELOPE_PUBLIC_URL: "not a url" },
       { PENELOPE_SANDBOX_TOKEN_FILE: "/secrets/missing" },
+      // The icon is served with the image type its extension names.
+      { PENELOPE_AGENT_ICON_FILE: "/config/icon.txt" },
     ]) {
       assert.throws(() => loadConfig(env, read), ConfigError, JSON.stringify(env));
     }
