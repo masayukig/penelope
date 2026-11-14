@@ -1,0 +1,111 @@
+# Releasing penelope
+#
+# Pushing a vX.Y.Z tag by hand releases that tag. weekly-release.yml calls
+# this with a version instead: a tag pushed with the run's GITHUB_TOKEN starts
+# no workflow, so the tag does not exist yet when this runs, and is pushed by
+# the last job, on the commit everything was built from (github.sha is the
+# same in every job of the run). A failed build leaves no tag behind.
+#
+# A release is its images, one per target of the Dockerfile, pushed to ghcr.io
+# under the tag as ghcr.io/yuanying/penelope-<target>, and a GitHub Release
+# with the notes. No binary is attached: the Sentinel runs only from its
+# image.
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_call:
+    inputs:
+      version:
+        description: The version to release (v1.2.3). The tag does not exist yet.
+        type: string
+        required: true
+      message:
+        description: The annotation of the tag.
+        type: string
+        required: true
+
+permissions: {}
+
+env:
+  VERSION: ${{ inputs.version || github.ref_name }}
+
+jobs:
+  # A weekly release is made from commits nobody looked at, so the tests run
+  # once more on exactly what is released.
+  test:
+    name: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # The same Node as the Dockerfile's, kept so by Renovate's node group.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.22.2
+          cache: npm
+      - run: make test
+
+  image:
+    name: image (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        target: [sentinel, backend, receivers, sandbox]
+    steps:
+      - uses: actions/checkout@v7
+      # No QEMU: every stage that runs a command runs on the runner's own
+      # platform, and the arm64 images only copy its output. A RUN in a final
+      # stage would need docker/setup-qemu-action here.
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository }}-${{ matrix.target }}:${{ env.VERSION }}
+          build-args: VERSION=${{ env.VERSION }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+
+  release:
+    name: GitHub Release
+    needs: [test, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      # An annotated tag, as the tags pushed by hand are.
+      - name: Push the tag
+        if: inputs.version != ''
+        env:
+          MESSAGE: ${{ inputs.message }}
+        run: |
+          object="$(gh api "repos/${GH_REPO}/git/tags" -f tag="${VERSION}" -f message="${MESSAGE}" \
+            -f object="${GITHUB_SHA}" -f type=commit \
+            -f 'tagger[name]=github-actions[bot]' \
+            -f 'tagger[email]=41898282+github-actions[bot]@users.noreply.github.com' --jq .sha)"
+          gh api "repos/${GH_REPO}/git/refs" -f ref="refs/tags/${VERSION}" -f sha="${object}"
+      - run: gh release create "${VERSION}" --verify-tag --generate-notes
