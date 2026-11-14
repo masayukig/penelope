@@ -1,6 +1,6 @@
 // What the tests share: temporary places, a clock the test moves, and an
 // HTTP client that talks over a Unix socket or a TCP port.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync, rmdirSync, rmSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -11,6 +11,19 @@ export function tempDir(t: { after: (fn: () => void) => void }): string {
   const dir = mkdtempSync(path.join(tmpdir(), "pb-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
+}
+
+/**
+ * Makes `file` impossible to append to until the returned function is called:
+ * a directory takes its place. Unlike a file mode, this holds for root too.
+ */
+export function unwritable(file: string): () => void {
+  renameSync(file, `${file}.away`);
+  mkdirSync(file);
+  return () => {
+    rmdirSync(file);
+    renameSync(`${file}.away`, file);
+  };
 }
 
 /** A clock that only moves when the test says so. */

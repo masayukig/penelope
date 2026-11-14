@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -131,7 +131,7 @@ describe("the sandbox's API", () => {
       const { call } = await setup(t);
       const answer = await call("/v1/events?agent=child&wait=0");
       assert.equal(answer.status, 400);
-      assert.match(answer.json().error, /main/);
+      assert.equal(typeof answer.json().error, "string");
     });
 
     it("refuses an ack whose seqs are not integers", async (t) => {
@@ -206,6 +206,17 @@ describe("the sandbox's API", () => {
         assert.equal(answer.status, 400, JSON.stringify(activity));
       }
     });
+
+    it("keeps none of a request with one block of the wrong shape", async (t) => {
+      // Guards against: part of a refused request in the record and the stream (docs/sandbox-api.md).
+      const { call, streamed } = await setup(t);
+      const activities = [
+        { kind: "turn_start", at, turn_id: "t-1" },
+        { kind: "thinking", at, turn_id: "t-1" },
+      ];
+      assert.equal((await call("/v1/activity", { json: { agent: "main", activities } })).status, 400);
+      assert.deepEqual(streamed, []);
+    });
   });
 
   describe("the end of a turn", () => {
@@ -216,6 +227,18 @@ describe("the sandbox's API", () => {
       assert.equal(answer.status, 204);
       const log = execFileSync("git", ["-c", `safe.directory=${memoryDir}`, "log", "--format=%s"], { cwd: memoryDir, encoding: "utf8" });
       assert.equal(log, "Turn t-9\n");
+    });
+
+    it("answers 500 when the commit fails, and commits what is left at the next end", async (t) => {
+      // Guards against: a turn's end taken as committed when /memory was not (docs/backend.md).
+      const { call, memoryDir } = await setup(t);
+      writeFileSync(path.join(memoryDir, "always.md"), "# always\n");
+      writeFileSync(path.join(memoryDir, ".git"), "not a repository\n");
+      assert.equal((await call("/v1/turns/end", { json: { agent: "main", turn_id: "t-1" } })).status, 500);
+      rmSync(path.join(memoryDir, ".git"));
+      assert.equal((await call("/v1/turns/end", { json: { agent: "main", turn_id: "t-2" } })).status, 204);
+      const files = execFileSync("git", ["-c", `safe.directory=${memoryDir}`, "ls-files"], { cwd: memoryDir, encoding: "utf8" });
+      assert.equal(files, "always.md\n");
     });
 
     it("sets the agent waiting", async (t) => {

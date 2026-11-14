@@ -32,14 +32,16 @@ describe("the database", () => {
   });
 
   it("keeps none of a transaction that throws", (t) => {
+    // Guards against: half of a request kept, such as part of a list of activities refused as a whole.
     const db = openDatabase(path.join(tempDir(t), "a.sqlite"));
     t.after(() => db.close());
+    db.exec("CREATE TABLE scratch (x INTEGER)");
     assert.throws(() =>
       transaction(db, () => {
-        db.prepare("INSERT INTO session_rotations (agent, at) VALUES ('main', 'x')").run();
+        db.prepare("INSERT INTO scratch (x) VALUES (1)").run();
         throw new Error("no");
       }),
     );
-    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM session_rotations").get() as { n: number }).n, 0);
+    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM scratch").get() as { n: number }).n, 0);
   });
 });

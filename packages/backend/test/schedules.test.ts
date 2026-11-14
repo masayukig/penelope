@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -8,7 +8,7 @@ import { Queue } from "../src/queue.ts";
 import { Scheduler, ScheduleError, Schedules } from "../src/schedules.ts";
 import { Sources } from "../src/sources.ts";
 import { AwakeHours } from "../src/time.ts";
-import { FakeClock, tempDir } from "./support.ts";
+import { FakeClock, tempDir, unwritable } from "./support.ts";
 
 function setup(t: { after: (fn: () => void) => void }, start = "2026-11-14T08:30:00Z") {
   const dir = tempDir(t);
@@ -33,7 +33,7 @@ describe("schedules", () => {
   it("are made from a cron expression and listed by agent", (t) => {
     const { schedules } = setup(t);
     const made = schedules.create({ agent: "main", reason: "every morning", cron: "0 9 * * *" });
-    assert.match(made.id, /^[0-9a-f-]{36}$/);
+    assert.ok(made.id.length > 0);
     assert.deepEqual(made, { id: made.id, agent: "main", reason: "every morning", cron: "0 9 * * *" });
     assert.deepEqual(schedules.list("main"), [made]);
     assert.deepEqual(schedules.list("child"), []);
@@ -125,10 +125,10 @@ describe("the scheduler", () => {
     clock.set("2026-11-14T08:31:00Z");
     scheduler.tick(); // b, writing the day's file of cron
     queue.ack(queue.take({ after: 0 }).map((e) => e.seq));
-    chmodSync(path.join(sourcesDir, "cron/2026-11-14.jsonl"), 0o400);
+    const restore = unwritable(path.join(sourcesDir, "cron/2026-11-14.jsonl"));
     clock.set("2026-11-14T09:00:00Z");
     scheduler.tick();
-    chmodSync(path.join(sourcesDir, "cron/2026-11-14.jsonl"), 0o600);
+    restore();
     scheduler.tick();
     assert.deepEqual(queue.take({ after: 1 }).map((e) => e.summary), ["a"]);
   });

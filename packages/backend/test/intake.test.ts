@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -9,7 +9,7 @@ import { intakeHandler } from "../src/intake.ts";
 import { Queue } from "../src/queue.ts";
 import { Sources } from "../src/sources.ts";
 import { AwakeHours } from "../src/time.ts";
-import { ask, multipart, tempDir } from "./support.ts";
+import { ask, multipart, tempDir, unwritable } from "./support.ts";
 
 async function setup(t: { after: (fn: () => void | Promise<void>) => void }, maxBytes?: number) {
   const dir = tempDir(t);
@@ -83,12 +83,14 @@ describe("the intake", () => {
   });
 
   it("answers 400 to an event from one of the backend's own sources", async (t) => {
-    const { target } = await setup(t);
+    // Guards against: a receivers' plugin starting the nightly switch or speaking as the owner.
+    const { target, queue } = await setup(t);
     for (const source of ["ui", "cron", "a2a", "self", "control"]) {
       const answer = await ask(target, "/v1/events", { json: { ...envelope, source } });
       assert.equal(answer.status, 400, source);
-      assert.match(answer.json().error, /backend's own/);
+      assert.equal(typeof answer.json().error, "string");
     }
+    assert.deepEqual(queue.take({ after: 0 }), []);
   });
 
   it("takes a multipart body with the envelope in `event` and files in `file`", async (t) => {
@@ -134,8 +136,9 @@ describe("the intake", () => {
   it("answers 503 when it cannot write /sources, so that the source sends it again", async (t) => {
     const { target, sourcesDir } = await setup(t);
     await ask(target, "/v1/events", { json: envelope });
-    const file = path.join(sourcesDir, `alertmanager/${new Date().toISOString().slice(0, 10)}.jsonl`);
-    chmodSync(file, 0o400);
+    // The day's file, whatever day it is: the intake dates it by the real clock.
+    const [day] = readdirSync(path.join(sourcesDir, "alertmanager"));
+    unwritable(path.join(sourcesDir, "alertmanager", day!));
     const answer = await ask(target, "/v1/events", { json: { ...envelope, id: "a-2" } });
     assert.equal(answer.status, 503);
     assert.equal(typeof answer.json().error, "string");

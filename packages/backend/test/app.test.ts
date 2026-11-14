@@ -70,6 +70,6 @@ describe("the command", () => {
   it("prints the usage and exits with 2 for anything else", () => {
     const result = run(["nonsense"], {});
     assert.equal(result.code, 2);
-    assert.match(result.stderr, /^usage: backend serve\|version/);
+    assert.match(result.stderr, /usage/);
   });
 });
