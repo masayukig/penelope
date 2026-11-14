@@ -26,7 +26,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS ?= -s -w -X main.version=$(VERSION)
 
 # The Go packages with tests behind the netns build tag, and how to get root.
-NETNS_PKGS ?= ./internal/origdst
+NETNS_PKGS ?= ./internal/origdst ./internal/proxy
 SUDO ?= sudo
 
 ##@ General
