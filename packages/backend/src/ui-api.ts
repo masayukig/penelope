@@ -4,7 +4,12 @@
 import { randomUUID } from "node:crypto";
 import type http from "node:http";
 
-import type { PostMessageResponse } from "@penelope/contract";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
+import type { AgentResponse, PostMessageResponse } from "@penelope/contract";
+
+import { type AgentSettings, ICON_TYPES } from "./config.ts";
 
 import type { Conversation } from "./conversation.ts";
 import type { Feed } from "./feed.ts";
@@ -14,6 +19,7 @@ import type { LoginSessions, Session } from "./login/sessions.ts";
 import type { Queue } from "./queue.ts";
 import type { Attachment } from "./sources.ts";
 import { iso } from "./time.ts";
+import { AGENT_ICONS_PATH } from "./web.ts";
 
 export const SESSION_COOKIE = "penelope_session";
 /** A message with its files: 64 MiB in all by default. */
@@ -31,6 +37,8 @@ export type UiOptions = {
   ownerId: number | undefined;
   /** Where the owner reaches the backend. Cookies are Secure when it is https. */
   publicUrl: string | undefined;
+  /** The agent's name and icon, read without a login. */
+  agent: AgentSettings;
   now: () => number;
   maxBytes?: number;
   /** The Web UI's files, served for everything else. Until it is built, nothing is. */
@@ -38,7 +46,7 @@ export type UiOptions = {
 };
 
 export function uiHandler(options: UiOptions): Handler {
-  const { queue, conversation, feed, login, sessions, ownerId, now } = options;
+  const { queue, conversation, feed, login, sessions, ownerId, agent, now } = options;
   const maxBytes = options.maxBytes ?? DEFAULT_UI_BYTES;
   const secure = options.publicUrl?.startsWith("https:") ?? false;
   const web = options.web ?? notBuilt;
@@ -79,6 +87,37 @@ export function uiHandler(options: UiOptions): Handler {
 
     if (!url.pathname.startsWith("/api/")) {
       await web(request, response);
+      return;
+    }
+
+    // Read without a login: the login screen and the home screen show who
+    // she is. Nothing else is here (docs/ui-api.md).
+    if (route === "GET /api/agent") {
+      const icons = Object.fromEntries(Object.keys(agent.icons).map((expression) => [expression, `${AGENT_ICONS_PATH}${encodeURIComponent(expression)}`]));
+      sendJson(response, 200, { name: agent.name, ...(Object.keys(icons).length === 0 ? {} : { icons }) } satisfies AgentResponse);
+      return;
+    }
+    if (request.method === "GET" && url.pathname.startsWith(AGENT_ICONS_PATH)) {
+      let expression = "";
+      try {
+        expression = decodeURIComponent(url.pathname.slice(AGENT_ICONS_PATH.length));
+      } catch {
+        // Not a name of any face: answered as one that is not there.
+      }
+      const file = Object.hasOwn(agent.icons, expression) ? agent.icons[expression] : undefined;
+      if (file === undefined) throw new HttpError(404, "no such face");
+      let body: Buffer;
+      try {
+        body = await readFile(file);
+      } catch {
+        throw new HttpError(404, "the face cannot be read");
+      }
+      response.writeHead(200, {
+        "content-type": ICON_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream",
+        "content-length": body.length,
+        "cache-control": "no-cache",
+      });
+      response.end(body);
       return;
     }
 

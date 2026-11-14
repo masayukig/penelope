@@ -115,6 +115,8 @@ services:
       PENELOPE_TIME_ZONE: UTC
       PENELOPE_AWAKE_HOURS: "00:00-00:00"
       PENELOPE_NIGHTLY_CRON: ${PENELOPE_E2E_NIGHTLY_CRON:-0 4 1 1 *}
+      PENELOPE_AVATAR: penelope
+      PENELOPE_AGENT_NAME: E2E Agent
       NODE_EXTRA_CA_CERTS: /run/secrets/e2e/outside-ca.crt
     volumes:
       - *resolv

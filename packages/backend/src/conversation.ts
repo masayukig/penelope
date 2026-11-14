@@ -4,7 +4,7 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-import type { Activity, AgentId, HistoryEntry, HistoryResponse, ReplyRequest } from "@penelope/contract";
+import type { Activity, AgentId, HistoryEntry, HistoryResponse, ReplyRequest, Trigger } from "@penelope/contract";
 
 import type { Feed } from "./feed.ts";
 import { iso } from "./time.ts";
@@ -19,6 +19,8 @@ type Row = {
   at: string;
   text: string;
   expression: string | null;
+  trigger_source: string | null;
+  trigger_summary: string | null;
 };
 
 export class Conversation {
@@ -45,6 +47,7 @@ export class Conversation {
     this.db
       .prepare("INSERT INTO history (id, kind, agent, at, text, expression, in_reply_to) VALUES (?, 'agent', ?, ?, ?, ?, ?)")
       .run(id, request.agent, at, request.text, request.expression ?? null, request.in_reply_to ?? null);
+    const trigger = request.in_reply_to === undefined ? undefined : this.triggerOf(request.in_reply_to);
     this.feed.publish({
       event: "reply",
       data: {
@@ -54,9 +57,16 @@ export class Conversation {
         text: request.text,
         agent: request.agent,
         ...(request.expression === undefined ? {} : { expression: request.expression }),
+        ...(trigger === undefined ? {} : { trigger }),
       },
     });
     return { id };
+  }
+
+  /** The event a reply answers, as the UI shows it: its source and summary, not its payload. */
+  private triggerOf(seq: number): Trigger | undefined {
+    const row = this.db.prepare("SELECT source, summary FROM events WHERE seq = ?").get(seq) as Trigger | undefined;
+    return row === undefined ? undefined : { source: row.source, summary: row.summary };
   }
 
   /**
@@ -70,7 +80,11 @@ export class Conversation {
       if (!/^\d+$/.test(before) || !Number.isSafeInteger(below)) throw new Error("before is not a cursor of the history");
     }
     const rows = this.db
-      .prepare("SELECT row, id, kind, agent, at, text, expression FROM history WHERE row < ? ORDER BY row DESC LIMIT ?")
+      .prepare(
+        `SELECT h.row, h.id, h.kind, h.agent, h.at, h.text, h.expression, e.source AS trigger_source, e.summary AS trigger_summary
+           FROM history h LEFT JOIN events e ON e.seq = h.in_reply_to
+          WHERE h.row < ? ORDER BY h.row DESC LIMIT ?`,
+      )
       .all(below, limit + 1) as Row[];
     const more = rows.length > limit;
     const entries = rows.slice(0, limit);
@@ -110,5 +124,6 @@ function entry(row: Row): HistoryEntry {
     text: row.text,
     agent: row.agent ?? "main",
     ...(row.expression === null ? {} : { expression: row.expression }),
+    ...(row.trigger_source === null || row.trigger_summary === null ? {} : { trigger: { source: row.trigger_source, summary: row.trigger_summary } }),
   };
 }

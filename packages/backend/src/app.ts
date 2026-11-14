@@ -20,6 +20,7 @@ import { Scheduler, Schedules } from "./schedules.ts";
 import { Sources } from "./sources.ts";
 import { AwakeHours } from "./time.ts";
 import { uiHandler } from "./ui-api.ts";
+import { webHandler } from "./web.ts";
 
 export type Backend = { port: number; close: () => Promise<void> };
 
@@ -54,7 +55,18 @@ export async function startBackend(
     log,
   );
   const ui = await listenTcp(
-    uiHandler({ queue, conversation, feed, login, sessions, ownerId: config.github?.ownerId, publicUrl: config.publicUrl, now }),
+    uiHandler({
+      queue,
+      conversation,
+      feed,
+      login,
+      sessions,
+      ownerId: config.github?.ownerId,
+      publicUrl: config.publicUrl,
+      agent: config.agent,
+      web: webHandler({ dir: config.webDir, agent: config.agent }),
+      now,
+    }),
     config.listen.host,
     config.listen.port,
     log,

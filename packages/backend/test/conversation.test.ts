@@ -57,6 +57,33 @@ describe("the conversation", () => {
     assert.equal("before" in last, false);
   });
 
+  // The UI shows what made her speak (a schedule, a mention) beside a reply.
+  // Guards against losing it, and against the event's payload leaking into
+  // the history along with it.
+  it("names the event a reply answers by its source and summary, in the history and down the stream", (t) => {
+    const { conversation, seen, db } = setup(t);
+    const { lastInsertRowid } = db
+      .prepare(
+        `INSERT INTO events (source, id, occurred_at, received_ms, summary, delivery, inline, payload, path, line)
+         VALUES ('cron', 'morning@1', '2026-11-14T09:00:00Z', 0, 'every morning at 9:00', 'now', 0, '{"secret":"x"}', 'p', 1)`,
+      )
+      .run();
+    const { id } = conversation.reply({ agent: "main", text: "good morning", in_reply_to: Number(lastInsertRowid) });
+    const trigger = { source: "cron", summary: "every morning at 9:00" };
+    const [streamed] = seen;
+    assert.deepEqual(streamed?.event === "reply" && streamed.data.trigger, trigger);
+    const [kept] = conversation.page().entries;
+    assert.equal(kept?.id, id);
+    assert.deepEqual(kept?.kind === "agent" && kept.trigger, trigger);
+  });
+
+  it("gives no trigger to a reply that answers no event it knows", (t) => {
+    const { conversation } = setup(t);
+    conversation.reply({ agent: "main", text: "on my own" });
+    conversation.reply({ agent: "main", text: "to something gone", in_reply_to: 999 });
+    for (const entry of conversation.page().entries) assert.equal("trigger" in entry, false);
+  });
+
   it("refuses a cursor it did not give", (t) => {
     const { conversation } = setup(t);
     assert.throws(() => conversation.page("nonsense"), /cursor/);
