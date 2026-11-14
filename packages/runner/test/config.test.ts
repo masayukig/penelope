@@ -26,6 +26,7 @@ test("the required settings and the defaults", () => {
     promptFileMaxBytes: 65536,
     imageMaxBytes: 5242880,
     pollWaitSeconds: 30,
+    turnFold: true,
   });
 });
 
@@ -41,7 +42,9 @@ test("the optional settings", () => {
     PENELOPE_PROMPT_FILE_MAX_BYTES: "100",
     PENELOPE_POLL_WAIT_SECONDS: "5",
     PENELOPE_IMAGE_MAX_BYTES: "1000",
+    PENELOPE_TURN_FOLD: "off",
   });
+  assert.equal(config.turnFold, false);
   assert.equal(config.imageMaxBytes, 1000);
   assert.deepEqual(config.model, { provider: "anthropic", id: "claude-opus-5-5" });
   assert.equal(config.thinkingLevel, "high");
@@ -78,4 +81,9 @@ test("a thinking level is one Pi knows", () => {
 test("numbers are positive integers", () => {
   assert.throws(() => readConfig({ ...required, PENELOPE_PROMPT_FILE_MAX_BYTES: "-1" }), ConfigError);
   assert.throws(() => readConfig({ ...required, PENELOPE_POLL_WAIT_SECONDS: "x" }), ConfigError);
+});
+
+test("folding is on or off", () => {
+  assert.equal(readConfig({ ...required, PENELOPE_TURN_FOLD: "on" }).turnFold, true);
+  assert.throws(() => readConfig({ ...required, PENELOPE_TURN_FOLD: "yes" }), ConfigError);
 });

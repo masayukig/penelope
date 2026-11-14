@@ -27,6 +27,8 @@ export interface Call {
   lastText: string;
   /** The mime types of the images in the last message. */
   lastImages: string[];
+  /** Every message but the system prompt, as the provider was given them. */
+  messages: Message[];
 }
 
 /** Decides each answer from the call. Called once per model request. */
@@ -116,6 +118,7 @@ export async function fakeRuntime(root: string, script: Script): Promise<ModelRu
                 .filter((part) => part.type === "image")
                 .map((part) => part.mimeType ?? "")
             : [],
+          messages: structuredClone(rest),
         });
         push({ type: "start", partial: message });
         if (answer.thinking) {

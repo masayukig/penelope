@@ -22,11 +22,13 @@ interface World {
   fake: FakeBackend;
   config: Config;
   calls: Call[];
+  /** The runner's log lines. */
+  logs: string[];
   /** Start a runner over the same places; stop it with the function it returns. */
   start(script: Script): Promise<() => Promise<void>>;
 }
 
-async function world(): Promise<World> {
+async function world(options: { turnFold?: boolean } = {}): Promise<World> {
   const root = await mkdtemp(join(tmpdir(), "runner-"));
   const home = join(root, "home");
   const memoryDir = join(root, "memory");
@@ -47,12 +49,15 @@ async function world(): Promise<World> {
     promptFileMaxBytes: 65536,
     imageMaxBytes: 1_000_000,
     pollWaitSeconds: 1,
+    turnFold: options.turnFold ?? true,
   };
   const calls: Call[] = [];
+  const logs: string[] = [];
   return {
     fake,
     config,
     calls,
+    logs,
     async start(script) {
       const modelRuntime = await fakeRuntime(root, (call) => {
         calls.push(call);
@@ -64,7 +69,7 @@ async function world(): Promise<World> {
         backend: new Backend({ url: config.backend.url, token: TOKEN, agent: "main" }),
         modelRuntime,
         settings: () => SettingsManager.inMemory({ retry: { enabled: false } }),
-        log: () => {},
+        log: (line) => logs.push(line),
       });
       const running = runner.run(controller.signal);
       const stop = async () => {
@@ -380,4 +385,126 @@ test("a now that comes with batched events steers the turn together with them", 
   assert.match(steered.userTexts[1]!, /\[seq 3\] slack\/ops/);
   assert.match(steered.userTexts[1]!, /\[batch\] slack\/ops: 1 event \(seq 2\)/);
   assert.equal(fake.sent("POST", "/v1/turns/end").length, 1);
+});
+
+// ── Folding ended turns ──
+
+const ASKED = /This turn is about to be folded\./;
+const asks = (calls: Call[]) => calls.filter((c) => c.lastRole === "user" && ASKED.test(c.lastText));
+const firstCallOf = (calls: Call[], text: string) => calls.find((c) => c.lastRole === "user" && c.lastText.includes(text))!;
+
+/** Works with the shell and stops without a word; answers the request before folding. */
+const silent: Script = (call) => {
+  if (call.lastRole === "user" && ASKED.test(call.lastText)) return { text: "The pods were all up." };
+  if (call.lastRole === "user") return { thinking: "check", calls: [{ tool: "bash", args: { command: "echo pods-output" } }] };
+  return {};
+};
+
+test("a turn that ends without her own text is asked once; then it is folded", async () => {
+  const { fake, start, calls, logs } = await world();
+  await start(silent);
+  fake.push(ui(1, "pods?"));
+  await until(() => acked(fake).includes(1));
+  assert.equal(asks(calls).length, 1);
+  assert.equal(fake.sent("POST", "/v1/turns/end").length, 1, "the request is part of the turn");
+
+  fake.push(ui(2, "thanks"));
+  await until(() => acked(fake).includes(2));
+  assert.equal(asks(calls).length, 2, "each turn without text is asked once");
+  const next = firstCallOf(calls, "thanks");
+  const sent = JSON.stringify(next.messages);
+  assert.ok(sent.includes("pods?"), "the event stays");
+  assert.ok(sent.includes("The pods were all up."), "her answer stays");
+  assert.ok(sent.includes("(folded) bash: echo pods-output"), "the call stays as a line");
+  assert.ok(!sent.includes("pods-output\\n"), "the output goes");
+  assert.ok(!ASKED.test(next.userTexts.join("\n")), "the request goes");
+  assert.ok(!sent.includes('"check"'), "the thinking goes");
+
+  assert.ok(logs.some((line) => /folded 0, asked yes, compactions 0/.test(line)));
+  assert.ok(logs.some((line) => /folded 1, asked yes, compactions 0/.test(line)));
+});
+
+test("no tool runs in the answer to the request before folding", async () => {
+  const { fake, start, calls, config } = await world();
+  const touched = join(config.home, "touched");
+  await start((call) => {
+    if (call.lastRole === "user" && ASKED.test(call.lastText)) {
+      return { text: "noted", calls: [{ tool: "bash", args: { command: `touch ${touched}` } }] };
+    }
+    return silent(call);
+  });
+  fake.push(ui(1, "pods?"));
+  await until(() => acked(fake).includes(1));
+  await assert.rejects(readFile(touched));
+  const answered = calls.indexOf(asks(calls)[0]!);
+  assert.equal(calls.length, answered + 1, "the answer ends with the refused call");
+});
+
+test("a turn with her own text is not asked", async () => {
+  const { fake, start, calls } = await world();
+  await start(replying);
+  fake.push(ui(1, "hello"));
+  await until(() => acked(fake).includes(1));
+  assert.equal(asks(calls).length, 0);
+});
+
+test("the reflection of the night is not asked", async () => {
+  const { fake, start, calls, config } = await world();
+  await start(
+    withPaths((call) => {
+      if (call.userTexts.at(-1)!.includes("This session ends now") && !call.systemPrompt.includes("You are the curator")) {
+        if (call.lastRole === "user") return { calls: [{ tool: "write", args: { path: "HANDOFF_PATH", content: "明日。\n" } }] };
+        return {};
+      }
+      return curatorWrites(call);
+    }, config.memoryDir),
+  );
+  fake.push(nightly(1));
+  await until(() => acked(fake).includes(1));
+  assert.equal(asks(calls).length, 0);
+});
+
+test("with folding off, nothing is asked or folded", async () => {
+  const { fake, start, calls } = await world({ turnFold: false });
+  await start(silent);
+  fake.push(ui(1, "pods?"));
+  await until(() => acked(fake).includes(1));
+  fake.push(ui(2, "thanks"));
+  await until(() => acked(fake).includes(2));
+  assert.equal(asks(calls).length, 0);
+  const sent = JSON.stringify(firstCallOf(calls, "thanks").messages);
+  assert.ok(sent.includes("pods-output\\n"), "the output is still there");
+  assert.ok(!sent.includes("(folded)"));
+  assert.ok(!calls[0]!.systemPrompt.includes("folded"));
+});
+
+test("what came before the turn just ended is sent as it was", async () => {
+  const { fake, start, calls } = await world();
+  await start(silent);
+  for (const [seq, text] of [
+    [1, "first"],
+    [2, "second"],
+    [3, "third"],
+  ] as const) {
+    fake.push(ui(seq, text));
+    await until(() => acked(fake).includes(seq));
+  }
+  const second = firstCallOf(calls, "second").messages;
+  const third = firstCallOf(calls, "third").messages;
+  assert.deepEqual(third.slice(0, second.length), second);
+  assert.ok(third.length < second.length + 6, "the second turn is folded too");
+});
+
+test("folding goes on after a restart", async () => {
+  const { fake, start, calls } = await world();
+  const stop = await start(silent);
+  fake.push(ui(1, "first"));
+  await until(() => acked(fake).includes(1));
+  await stop();
+  await start(silent);
+  fake.push(ui(2, "second"));
+  await until(() => acked(fake).includes(2));
+  const sent = JSON.stringify(firstCallOf(calls, "second").messages);
+  assert.ok(sent.includes("(folded) bash: echo pods-output"));
+  assert.ok(!sent.includes("pods-output\\n"));
 });

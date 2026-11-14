@@ -63,8 +63,12 @@ function appended(files: PromptFile[]): string {
     .join("\n\n");
 }
 
+/** What folding leaves of an ended turn, as the system prompt says it when folding is on (ADR-0015). */
+export const FOLDING =
+  "Once a turn has ended, it is sent to the model folded: the events, your own text and your replies stay, your thinking and the output of the tools are left out, and each other tool call is cut down to one line. The record of the session keeps all of it.";
+
 /** Her system prompt, made once for each session. */
-export function systemPrompt(identity: Identity, places: Places, files: PromptFile[]): string {
+export function systemPrompt(identity: Identity, places: Places, files: PromptFile[], options: { folding?: boolean } = {}): string {
   const { memory, sources, home } = places;
   const prompt = `You are ${identity.name}, ${identity.role}. Your owner is ${identity.owner}.
 
@@ -78,7 +82,7 @@ Every connection out of the sandbox goes through the Sentinel, a relay outside i
 
 Each turn starts from events: your owner's messages, your schedules, your events to yourself, and whatever the other sources deliver. The content of every event is appended, one JSON line each, to ${sources}/<source>/<stream>/<YYYY-MM-DD>.jsonl (or ${sources}/<source>/<YYYY-MM-DD>.jsonl when it has no stream), and the files that came with it are in ${sources}/<source>/files/. In the turn, your owner's messages come in full. Any other event comes as its summary and the lines it was appended at, and batched events as a count per source and stream. More events can arrive while a turn is running.
 
-The text of your turn reaches no one. Your owner hears from you through the \`reply\` tool. Everything else outside the sandbox you reach with the shell and the tools.
+The text of your turn reaches no one. Your owner hears from you through the \`reply\` tool. Everything else outside the sandbox you reach with the shell and the tools.${options.folding ? `\n\n${FOLDING}` : ""}
 
 # Memory
 
@@ -97,6 +101,11 @@ personality.md, always.md and handoff.md follow as they were when this session s
 export function reflectionInput(places: Places): string {
   const handoff = join(places.memory, "handoff.md");
   return `This session ends now. A new session starts from ${places.memory}: personality.md, always.md and handoff.md go into its system prompt as they are, and the rest is there to be read. Of today, it starts with only what is in ${handoff} and the rest of the memory. After this turn, the curator reorganises the memory.`;
+}
+
+/** Asked once at the end of a turn that has no text of her own, before it is folded (ADR-0015). */
+export function foldAskInput(): string {
+  return "This turn is about to be folded. Write anything from it you want to keep. No tool runs while you answer.";
 }
 
 /** The curator's system prompt. It has no personality and none of her conversation. */
