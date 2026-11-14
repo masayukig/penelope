@@ -125,6 +125,9 @@ FROM golang:1.27.4-trixie AS sandbox-go
 # the node image's user of the same UID. /home/agent, /memory and Pi's
 # directory under HOME are mounted from the Pod's persistent volumes.
 #
+# /memory/.git belongs to the backend, which commits it (ADR-0006); git is
+# told the directory is safe, so that `agent` can read the history.
+#
 # The Sentinel's CA is added at start by the entrypoint, from a volume, to the
 # system bundle (docs/pod.md, "CA"). The bundle is kept writable by `agent`
 # for that, with Debian's own copy beside it to start from each time.
@@ -140,7 +143,8 @@ RUN apt-get update \
     && useradd --uid 1000 --user-group --create-home --home-dir /home/agent --shell /bin/bash agent \
     && mkdir -p /usr/share/penelope /etc/penelope/ca \
     && cp /etc/ssl/certs/ca-certificates.crt /usr/share/penelope/ca-certificates.crt \
-    && chown agent:agent /etc/ssl/certs/ca-certificates.crt
+    && chown agent:agent /etc/ssl/certs/ca-certificates.crt \
+    && git config --system --add safe.directory /memory
 COPY --from=sandbox-go /usr/local/go /usr/local/go
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /usr/local/bin/
 COPY --from=sandbox-tools /out/ /usr/local/bin/

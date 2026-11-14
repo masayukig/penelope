@@ -1,0 +1,170 @@
+# The Pod of docs/pod.md, laid out with Docker Compose for the end-to-end test
+# (e2e/README.md). `pod` holds the network namespace that the four containers
+# share, as a Pod's pause container does; `init` redirects the sandbox's
+# traffic in it before they start; `volumes` gives the volumes the owners a
+# Pod's fsGroup would. `outside` is the world outside the Pod, all fake.
+#
+# Both `outside` and `pod` are on Docker's default bridge, with the addresses
+# Docker gives them; the test starts them first and writes what depends on
+# their addresses (the Pod's resolv.conf and the backend's public URL) before
+# it starts the rest. The test reaches the backend from the outside container,
+# as the owner's browser would, so no port is published.
+#
+# The images of the repository are the ones `make images` builds, tagged
+# PENELOPE_E2E_TAG. The keys are made for each run under e2e/.run/.
+
+name: penelope-e2e
+
+x-resolv: &resolv ./.run/resolv.conf:/etc/resolv.conf:ro
+
+volumes:
+  memory: {}
+  memory-git: {}
+  home: {}
+  sources: {}
+  database: {}
+  intake: {}
+  sandbox-socket: {}
+  admin-socket: {}
+
+services:
+  outside:
+    build: { context: ., target: outside }
+    image: penelope-e2e-outside
+    network_mode: bridge
+    environment:
+      OUTSIDE_CERT_FILE: /run/secrets/e2e/outside.crt
+      OUTSIDE_KEY_FILE: /run/secrets/e2e/outside.key
+      OUTSIDE_MODEL_KEY_FILE: /run/secrets/e2e/model-key
+      OUTSIDE_MODEL_SURROGATE: e2e-surrogate-model-0001
+      OUTSIDE_GITHUB_CLIENT_ID: e2e-client-id
+      OUTSIDE_GITHUB_CLIENT_SECRET_FILE: /run/secrets/e2e/github-client-secret
+      OUTSIDE_OWNER_GITHUB_ID: "4242"
+    volumes:
+      - ./.run:/run/secrets/e2e:ro
+
+  # The Pod's network namespace.
+  pod:
+    build: { context: ., target: init }
+    image: penelope-e2e-init
+    command: ["sleep", "infinity"]
+    init: true
+    network_mode: bridge
+    volumes: [*resolv]
+
+  init:
+    image: penelope-e2e-init
+    command: ["/e2e/init/redirect.sh"]
+    network_mode: service:pod
+    cap_add: [NET_ADMIN]
+    depends_on:
+      pod: { condition: service_started }
+
+  volumes:
+    image: penelope-e2e-init
+    command: ["/e2e/init/volumes.sh"]
+    network_mode: none
+    depends_on:
+      pod: { condition: service_started }
+    volumes:
+      - ./config:/e2e/config:ro
+      - memory:/volumes/memory
+      - memory-git:/volumes/memory-git
+      - home:/volumes/home
+      - sources:/volumes/sources
+      - database:/volumes/database
+      - intake:/volumes/intake
+      - sandbox-socket:/volumes/sandbox-socket
+      - admin-socket:/volumes/admin-socket
+
+  sentinel:
+    image: penelope-sentinel:${PENELOPE_E2E_TAG:?}
+    command: ["serve", "-config", "/etc/penelope/sentinel.yaml"]
+    network_mode: service:pod
+    depends_on:
+      init: { condition: service_completed_successfully }
+      volumes: { condition: service_completed_successfully }
+    volumes:
+      - *resolv
+      - ./config/sentinel.yaml:/etc/penelope/sentinel.yaml:ro
+      - ./.run/sentinel-ca.crt:/run/secrets/e2e/sentinel-ca.crt:ro
+      - ./.run/sentinel-ca.key:/run/secrets/e2e/sentinel-ca.key:ro
+      - ./.run/outside-ca.crt:/run/secrets/e2e/outside-ca.crt:ro
+      - ./.run/model-key:/run/secrets/e2e/model-key:ro
+      - ./.run/backend-token:/run/secrets/e2e/backend-token:ro
+      - sandbox-socket:/run/penelope/sandbox
+      - admin-socket:/run/penelope/admin
+
+  # GitHub's OAuth goes to the real names, github.com and api.github.com,
+  # which the outside's name server answers with itself; the backend trusts
+  # the outside's CA. Nothing of the backend is changed for the test. The
+  # sandbox is given the same names, a difference from a Pod that the test
+  # accepts: the sandbox does not use GitHub in it.
+  backend:
+    image: penelope-backend:${PENELOPE_E2E_TAG:?}
+    network_mode: service:pod
+    depends_on:
+      init: { condition: service_completed_successfully }
+      volumes: { condition: service_completed_successfully }
+    environment:
+      PENELOPE_PUBLIC_URL: ${PENELOPE_E2E_PUBLIC_URL:-}
+      PENELOPE_SANDBOX_TOKEN_FILE: /run/secrets/e2e/backend-token
+      PENELOPE_GITHUB_CLIENT_ID: e2e-client-id
+      PENELOPE_GITHUB_CLIENT_SECRET_FILE: /run/secrets/e2e/github-client-secret
+      PENELOPE_OWNER_GITHUB_ID: "4242"
+      PENELOPE_TIME_ZONE: UTC
+      PENELOPE_AWAKE_HOURS: "00:00-00:00"
+      PENELOPE_NIGHTLY_CRON: ${PENELOPE_E2E_NIGHTLY_CRON:-0 4 1 1 *}
+      NODE_EXTRA_CA_CERTS: /run/secrets/e2e/outside-ca.crt
+    volumes:
+      - *resolv
+      - ./.run/backend-token:/run/secrets/e2e/backend-token:ro
+      - ./.run/github-client-secret:/run/secrets/e2e/github-client-secret:ro
+      - ./.run/outside-ca.crt:/run/secrets/e2e/outside-ca.crt:ro
+      - memory:/memory
+      - memory-git:/memory/.git
+      - sources:/sources
+      - database:/var/lib/penelope
+      - intake:/run/penelope/intake
+      - sandbox-socket:/run/penelope/sandbox
+      - admin-socket:/run/penelope/admin
+
+  # Only the surrogates and the Sentinel's public certificate are here.
+  sandbox:
+    image: penelope-sandbox:${PENELOPE_E2E_TAG:?}
+    network_mode: service:pod
+    depends_on:
+      init: { condition: service_completed_successfully }
+      volumes: { condition: service_completed_successfully }
+      sentinel: { condition: service_started }
+      backend: { condition: service_started }
+    environment:
+      PENELOPE_BACKEND_URL: https://backend.example.com
+      PENELOPE_BACKEND_TOKEN: e2e-surrogate-backend-0001
+      PENELOPE_NAME: Penelope
+      PENELOPE_ROLE: the end-to-end test's agent
+      PENELOPE_OWNER: the e2e owner
+      PENELOPE_MODEL: e2e/scripted
+      PENELOPE_POLL_WAIT_SECONDS: "10"
+    volumes:
+      - *resolv
+      - ./.run/sentinel-ca.crt:/etc/penelope/ca/sentinel.crt:ro
+      - memory:/memory
+      - memory-git:/memory/.git:ro
+      - home:/home/agent
+      - sources:/sources:ro
+
+  # There is no receivers plugin yet: the container stays up for the test's
+  # small sender (sender/send.ts) to run in it, with the intake socket.
+  receivers:
+    image: penelope-receivers:${PENELOPE_E2E_TAG:?}
+    entrypoint: ["sleep", "infinity"]
+    init: true
+    network_mode: service:pod
+    depends_on:
+      init: { condition: service_completed_successfully }
+      volumes: { condition: service_completed_successfully }
+    volumes:
+      - *resolv
+      - ./sender:/e2e/sender:ro
+      - intake:/run/penelope/intake

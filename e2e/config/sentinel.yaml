@@ -1,0 +1,24 @@
+# The Sentinel's configuration for the end-to-end test (docs/sentinel-config.md).
+# Every name is made up; the surrogates are the sandbox's, and the real keys
+# are made afresh for every run under e2e/.run/.
+listen:
+  proxy: ["0.0.0.0:15001", "[::]:15001"]
+  dns: ["0.0.0.0:15053", "[::]:15053"]
+ca:
+  cert: /run/secrets/e2e/sentinel-ca.crt
+  key: /run/secrets/e2e/sentinel-ca.key
+default: passthrough
+hosts:
+  - name: model.example.com
+    upstream_ca: /run/secrets/e2e/outside-ca.crt
+    credentials:
+      - place: bearer
+        surrogate: e2e-surrogate-model-0001
+        source: { file: /run/secrets/e2e/model-key }
+  - name: backend.example.com
+    upstream: unix:///run/penelope/sandbox/backend.sock
+    credentials:
+      - place: bearer
+        surrogate: e2e-surrogate-backend-0001
+        source: { file: /run/secrets/e2e/backend-token }
+allow: []
