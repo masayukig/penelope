@@ -22,6 +22,16 @@ describe("the memory", () => {
     assert.equal(git(dir, "ls-files"), "always.md\n");
   });
 
+  it("makes the repository in an empty .git, the mount point a Pod gives it", async (t) => {
+    const dir = tempDir(t);
+    mkdirSync(path.join(dir, ".git"));
+    writeFileSync(path.join(dir, "always.md"), "# always\n");
+    const memory = new Memory(dir, author);
+    assert.equal(await memory.commit({ agent: "main", turnId: "t-1" }), "committed");
+    assert.equal(git(dir, "ls-files"), "always.md\n");
+    assert.equal(git(dir, "rev-parse", "--abbrev-ref", "HEAD").trim(), "main");
+  });
+
   it("commits what changed as it is, as the backend, saying which turn", async (t) => {
     const dir = tempDir(t);
     const memory = new Memory(dir, author);
