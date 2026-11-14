@@ -4,7 +4,8 @@
 //
 // One turn is one run of Pi: from the prompt until Pi will not go on by
 // itself. An event that comes during a turn joins it: `now` as a steer,
-// `batch` as a follow-up. The events of a turn are acked after the backend
+// with the batched events handed over beside it, and `batch` alone as a
+// follow-up. The events of a turn are acked after the backend
 // has been told the turn ended. An event that comes again, as the backend
 // hands over one that is not acked yet, is dropped by its seq.
 
@@ -159,13 +160,16 @@ export class Runner {
       this.wake?.();
       return;
     }
-    const now = events.filter((event) => event.delivery === "now");
-    const batch = events.filter((event) => event.delivery === "batch");
+    // A `now` brings the batched events handed over with it into the same
+    // steer, so that the turn sees it with what led up to it. Batched events
+    // alone follow the turn.
     turn.seqs.push(...events.map((event) => event.seq));
-    if (now.length > 0) turn.queued.push(this.input(now).then(([text, images]) => turn.session.steer(text, images)));
-    if (batch.length > 0) {
-      turn.queued.push(this.input(batch).then(([text, images]) => turn.session.followUp(text, images)));
-    }
+    const steer = events.some((event) => event.delivery === "now");
+    turn.queued.push(
+      this.input(events).then(([text, images]) =>
+        steer ? turn.session.steer(text, images) : turn.session.followUp(text, images),
+      ),
+    );
   }
 
   /** The text of the events, and the images of the owner's messages among them. */

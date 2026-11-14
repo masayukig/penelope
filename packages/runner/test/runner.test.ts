@@ -352,3 +352,32 @@ test("an event handled already is dropped when it comes again", async () => {
   await new Promise((resolve) => setTimeout(resolve, 1500));
   assert.equal(calls.filter((c) => c.lastRole === "user" && c.lastText.includes("once")).length, 1);
 });
+
+test("a now that comes with batched events steers the turn together with them", async () => {
+  const { fake, start, calls } = await world();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await start(async (call) => {
+    if (call.lastRole === "user" && call.userTexts.length === 1) {
+      return { calls: [{ tool: "bash", args: { command: "echo working" } }] };
+    }
+    if (call.lastRole === "toolResult" && call.userTexts.length === 1) {
+      await held;
+      return { calls: [{ tool: "bash", args: { command: "echo more" } }] };
+    }
+    return { text: "done" };
+  });
+  fake.push(ui(1, "start"));
+  await until(() => calls.length >= 2);
+  // One poll hands over the stream and the mention after it, as the backend does.
+  fake.push(slack(2, "batch"));
+  fake.push(slack(3, "now"));
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  release();
+  await until(() => acked(fake).includes(3) && acked(fake).includes(2));
+
+  const steered = calls.find((c) => c.userTexts.length === 2)!;
+  assert.match(steered.userTexts[1]!, /\[seq 3\] slack\/ops/);
+  assert.match(steered.userTexts[1]!, /\[batch\] slack\/ops: 1 event \(seq 2\)/);
+  assert.equal(fake.sent("POST", "/v1/turns/end").length, 1);
+});
