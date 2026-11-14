@@ -23,6 +23,14 @@
       "matchStrings": ["FROM (?:--platform=\\S+ )?golang:(?<currentValue>\\d+\\.\\d+\\.\\d+)-"],
       "depNameTemplate": "go",
       "datasourceTemplate": "golang-version"
+    },
+    {
+      "description": "porkadot is not on RubyGems; the sandbox's image builds its gem from a tag of its repository, so its version is read from the repository's tags",
+      "customType": "regex",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": ["ARG PORKADOT_VERSION=(?<currentValue>v\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "yuanying/porkadot",
+      "datasourceTemplate": "github-tags"
     }
   ],
   "packageRules": [

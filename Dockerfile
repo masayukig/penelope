@@ -11,7 +11,8 @@
 # copied into the image of the target platform: Go cross-compiles, and what tsc
 # writes is the same on every platform. The exceptions are the final stages
 # of the backend, which installs git, and of the sandbox, which installs
-# Debian's packages; building those for another platform needs QEMU.
+# Debian's packages, and the stage that builds porkadot's gem with its native
+# extensions; building those for another platform needs QEMU.
 # VERSION is the release's tag.
 #
 # The Node here and the Node of setup-node in the workflows are the same
@@ -122,6 +123,25 @@ RUN KUBECTL_VERSION=$KUBECTL_VERSION HELM_VERSION=$HELM_VERSION KUSTOMIZE_VERSIO
 # The Go toolchain of the target platform, copied whole.
 FROM golang:1.27.4-trixie AS sandbox-go
 
+# porkadot, the CLI that builds and runs the cluster, is not on RubyGems: its
+# gem is built from the tag of its repository, whose gemspec lists the files
+# with git. Two of its dependencies have native extensions, so this stage
+# runs on the target platform, from the same Debian and Ruby as the sandbox,
+# and the release builds it for arm64 under QEMU. What `gem install` writes,
+# the gems under /var/lib/gems and the command in /usr/local/bin, is copied
+# into the sandbox at the same paths. Renovate raises PORKADOT_VERSION from
+# the repository's tags.
+FROM node:24.22.3-trixie-slim AS sandbox-porkadot
+ARG PORKADOT_VERSION=v0.37.7
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates git ruby ruby-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --quiet --depth 1 --branch "$PORKADOT_VERSION" https://github.com/yuanying/porkadot /src/porkadot \
+    && cd /src/porkadot \
+    && gem build porkadot.gemspec \
+    && gem install --no-document --bindir /usr/local/bin ./porkadot-*.gem \
+    && porkadot help >/dev/null
+
 # The sandbox (ADR-0011): Debian, Node, the development tools and the runner.
 # The user is `agent`, UID 1000, with HOME /home/agent; it takes the place of
 # the node image's user of the same UID. /home/agent, /memory and Pi's
@@ -150,6 +170,8 @@ RUN apt-get update \
 COPY --from=sandbox-go /usr/local/go /usr/local/go
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /usr/local/bin/
 COPY --from=sandbox-tools /out/ /usr/local/bin/
+COPY --from=sandbox-porkadot /var/lib/gems/ /var/lib/gems/
+COPY --from=sandbox-porkadot /usr/local/bin/porkadot /usr/local/bin/porkadot
 COPY packages/runner/image/entrypoint.sh /usr/local/bin/penelope-sandbox
 WORKDIR /opt/penelope/runner
 COPY --from=ts-build /src/packages/runner/package.json ./
