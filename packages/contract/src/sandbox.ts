@@ -12,6 +12,15 @@ export type FromAgent = { agent: AgentId };
 /** The lines the backend appended to a file under /sources. 1-based, both ends included. */
 export type Appended = { path: string; lines: [from: number, to: number] };
 
+/** A file that came with an event, as it was kept under /sources/<source>/files/. */
+export type DeliveredAttachment = {
+  path: string;
+  /** The media type: from the file's first bytes for PNG, JPEG, GIF and WebP, else as the sender said, else application/octet-stream. */
+  mime_type: string;
+  /** Bytes. */
+  size: number;
+};
+
 type DeliveredBase = {
   /** The backend's order. */
   seq: number;
@@ -26,7 +35,7 @@ type DeliveredBase = {
   /** Where its payload was written. */
   appended: Appended;
   /** Files that came with it, under /sources/<source>/files/. */
-  attachments?: string[];
+  attachments?: DeliveredAttachment[];
 };
 
 /**

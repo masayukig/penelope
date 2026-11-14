@@ -1,0 +1,89 @@
+# backend の仕様
+
+backend の設定、オーナーのログインのセッション、`/memory` のコミット、夜の切り替えでの backend の役目を決める。
+ADR が「backend の仕様書」「backend の設定」に委ねた点はここに書く。
+口の形は [events.md](events.md)（取り込み口）・[sandbox-api.md](sandbox-api.md)（sandbox 向けの口）・[ui-api.md](ui-api.md)（UI 向けの API）にある。
+
+## 動かし方
+
+- `backend serve` で動く。image は引数なしでこれを動かす。`backend version` は版を出す。
+- 設定は環境変数で渡す。鍵の値は環境変数に置かず、値を書いたファイルの場所を渡す（`_FILE` で終わる変数）。
+- 設定に使えない値があれば、起動せずに終わる（終了コード 2）。
+- SIGTERM で、待ち受けを閉じ、つながっている long-poll と流れを切ってから終わる。
+
+## 設定
+
+| 変数 | 既定 | 中身 |
+| --- | --- | --- |
+| `PENELOPE_DATABASE` | `/var/lib/penelope/backend.sqlite` | SQLite のファイル（永続） |
+| `PENELOPE_SOURCES_DIR` | `/sources` | `/sources` の場所。sandbox から見える場所と同じにする |
+| `PENELOPE_MEMORY_DIR` | `/memory` | `/memory` の作業ツリー |
+| `PENELOPE_INTAKE_SOCKET` | `/run/penelope/intake/backend.sock` | 取り込み口の Unix socket |
+| `PENELOPE_SANDBOX_SOCKET` | `/run/penelope/sandbox/backend.sock` | sandbox 向けの口の Unix socket |
+| `PENELOPE_LISTEN` | `0.0.0.0:8080` | UI 向けの API の TCP の待ち受け（`host:port`、IPv6 は `[::]:8080`） |
+| `PENELOPE_PUBLIC_URL` | なし | オーナーが backend に届く URL（例: `https://penelope.example.com`）。OAuth の callback はこの下の `/auth/github/callback` |
+| `PENELOPE_SANDBOX_TOKEN_FILE` | なし | sandbox 向けの口の本物の token。無ければ、sandbox 向けの口はすべて `401` |
+| `PENELOPE_GITHUB_CLIENT_ID` | なし | OAuth App の client ID |
+| `PENELOPE_GITHUB_CLIENT_SECRET_FILE` | なし | OAuth App の client secret |
+| `PENELOPE_OWNER_GITHUB_ID` | なし | オーナーの GitHub の数値の user ID |
+| `PENELOPE_TIME_ZONE` | `TZ`、それも無ければ `UTC` | 時間帯。`/sources` の日付、起きている時間、cron の式に使う |
+| `PENELOPE_AWAKE_HOURS` | `07:00-23:00` | 起きている時間（`HH:MM-HH:MM`、始まりを含み終わりを含まない。日をまたいでよい。始まりと終わりが同じならいつも起きている） |
+| `PENELOPE_NIGHTLY_CRON` | `0 4 * * *` | 夜の切り替えの時刻（5 欄の cron の式） |
+| `PENELOPE_BATCH_QUIET_MINUTES` | `5` | `batch` の N（最後の 1 件から待つ分） |
+| `PENELOPE_BATCH_MAX_MINUTES` | `30` | `batch` の M（最初の 1 件から待つ最長の分） |
+| `PENELOPE_REDELIVER_MINUTES` | `5` | 渡して ack の無い出来事をもう一度渡すまでの分 |
+| `PENELOPE_DELIVERY_UI`・`_CRON`・`_A2A`・`_SELF` | `now` | backend の中の受信元の `delivery` の既定 |
+| `PENELOPE_INLINE_SOURCES` | `ui` | inline の受信元（`,` で区切る）。`control` は書かなくても常に inline |
+| `PENELOPE_GIT_AUTHOR_NAME` | `penelope-backend` | `/memory` のコミットの作者の名前 |
+| `PENELOPE_GIT_AUTHOR_EMAIL` | `backend@penelope.invalid` | 同じくメールアドレス |
+
+- GitHub のログインは、`PENELOPE_GITHUB_CLIENT_ID`・`PENELOPE_GITHUB_CLIENT_SECRET_FILE`・`PENELOPE_OWNER_GITHUB_ID` の 3 つと `PENELOPE_PUBLIC_URL` が揃ったときだけ動く。3 つのどれも無ければ、ログインは無く、誰も入れない（[ADR-0010](adr/0010-github-oauth-for-people-tokenreview-for-a2a.md)）。一部だけあるときは、設定の誤りとして起動しない。
+- 数は分の整数で、0 より大きいもの。
+- `batch` の待ちは、N・M のほか、`now` の出来事を初めて渡すときにも終わる。そのとき待っている `batch` の出来事は、起きている時間の外でも、`now` の出来事と一緒に渡す（[events.md](events.md) の「いつ渡すか」）。
+
+## 状態
+
+- 状態は `PENELOPE_DATABASE` の SQLite の 1 つのファイルに置く（[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)）。待ち行列、会話の履歴、途中経過の記録、予約、セッションの切り替えの記録、ログインのセッションである。
+- schema は migration の列で進める。版は `PRAGMA user_version` で、その数の migration が当たっている。migration は足すだけで、書き換えない。backend より新しい版のファイルは開かずに止まる。
+- 出来事・会話の履歴・途中経過は消さない。いつまで残すかは、量が問題になったときに決める。
+- `/sources` の保存期間による削除はまだ無い。
+
+## オーナーのログイン
+
+[ADR-0010](adr/0010-github-oauth-for-people-tokenreview-for-a2a.md) の「ログインのセッションの寿命と cookie の扱い」をここで決める。
+
+- natsumi のブラウザのログインの形を写す。ログインの試みごとに 1 回限りの `state` と backend 自身の PKCE の verifier を作り、GitHub の答えのアカウントを数値の user ID でオーナーと照らす。GitHub の access token は user ID を読むのに 1 回使うだけで、残さない。
+- ログインの試みはメモリにだけ置く。寿命は 10 分。backend が再起動すると、途中のログインはやり直しになる。
+- セッションの token は 256 bit の乱数で、SQLite には SHA-256 だけを残す。
+- セッションは最後に使ってから 30 日で終わる。使うたびに終わりを延ばす（前に延ばしてから 1 時間以内なら書かない）。
+- cookie は `penelope_session` の 1 つで、`Path=/`・`HttpOnly`・`SameSite=Strict`。`PENELOPE_PUBLIC_URL` が https なら `Secure` も付ける。セッションを延ばすたびに cookie も付け直す。
+- 使うたびに、セッションの GitHub の user ID が今の設定のオーナーと同じかを確かめる。設定のオーナーを変えると、前のセッションは通らなくなる。
+- ログアウトはセッションを取り消し、cookie を消す。
+
+## `/memory` のコミット
+
+[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md) の「コミットの作者とメッセージの形」をここで決める。
+
+- ターンの終わり（`POST /v1/turns/end`）ごとに、作業ツリーの変わったものをすべて（足したもの・変えたもの・消したもの）、検査せずにそのままコミットする。変わったものが無ければコミットしない。
+- 作者とコミッターは `PENELOPE_GIT_AUTHOR_NAME` と `PENELOPE_GIT_AUTHOR_EMAIL`。
+- メッセージは、1 行目が `Turn <turn_id>`、本文が `Agent: <agent>`。
+- `.git` が無ければ、最初のコミットの前に `main` を枝にして作る。
+- git は backend の git の設定を読まない。hook も署名も使わない。作業ツリーの持ち主は sandbox のユーザーなので、その場所を `safe.directory` として渡す。
+- コミットは 1 つずつ順に行う。
+- コミットに失敗したら、ターンの終わりに `500` で答える。変わったものは作業ツリーに残り、次のターンの終わりにコミットされる。
+
+## 夜の切り替え
+
+[ADR-0007](adr/0007-one-session-switched-nightly-with-a-one-turn-curator.md) と [sandbox-api.md](sandbox-api.md) の「セッションの切り替えの知らせ」の、backend の役目を決める。
+
+- `PENELOPE_NIGHTLY_CRON` の時刻に、`source` が `control`、`id` が `nightly@<時刻>`、`payload` が `{kind: "nightly"}` の出来事を列に入れる。backend が止まっていて時刻を過ぎたものは、後から入れない。次の夜を待つ。
+- backend は切り替えの段を数えない。制御の出来事も、ほかの出来事と同じく、ack が無ければ `PENELOPE_REDELIVER_MINUTES` の後にもう一度渡すだけである。
+- 切り替えの知らせ（`POST /v1/sessions/rotated`）は記録に残す。
+- 切り替えの途中で runner が止まったときにどこからやり直すか、整理係のターンが失敗したときにどうするかは、runner が決める。
+
+## 予約
+
+- 予約は SQLite に置き、次に来る時刻を持つ。backend は 15 秒ごとに、時刻の来た予約を出来事にする。
+- 出来事の `id` は `<予約の ID>@<時刻>`、`occurred_at` は予約の時刻である。
+- cron の予約は、出来事にしたら次の時刻に進める。backend が止まっていて何回分かを過ぎたときも、出来事は 1 つだけにする。1 回の予約は、出来事にしたら消す。
+- `/sources` に書けずに出来事にできなかった予約は、そのまま残し、次の 15 秒で入れ直す。

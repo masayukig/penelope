@@ -44,7 +44,7 @@ backend には、外から 2 種類の呼び手が来る。オーナーが Web U
 
 ### 本 ADR で決定しないこと
 
-- ログインのセッションの寿命と cookie の扱い（委譲先: backend の仕様書。実装の作業単位で `docs/` に置く）
+- ログインのセッションの寿命と cookie の扱い（委譲先: [backend の仕様書](../backend.md)）
 - allow-list に載せる個別の送り手と、受ける audience の値（委譲先: 配置のリポジトリの設定）
 - Mac・iPhone のアプリ向けの token の発行の仕方（委譲先: アプリをつなぎ直すときの ADR）
 

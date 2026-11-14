@@ -100,8 +100,11 @@ export const inlineUi = {
   inline: true,
   payload: { text: "hello" },
   appended: { path: "/sources/ui/2026-11-14.jsonl", lines: [1, 1] },
-  attachments: ["/sources/ui/files/13-screenshot.png"],
+  attachments: [{ path: "/sources/ui/files/13-screenshot.png", mime_type: "image/png", size: 48213 }],
 } satisfies DeliveredEvent;
+
+// @ts-expect-error a handed-over attachment carries its type and size, not only its path
+export const bareAttachment = { ...inlineUi, attachments: ["/sources/ui/files/13-screenshot.png"] } satisfies DeliveredEvent;
 
 // @ts-expect-error an inline event carries its payload
 export const inlineWithoutPayload = { ...notice, inline: true } satisfies DeliveredEvent;

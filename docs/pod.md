@@ -10,13 +10,12 @@
 | コンテナ | UID | 持つもの |
 | --- | --- | --- |
 | sandbox | 1000（ユーザー `agent`、HOME `/home/agent`） | runner と Pi、開発の道具。サロゲートだけ |
-| backend | sandbox と別 | 取り込み口と待ち行列、sandbox 向けの口、UI 向けの API |
-| Sentinel | sandbox と別 | 透過の受け口、本物の鍵、CA の鍵、管理口 |
-| receivers | sandbox と別 | 受信のプラグイン、受信の鍵 |
+| backend | 1001 | 取り込み口と待ち行列、sandbox 向けの口、UI 向けの API |
+| Sentinel | 65532（distroless の `nonroot`） | 透過の受け口、本物の鍵、CA の鍵、管理口 |
+| receivers | 1002 | 受信のプラグイン、受信の鍵 |
 
-未決:
-
-- sandbox のほかの 3 つの UID の値（それぞれ別にするか）。
+- 4 つとも別の UID にする。網の向け直しは sandbox の UID で選ぶので（下の「網」）、ほかのコンテナが同じ UID だと、その外向きまで Sentinel へ向け直される。
+- backend と receivers の image は、ユーザーを作らず数値の UID と GID で動く。
 
 ## volume
 
@@ -41,6 +40,7 @@
 - 取り込み口の socket は sandbox に mount しない。送れるのは socket が見えるコンテナだけである（[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)）。
 - 管理口の socket も sandbox に mount しない（[ADR-0005](adr/0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md)）。
 - backend の sandbox 向けの口の socket は、backend と Sentinel だけが mount する。Sentinel は backend の登録の `upstream` でこの socket につなぐ（[sentinel-config.md](sentinel-config.md) の「上流」）。
+- コンテナの UID が違うので、配置は Pod の `fsGroup` で、共有する volume を 1 つのグループに置く。backend は sandbox が書いた `/memory` の作業ツリーを読み、`/memory/.git`・SQLite・`/sources` を書く。sandbox は `/sources` を読む。socket は backend が誰でも書ける mode で作るので、見えるかどうかは mount だけで決まる。
 
 ## 待ち受け
 
