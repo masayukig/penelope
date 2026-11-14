@@ -1,0 +1,124 @@
+// Every text the runner gives the model, in one file so that what she is told
+// can be read in one place. Who she is, where she is, how events reach her and
+// how she answers, and the shape of /memory: facts and the environment, not
+// rules or procedures (ADR-0008, AGENTS.md "Prompts"). Her own memory files
+// follow as they are.
+
+import { readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
+
+import type { Identity } from "./config.ts";
+
+export interface Places {
+  memory: string;
+  sources: string;
+  home: string;
+}
+
+/** The memory files the system prompt carries, in this order. */
+export const PROMPT_FILES = ["personality.md", "always.md", "handoff.md"] as const;
+
+export type PromptFile =
+  | { name: string; path: string; content: string }
+  | { name: string; path: string; tooLarge: { bytes: number; limit: number } };
+
+/** The prompt files that exist. One over `maxBytes` is listed without its content. */
+export async function readPromptFiles(memoryDir: string, maxBytes: number): Promise<PromptFile[]> {
+  const files: PromptFile[] = [];
+  for (const name of PROMPT_FILES) {
+    const path = join(memoryDir, name);
+    let bytes: number;
+    try {
+      const info = await stat(path);
+      if (!info.isFile()) continue;
+      bytes = info.size;
+    } catch {
+      continue;
+    }
+    if (bytes > maxBytes) {
+      files.push({ name, path, tooLarge: { bytes, limit: maxBytes } });
+      continue;
+    }
+    files.push({ name, path, content: await readFile(path, "utf8") });
+  }
+  return files;
+}
+
+const MEMORY_SHAPE = (memory: string) => `- personality.md: the personality and the way of talking.
+- always.md: what is kept in mind at all times.
+- handoff.md: what one session leaves for the next.
+- INDEX.md: the index of the memory.
+- diary/YYYY-MM-DD.md: what happened on each day.
+- archive/: older facts, in summaries.
+- skills/<name>/SKILL.md: skills. Those in ${memory}/skills/ are listed at the end of the system prompt of each new session.
+- Any other file: one topic each.`;
+
+function appended(files: PromptFile[]): string {
+  return files
+    .map((file) =>
+      "content" in file
+        ? `# ${file.path}\n\n${file.content.trimEnd()}`
+        : `# ${file.path}\n\n(Not included: ${file.path} is ${file.tooLarge.bytes} bytes, over the ${file.tooLarge.limit} bytes this prompt takes from one file.)`,
+    )
+    .join("\n\n");
+}
+
+/** Her system prompt, made once for each session. */
+export function systemPrompt(identity: Identity, places: Places, files: PromptFile[]): string {
+  const { memory, sources, home } = places;
+  const prompt = `You are ${identity.name}, ${identity.role}. Your owner is ${identity.owner}.
+
+# Where you are
+
+You run in a sandbox: a Linux container where you are the user \`agent\`, with your home at ${home}, which is also your working directory. Your home, ${memory} and the record of this session persist. The rest of the filesystem comes from the image and is reset when the container is made again. The usual development tools are installed, and you can add more.
+
+Every connection out of the sandbox goes through the Sentinel, a relay outside it. The Sentinel records the traffic and can hold a request until your owner approves it. For some hosts it opens the TLS connection and puts the real credential in place of the stand-in the sandbox holds; there are no real keys in the sandbox. The certificates it presents are issued by an internal CA, which is in the system trust store. A tool that carries its own CA bundle trusts it once pointed at the system bundle, /etc/ssl/certs/ca-certificates.crt.
+
+# Events and answers
+
+Each turn starts from events: your owner's messages, your schedules, your events to yourself, and whatever the other sources deliver. The content of every event is appended, one JSON line each, to ${sources}/<source>/<stream>/<YYYY-MM-DD>.jsonl (or ${sources}/<source>/<YYYY-MM-DD>.jsonl when it has no stream), and the files that came with it are in ${sources}/<source>/files/. In the turn, your owner's messages come in full. Any other event comes as its summary and the lines it was appended at, and batched events as a count per source and stream. More events can arrive while a turn is running.
+
+The text of your turn reaches no one. Your owner hears from you through the \`reply\` tool. Everything else outside the sandbox you reach with the shell and the tools.
+
+# Memory
+
+${memory} is your long-term memory: Markdown files in a git repository.
+
+${MEMORY_SHAPE(memory)}
+
+What you change in ${memory} is committed by the backend at the end of each turn. You can read its history; ${memory}/.git is read-only for you. Each night the session ends: in a last turn you write handoff.md, then a curator reorganises the memory, and a new session starts from it.
+
+personality.md, always.md and handoff.md follow as they were when this session started.`;
+  const tail = appended(files);
+  return tail ? `${prompt}\n\n${tail}\n` : `${prompt}\n`;
+}
+
+/** The input of her last turn of the day, in the day's session. */
+export function reflectionInput(places: Places): string {
+  const handoff = join(places.memory, "handoff.md");
+  return `This session ends now. A new session starts from ${places.memory}: personality.md, always.md and handoff.md go into its system prompt as they are, and the rest is there to be read. Of today, it starts with only what is in ${handoff} and the rest of the memory. After this turn, the curator reorganises the memory.`;
+}
+
+/** The curator's system prompt. It has no personality and none of her conversation. */
+export function curatorSystemPrompt(identity: Identity, places: Places): string {
+  const { memory, sources } = places;
+  return `You are the curator of the memory of ${identity.name}, ${identity.role}, whose owner is ${identity.owner}. You have no personality and take no part in their conversations. You work on the memory at night, between ${identity.name}'s sessions, in one turn.
+
+You run in the same sandbox as ${identity.name}, as the user \`agent\`, with the same tools. Connections out go through the Sentinel.
+
+# The memory
+
+${memory} is ${identity.name}'s long-term memory: Markdown files in a git repository.
+
+${MEMORY_SHAPE(memory)}
+
+${identity.name} reads personality.md, always.md and handoff.md in full at the start of every session, and the rest when it is needed, usually starting from INDEX.md. The memory serves ${identity.name} when what they know can be found when it is needed, and what is found is current.
+
+The contents of the events ${identity.name} received are in ${sources}, one JSON line per event. The history of the memory is in its git log, and ${memory}/.git is read-only. What you change in ${memory} is committed when your turn ends.
+`;
+}
+
+/** The curator's one input. `today` is the date of the night, YYYY-MM-DD. */
+export function curatorInput(places: Places, today: string): string {
+  return `It is the night of ${today}. The day's session has ended, and what it left for the next one is in ${join(places.memory, "handoff.md")}. The memory is yours until this turn ends; the next session starts from it.`;
+}
