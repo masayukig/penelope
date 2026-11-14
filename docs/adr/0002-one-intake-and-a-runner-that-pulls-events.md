@@ -1,7 +1,7 @@
 # 0002. 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく
 
 - Date: 2026-11-14
-- Status: Accepted
+- Status: Accepted（Decision「runner が取りにいく」の loopback を塞ぐ点は ADR-0014 で置き換え）
 
 ## Context
 
@@ -44,6 +44,7 @@ penelope では Pi が sandbox の中で動く（ADR-0001）。出来事を sand
 - runner は、溜まった出来事をまとめて 1 ターンの入力にする。ターンの途中に届いた出来事は、Pi の steer か follow-up でそのセッションに入れる。
 - runner は Pi の出来事を購読し、途中の思考、ツールの呼び出しと結果、返事の区切り、ターンの始まりと終わりを backend へ送る。
 - runner から backend への通信も、ほかの外向きと同じく Sentinel を通る。sandbox の UID から同じ Pod の loopback へ直に届く道は塞ぐ。backend への鍵はサロゲートとして sandbox に置き、Sentinel が本物に差し替える（ADR-0003、ADR-0004）。
+  - 2026-11-14 追記: ADR-0014 で置き換え。loopback は塞がず、backend の sandbox 向けの口を Unix socket だけで待ち受けて、Sentinel を通る道に限る。
 
 ### 失敗したときの倒し方
 
@@ -51,7 +52,7 @@ penelope では Pi が sandbox の中で動く（ADR-0001）。出来事を sand
 
 ### 本 ADR で決定しないこと
 
-- 封筒の各欄の型と、取り込み口の API の形（委譲先: 出来事の仕様書。repo-bootstrap の後の実装の作業単位で `docs/` に置く）
+- 封筒の各欄の型と、取り込み口の API の形（委譲先: [出来事の仕様書](../events.md)）
 - 最初に作る receivers のプラグインの順番（委譲先: 最小版の作業単位の一覧）
 - UI へ流す途中経過の細かさ（トークンごとか、ブロックごとか）（委譲先: ADR-0009 の「本 ADR で決定しないこと」）
 - 出来事と会話の履歴をいつまで残すか（委譲先: backend の仕様書）
@@ -81,6 +82,8 @@ penelope では Pi が sandbox の中で動く（ADR-0001）。出来事を sand
 - Related: ADR-0008 プロンプトは事実と環境だけを伝え、やり方は任せる
 - Related: ADR-0009 最初の UI は Web だけにし、新しい API と Astryx で作る
 - Related: ADR-0010 人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる
+- Related: ADR-0013 出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す
+- Superseded by（一部）: ADR-0014 sandbox の loopback は sandbox に任せ、Pod の中の口は Unix socket だけで待ち受ける（Decision「runner が取りにいく」の loopback を塞ぐ点）
 
 ## References
 
