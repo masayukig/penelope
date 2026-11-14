@@ -7,6 +7,8 @@ import { test } from "node:test";
 import {
   curatorInput,
   curatorSystemPrompt,
+  FOLDING,
+  foldAskInput,
   readPromptFiles,
   reflectionInput,
   systemPrompt,
@@ -77,4 +79,19 @@ test("the reflection and the curator's input name the places", async () => {
   const places = await memory({});
   assert.ok(reflectionInput(places).includes(join(places.memory, "handoff.md")));
   assert.ok(curatorInput(places, "2026-11-14").includes("2026-11-14"));
+});
+
+test("with folding on, the system prompt says what folding leaves", async () => {
+  const places = await memory({});
+  const files = await readPromptFiles(places.memory, 1000);
+  const folding = systemPrompt(identity, places, files, { folding: true });
+  assert.ok(folding.includes(FOLDING));
+  assert.ok(!systemPrompt(identity, places, files, { folding: false }).includes(FOLDING));
+});
+
+test("the request before folding names no way to answer it", () => {
+  assert.equal(
+    foldAskInput(),
+    "This turn is about to be folded. Write anything from it you want to keep. No tool runs while you answer.",
+  );
 });

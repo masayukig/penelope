@@ -37,6 +37,8 @@ export interface Config {
   /** An image of the owner's message larger than this is left as a path. */
   imageMaxBytes: number;
   pollWaitSeconds: number;
+  /** Whether ended turns are folded before they are sent to the model (ADR-0015). */
+  turnFold: boolean;
 }
 
 export class ConfigError extends Error {
@@ -89,6 +91,8 @@ export function readConfig(env: Env): Config {
   const promptFileMaxBytes = positiveInteger(env, "PENELOPE_PROMPT_FILE_MAX_BYTES", 65536, problems);
   const imageMaxBytes = positiveInteger(env, "PENELOPE_IMAGE_MAX_BYTES", 5 * 1024 * 1024, problems);
   const pollWaitSeconds = positiveInteger(env, "PENELOPE_POLL_WAIT_SECONDS", 30, problems);
+  const fold = env.PENELOPE_TURN_FOLD || "on";
+  if (fold !== "on" && fold !== "off") problems.push("PENELOPE_TURN_FOLD must be on or off");
   if (problems.length > 0) throw new ConfigError(problems.join("; "));
 
   const agentDir = env.PI_CODING_AGENT_DIR || join(home, ".pi", "agent");
@@ -106,5 +110,6 @@ export function readConfig(env: Env): Config {
     promptFileMaxBytes,
     imageMaxBytes,
     pollWaitSeconds,
+    turnFold: fold !== "off",
   };
 }

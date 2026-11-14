@@ -18,6 +18,7 @@ import type { Activity, ControlPayload, DeliveredEvent } from "@penelope/contrac
 import { TurnRecorder } from "./activities.ts";
 import type { Backend } from "./backend.ts";
 import type { Config } from "./config.ts";
+import { FOLD_ASK, foldExtension, TURN_END } from "./fold.ts";
 import { inlineImages } from "./images.ts";
 import {
   curatorManager,
@@ -32,6 +33,7 @@ import {
 import {
   curatorInput,
   curatorSystemPrompt,
+  foldAskInput,
   type Places,
   readPromptFiles,
   reflectionInput,
@@ -82,6 +84,11 @@ export class Runner {
   private readonly inbox: DeliveredEvent[] = [];
   private wake: (() => void) | undefined;
   private sending: Promise<void> = Promise.resolve();
+  /** While the request before folding is answered, no tool runs. */
+  private asking = false;
+  /** How many ended turns the last model call had folded. */
+  private folded = 0;
+  private stopping = false;
 
   constructor(options: RunnerOptions) {
     this.config = options.config;
@@ -92,6 +99,13 @@ export class Runner {
       modelRuntime: options.modelRuntime,
       settings: options.settings,
       tools: backendTools(options.backend),
+      extensions: [
+        foldExtension({
+          folding: () => options.config.turnFold,
+          asking: () => this.asking,
+          folded: (count) => (this.folded = count),
+        }),
+      ],
     };
     this.places = { memory: options.config.memoryDir, sources: options.config.sourcesDir, home: options.config.home };
   }
@@ -100,6 +114,7 @@ export class Runner {
   async run(signal: AbortSignal): Promise<void> {
     await this.open();
     signal.addEventListener("abort", () => {
+      this.stopping = true;
       this.wake?.();
       void this.session?.abort();
     });
@@ -112,7 +127,7 @@ export class Runner {
 
   private async mainPrompt(): Promise<string> {
     const files = await readPromptFiles(this.config.memoryDir, this.config.promptFileMaxBytes);
-    return systemPrompt(this.config.identity, this.places, files);
+    return systemPrompt(this.config.identity, this.places, files, { folding: this.config.turnFold });
   }
 
   /** Her session as the last run left it, or a new one. */
@@ -217,20 +232,37 @@ export class Runner {
    * backend is told the turn ended (it commits /memory), and the events are
    * acked. A turn that fails is not acked: the backend hands its events over
    * again.
+   *
+   * An ordinary turn is one of her day's session, made of events: events can
+   * join it, and when it ends it is marked so that it is folded from then on
+   * (ADR-0015). One that ended without any text of hers is first asked, once,
+   * for what she wants to keep. The nightly reflection and the curator's turn
+   * are not ordinary.
    */
   private async turnOf(
     session: AgentSession,
     input: string,
     seqs: number[],
-    joinable = true,
+    ordinary = true,
     images?: ImageContent[],
   ): Promise<void> {
     const recorder = new TurnRecorder(randomUUID(), () => new Date().toISOString(), (activity) => this.send(activity));
-    const unsubscribe = session.subscribe((event) => recorder.handle(event));
+    let spoke = false;
+    let compactions = 0;
+    const unsubscribe = session.subscribe((event) => {
+      recorder.handle(event);
+      if (event.type === "message_update" && event.assistantMessageEvent.type === "text_end") {
+        spoke ||= event.assistantMessageEvent.content.trim() !== "";
+      } else if (event.type === "compaction_end" && event.result && !event.aborted) {
+        compactions++;
+      }
+    });
     const turn: Turn = { session, seqs: [...seqs], queued: [] };
-    if (joinable) this.turn = turn;
+    if (ordinary) this.turn = turn;
+    this.folded = 0;
     recorder.start();
     let failed = false;
+    let asked = false;
     try {
       let text = input;
       let withImages = images;
@@ -252,9 +284,17 @@ export class Runner {
       failed = true;
       this.log(`turn ${recorder.turnId} failed: ${(error as Error).message}`);
     } finally {
-      if (joinable) this.turn = undefined;
-      unsubscribe();
+      if (ordinary) this.turn = undefined;
     }
+    if (ordinary && !failed) {
+      if (this.config.turnFold && !spoke && !this.stopping) {
+        asked = true;
+        await this.ask(session, recorder.turnId);
+      }
+      await session.sendCustomMessage({ customType: TURN_END, content: "", display: false });
+    }
+    unsubscribe();
+    this.log(`turn ${recorder.turnId}: folded ${this.folded}, asked ${asked ? "yes" : "no"}, compactions ${compactions}`);
     recorder.end();
     await this.sending;
     try {
@@ -267,6 +307,18 @@ export class Runner {
       return;
     }
     await this.ack(turn.seqs);
+  }
+
+  /** The request before folding. Events that come meanwhile wait for the next turn. */
+  private async ask(session: AgentSession, turnId: string): Promise<void> {
+    this.asking = true;
+    try {
+      await session.sendCustomMessage({ customType: FOLD_ASK, content: foldAskInput(), display: false }, { triggerTurn: true });
+    } catch (error) {
+      this.log(`turn ${turnId}: the request before folding failed: ${(error as Error).message}`);
+    } finally {
+      this.asking = false;
+    }
   }
 
   private async ack(seqs: number[]): Promise<void> {
@@ -301,7 +353,7 @@ export class Runner {
     // tidy again, and the day's session does not go on (docs/sandbox-api.md).
     try {
       const curator = await openSession(
-        { ...this.setup, tools: [] },
+        { ...this.setup, tools: [], extensions: [] },
         curatorSystemPrompt(this.config.identity, this.places),
         curatorManager(this.config),
       );

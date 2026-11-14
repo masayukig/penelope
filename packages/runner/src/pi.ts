@@ -10,6 +10,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   type ModelRuntime,
+  type ExtensionFactory,
   SessionManager,
   type SettingsManager,
   type ToolDefinition,
@@ -23,6 +24,8 @@ export interface PiSetup {
   /** Pi's settings. A deployment reads them from Pi's directory. */
   settings: () => SettingsManager;
   tools: ToolDefinition[];
+  /** Given to Pi as they are; nothing is loaded from disk. */
+  extensions: ExtensionFactory[];
 }
 
 /** Which session is hers, and the last nightly event that switched it. */
@@ -86,6 +89,7 @@ export async function openSession(
     agentDir: config.agentDir,
     settingsManager,
     noExtensions: true,
+    extensionFactories: setup.extensions,
     noContextFiles: true,
     noPromptTemplates: true,
     noThemes: true,

@@ -59,6 +59,7 @@ penelope では、記憶の検査をやめる（ADR-0006）。Pi は sandbox の
 - Related: ADR-0001 1 つの Pod に backend・Sentinel・sandbox・receivers を置き、Pi ごと sandbox の中で動かす
 - Related: ADR-0006 記憶は `/memory` の形を保ち、検査をやめ、コミットだけを sandbox の外で行う
 - Related: ADR-0008 プロンプトは事実と環境だけを伝え、やり方は任せる
+- Related: ADR-0015 終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない（compaction の手前に畳み込みを足す）
 - Related（natsumi、このリポジトリの外）: ADR 0009「長期記憶と、夜の session の切り替え」、ADR 0055「記憶の組み直しは、人格を持たない整理係が夜に行う」、ADR 0068「整理係は人間の記憶のように、工程を分けて古い記憶を要約し、出来事を知識にする」
 
 ## References
