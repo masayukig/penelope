@@ -1,0 +1,12 @@
+# Build artifacts
+/bin/
+dist/
+node_modules/
+
+# Test artifacts
+*.test
+coverage.out
+
+# Editor / OS
+.DS_Store
+*.swp
