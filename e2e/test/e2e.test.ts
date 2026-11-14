@@ -14,12 +14,14 @@ import { after, before, describe, it } from "node:test";
 import type { TurnLine } from "@penelope/contract";
 
 import {
+  a2aCall,
   Browser,
   compose,
   composeEnv,
   E2E_DIR,
   eventually,
   exec,
+  fromOutside,
   type ModelCall,
   outside,
   pod,
@@ -291,7 +293,7 @@ describe("the Pod end to end", () => {
 
   it("has no real key in the sandbox, and only its surrogates", track(async () => {
     // Guards against: a real key, or the intake, becoming reachable from the sandbox.
-    const keys = ["model-key", "backend-token", "github-client-secret", "sentinel-ca.key", "outside-ca.key", "outside.key"]
+    const keys = ["model-key", "backend-token", "github-client-secret", "kube-token", "sender-token", "stranger-token", "sentinel-ca.key", "outside-ca.key", "outside.key"]
       .map((name) => readFileSync(join(RUN_DIR, name), "utf8").trim().split("\n").filter((line) => line && !line.startsWith("-----")))
       .flat();
     const found = exec(
@@ -347,6 +349,74 @@ describe("the Pod end to end", () => {
       ["e2e", "feed", 1, "E2E-BATCH one", [{ path: file, lines: [1, 1] }]],
     );
     assert.ok(batchLine.seqs[0]! < nowLine.seq, "the batch came before the now");
+  }));
+
+  it("takes another agent's request over A2A, asks it back, and hands it her answer", track(async () => {
+    // Guards against: a request of an allowed ServiceAccount, checked by TokenReview or by gated's assertion, not reaching
+    // a turn; her question or answer not reaching the sender's task; or a ServiceAccount not on the allow-list getting in.
+    const token = (name: string) => readFileSync(join(RUN_DIR, name), "utf8").trim();
+    const host = new URL(pod.url).hostname;
+    const bearer = { authorization: `Bearer ${token("sender-token")}` };
+    const gated = async (subject = "system:serviceaccount:e2e:claude") => ({ "gated-assertion": await outside.assertion(subject, host) });
+    const message = (id: string, text: string, more: Record<string, string> = {}) => ({ message: { messageId: id, role: "ROLE_USER", parts: [{ text }], ...more } });
+
+    // The card, without a token: who she is and where to call.
+    const card = JSON.parse(fromOutside("GET", new URL("/a2a/.well-known/agent-card.json", pod.url).href).text) as {
+      name: string;
+      description: string;
+      supportedInterfaces: { url: string }[];
+    };
+    assert.equal(card.name, "E2E Agent");
+    assert.equal(card.description, "The end-to-end test's agent.");
+    assert.equal(card.supportedInterfaces[0]!.url, `${pod.url}/a2a/`);
+
+    // A ServiceAccount that is not a sender is refused, by either check; so is a call with nothing.
+    const strangers: Record<string, string>[] = [{ authorization: `Bearer ${token("stranger-token")}` }, await gated("system:serviceaccount:e2e:stranger"), {}];
+    for (const headers of strangers) {
+      const refused = a2aCall("SendMessage", message("e2e-stranger", "E2E-A2A-STRANGER"), headers);
+      assert.equal(refused.status, 401, JSON.stringify(headers));
+    }
+
+    // The sender asks with its ServiceAccount token, which the backend reviews.
+    const sent = a2aCall("SendMessage", message("e2e-a2a-1", "E2E-A2A-ASK look at the alerts"), bearer);
+    assert.equal(sent.status, 200, JSON.stringify(sent.body));
+    // SendMessage answers with the task under `task` (or a message under `message`); GetTask with the task itself.
+    const task = sent.body.result?.task as { id: string; contextId: string; status: { state: string } };
+    assert.equal(task?.status?.state, "TASK_STATE_WORKING", JSON.stringify(sent.body));
+    const getTask = async (headers: Record<string, string>) => a2aCall("GetTask", { id: task.id }, headers).body.result;
+
+    // Her turn asks back; the sender reads the question from its task.
+    const asking = await eventually("her question", async () => {
+      const now = await getTask(bearer);
+      return now.status.state === "TASK_STATE_INPUT_REQUIRED" ? now : undefined;
+    }, 180_000);
+    assert.equal(asking.status.message.parts[0].text, "E2E-A2A-QUESTION");
+
+    // The sender answers through gated, which took its token off and put its assertion in place.
+    const answered = a2aCall("SendMessage", message("e2e-a2a-2", "E2E-A2A-ANSWER the backend", { taskId: task.id, contextId: task.contextId }), await gated());
+    assert.equal(answered.status, 200, JSON.stringify(answered.body));
+    assert.equal(answered.body.result?.task?.id, task.id, JSON.stringify(answered.body));
+
+    const done = await eventually("her answer", async () => {
+      const now = await getTask(await gated());
+      return now.status.state === "TASK_STATE_COMPLETED" ? now : undefined;
+    }, 180_000);
+    assert.equal(done.artifacts[0].parts[0].text, "E2E-A2A-DONE");
+
+    // Both messages are a2a events of the sender's stream, appended to /sources, each naming the task.
+    const day = new Date().toISOString().slice(0, 10);
+    const lines = exec("sandbox", `cat /sources/a2a/claude/${day}.jsonl`).stdout.trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(
+      lines.map((line) => [line.source, line.stream, line.payload.kind, line.payload.task_id, line.payload.text]),
+      [
+        ["a2a", "claude", "request", task.id, "E2E-A2A-ASK look at the alerts"],
+        ["a2a", "claude", "answer", task.id, "E2E-A2A-ANSWER the backend"],
+      ],
+    );
+    // The API server was asked with the backend's own token, and never for the strangers' way in through gated.
+    const reviews = await outside.reviews();
+    assert.ok(reviews.length > 0);
+    assert.ok(reviews.every((review) => review.caller === "backend"), JSON.stringify(reviews));
   }));
 
   // Last, as from here on a night comes every minute.

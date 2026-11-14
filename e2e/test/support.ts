@@ -137,7 +137,21 @@ export const outside = {
     control<{ code: string; state: string; redirect_uri: string }>("/authorize", { method: "POST", body: JSON.stringify({ query }) }),
   modelCalls: async () => (await control<{ calls: ModelCall[] }>("/model")).calls,
   seen: async () => (await control<{ seen: Seen[] }>("/seen")).seen,
+  /** The TokenReviews the fake API server answered. */
+  reviews: async () => (await control<{ reviews: { caller: string; outcome: string }[] }>("/reviews")).reviews,
+  /** What the fake gated would put on a call of `subject` to `host`. */
+  assertion: async (subject: string, host: string) =>
+    (await control<{ assertion: string }>("/assertion", { method: "POST", body: JSON.stringify({ subject, host }) })).assertion,
 };
+
+/**
+ * A JSON-RPC call of A2A to the backend's way in, from outside the Pod, as another agent makes it: in A2A 1.0, which
+ * the senders name in A2A-Version (a call without it is taken as 0.3).
+ */
+export function a2aCall(method: string, params: unknown, headers: Record<string, string>): { status: number; body: any } {
+  const answer = fromOutside("POST", new URL("/a2a/", pod.url).href, { "content-type": "application/json", "a2a-version": "1.0", ...headers }, JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }));
+  return { status: answer.status, body: answer.text ? JSON.parse(answer.text) : undefined };
+}
 
 export function textOf(content: unknown): string {
   if (typeof content === "string") return content;

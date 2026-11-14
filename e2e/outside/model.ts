@@ -39,6 +39,17 @@ export function where(messages: readonly ChatMessage[]): { system: string; input
 const write = (path: string, content: string) => ({ name: "write", args: { path, content } });
 const reply = (text: string) => ({ name: "reply", args: { text } });
 
+/** The seq of the input's `a2a` event: what `reply_to_agent` names (docs/events.md, "ターンに入る形"). */
+function a2aSeq(input: string): number | undefined {
+  for (const line of input.split("\n")) {
+    if (!line.startsWith("{")) continue;
+    const event = JSON.parse(line) as { source?: string; seq?: number };
+    if (event.source === "a2a") return event.seq;
+  }
+  return undefined;
+}
+const replyToAgent = (input: string, state: string, text: string) => ({ name: "reply_to_agent", args: { in_reply_to: a2aSeq(input), state, text } });
+
 /** What the model says next. Each turn ends with text of her own, so that no turn is asked before it is folded. */
 export function script(messages: readonly ChatMessage[]): Answer {
   const { system, input, steps } = where(messages);
@@ -57,6 +68,8 @@ export function script(messages: readonly ChatMessage[]): Answer {
         { text: "E2E-TEXT-1" },
       ];
     }
+    if (input.includes("E2E-A2A-ASK")) return [{ calls: [replyToAgent(input, "input-required", "E2E-A2A-QUESTION")] }, { text: "Asked." }];
+    if (input.includes("E2E-A2A-ANSWER")) return [{ calls: [replyToAgent(input, "completed", "E2E-A2A-DONE")] }, { text: "Answered." }];
     if (input.includes("E2E-NOW")) return [{ calls: [reply("E2E-REPLY-EVENTS")] }, { text: "Seen." }];
     const turn = /E2E-TURN-(\d+)/.exec(input)?.[1];
     if (turn) return [{ calls: [reply(`E2E-REPLY-${turn}`)] }, { text: `E2E-TEXT-${turn}` }];

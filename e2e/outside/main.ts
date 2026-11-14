@@ -1,8 +1,9 @@
 // The outside world of the end-to-end test (e2e/README.md), in one container:
 //
 //   :53/udp   a name server for the test's names, all of them this container
-//   :443      HTTPS, by Host: the model's API, GitHub's OAuth and API, and a
-//             host the Sentinel passes through
+//   :443      HTTPS, by Host: the model's API, GitHub's OAuth and API, the
+//             cluster's API server and gated's keys, and a host the Sentinel
+//             passes through
 //   :80       plain HTTP for the host the Sentinel passes through
 //   :8081     the control API the test reads what came here from, on loopback
 //
@@ -16,6 +17,7 @@ import https from "node:https";
 import { networkInterfaces } from "node:os";
 import process from "node:process";
 
+import { cluster, GATED, KUBERNETES } from "./cluster.ts";
 import { serveDns, type Lookup } from "./dns.ts";
 import { chunks, completion, type ChatMessage, script } from "./model.ts";
 
@@ -41,7 +43,12 @@ const MODEL = "model.example.com";
 const GITHUB = "github.com";
 const GITHUB_API = "api.github.com";
 const PLAIN = "plain.example.net";
-const NAMES = new Set([MODEL, GITHUB, GITHUB_API, PLAIN, "backend.example.com"]);
+const NAMES = new Set([MODEL, GITHUB, GITHUB_API, PLAIN, KUBERNETES, GATED, "backend.example.com"]);
+const fakeCluster = cluster({
+  backend: secret("OUTSIDE_KUBE_TOKEN_FILE"),
+  sender: secret("OUTSIDE_SENDER_TOKEN_FILE"),
+  stranger: secret("OUTSIDE_STRANGER_TOKEN_FILE"),
+});
 
 type Credential = "real" | "surrogate" | "none" | "other";
 type Seen = { at: string; scheme: "https" | "http"; host: string; method: string; path: string; credential: Credential };
@@ -135,6 +142,8 @@ function outside(scheme: "https" | "http") {
       if (scheme === "https" && host === MODEL) return model(request, response);
       if (scheme === "https" && host === GITHUB) return github(request, response);
       if (scheme === "https" && host === GITHUB_API) return githubApi(request, response);
+      if (scheme === "https" && host === KUBERNETES) return fakeCluster.tokenReview(request, await body(request), response);
+      if (scheme === "https" && host === GATED) return fakeCluster.gatedKeys(request, response);
       if (host === PLAIN) {
         await body(request);
         response.writeHead(200, { "content-type": "text/plain" });
@@ -165,6 +174,12 @@ async function control(request: http.IncomingMessage, response: http.ServerRespo
   }
   if (request.method === "GET" && url.pathname === "/seen") return json(response, 200, { seen, lookups });
   if (request.method === "GET" && url.pathname === "/model") return json(response, 200, { calls: modelCalls });
+  if (request.method === "GET" && url.pathname === "/reviews") return json(response, 200, { reviews: fakeCluster.reviews });
+  if (request.method === "POST" && url.pathname === "/assertion") {
+    // What gated would put on a call of the subject to the host, in place of the token it took.
+    const { subject, host } = JSON.parse(await body(request)) as { subject: string; host: string };
+    return json(response, 200, { assertion: fakeCluster.assertion(subject, host) });
+  }
   json(response, 404, { error: "not found" });
 }
 
