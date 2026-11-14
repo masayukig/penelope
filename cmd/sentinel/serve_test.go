@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -235,5 +238,126 @@ func TestTheResolverIsTakenFromResolvConf(t *testing.T) {
 	writeConfig(t, path, "search example.com\n")
 	if _, err := resolverFrom(path); err == nil {
 		t.Error("a resolv.conf without a nameserver gave a resolver")
+	}
+}
+
+// logRecords keeps what the Sentinel logs, for the tests that can see a
+// reload only there.
+type logRecords struct {
+	mu   sync.Mutex
+	recs []slog.Record
+}
+
+func (l *logRecords) Enabled(context.Context, slog.Level) bool { return true }
+func (l *logRecords) Handle(_ context.Context, r slog.Record) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.recs = append(l.recs, r.Clone())
+	return nil
+}
+func (l *logRecords) WithAttrs([]slog.Attr) slog.Handler { return l }
+func (l *logRecords) WithGroup(string) slog.Handler      { return l }
+
+// saw reports whether an Info record holds an attribute of the value v.
+func (l *logRecords) saw(v string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.recs {
+		found := false
+		r.Attrs(func(a slog.Attr) bool {
+			found = found || (r.Level == slog.LevelInfo && a.Value.String() == v)
+			return !found
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+// Guards against: a SIGHUP that does not make the running Sentinel read its
+// configuration again (docs/sentinel-config.md). The ten seconds of the
+// regular reload are not waited for; the decision of what to take is
+// TestAReloadKeepsTheConfigurationWhenTheNewOneCannotBeServed's.
+func TestASIGHUPReadsTheConfigurationAgain(t *testing.T) {
+	// This process takes SIGHUP itself first, so that a signal sent before
+	// serve listens for it does not end the test.
+	own := make(chan os.Signal, 16)
+	signal.Notify(own, syscall.SIGHUP)
+	defer signal.Stop(own)
+
+	ca := testca.New(t)
+	path := filepath.Join(t.TempDir(), "sentinel.yaml")
+	first := sentinelConfig(ca, fakeResolver(t), "")
+	writeConfig(t, path, first)
+	logs := &logRecords{}
+	ctx, cancel := context.WithCancel(context.Background())
+	listening := make(chan struct{}, 8)
+	done := make(chan error, 1)
+	go func() {
+		done <- serve(ctx, path, io.Discard, slog.New(logs), func(string, net.Addr) { listening <- struct{}{} })
+	}()
+	stop := func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("serve = %v, want nil when stopped", err)
+		}
+	}
+	select {
+	case <-listening:
+	case err := <-done:
+		t.Fatalf("serve stopped: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not listen")
+	}
+	defer stop()
+
+	// Written whole, so that no read sees half of it.
+	next := path + ".next"
+	writeConfig(t, next, first+"default: deny\n")
+	if err := os.Rename(next, path); err != nil {
+		t.Fatal(err)
+	}
+	// The file is read again within the ten seconds anyway; a SIGHUP every
+	// 50 ms makes it well before them.
+	deadline := time.Now().Add(5 * time.Second)
+	for !logs.saw(string(config.Deny)) {
+		if time.Now().After(deadline) {
+			t.Fatal("the configuration was not read again after SIGHUP")
+		}
+		if err := syscall.Kill(os.Getpid(), syscall.SIGHUP); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// Guards against: a Sentinel that runs on without one of its listeners
+// (ADR-0014): it does not start when it cannot listen.
+func TestServeDoesNotStartWhenItCannotListen(t *testing.T) {
+	taken, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = taken.Close() }()
+	ca := testca.New(t)
+	for name, listen := range map[string]string{
+		"the proxy": "listen:\n  proxy: [\"" + taken.Addr().String() + "\"]\n  dns: [\"127.0.0.1:0\"]\n",
+		"DNS":       "listen:\n  proxy: [\"127.0.0.1:0\"]\n  dns: [\"" + taken.Addr().String() + "\"]\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "sentinel.yaml")
+			writeConfig(t, path, listen+"resolver: 127.0.0.1:53\nca: {cert: "+ca.CertFile+", key: "+ca.KeyFile+"}\n")
+			done := make(chan error, 1)
+			go func() { done <- serve(context.Background(), path, io.Discard, slog.New(slog.DiscardHandler), nil) }()
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Error("serve = nil, want an error")
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("serve went on without its listener")
+			}
+		})
 	}
 }

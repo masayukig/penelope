@@ -20,6 +20,9 @@ function setup(t: { after: (fn: () => void) => void }) {
 
 const at = "2026-11-14T09:00:01Z";
 
+// What is kept is read straight from the tables: there is no API to read it
+// back yet, and the schema only grows by migrations (docs/backend.md "状態").
+
 describe("the conversation", () => {
   it("keeps a reply and sends it down the stream", (t) => {
     const { conversation, seen } = setup(t);

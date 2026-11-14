@@ -23,11 +23,15 @@ async function memory(files: Record<string, string>): Promise<Places> {
   return { memory: dir, sources: "/sources", home: "/home/agent" };
 }
 
+// What the prompts say is looked at by the facts in them (ADR-0008), not by their wording.
+
 test("the system prompt says who she is and where", async () => {
+  // Guards against: a system prompt that loses her name, role or owner, or one of the places she works in.
   const places = await memory({});
   const prompt = systemPrompt(identity, places, await readPromptFiles(places.memory, 1000));
-  assert.match(prompt, /You are Example, the operator of a Kubernetes cluster\./);
-  assert.match(prompt, /Your owner is Owner\./);
+  assert.ok(prompt.includes(identity.name));
+  assert.ok(prompt.includes(identity.role));
+  assert.ok(prompt.includes(identity.owner));
   assert.ok(prompt.includes(places.memory));
   assert.ok(prompt.includes("/sources"));
   assert.ok(prompt.includes("/home/agent"));
@@ -62,8 +66,10 @@ test("a file over the limit is not added, and the prompt says so", async () => {
   const places = await memory({ "always.md": "x".repeat(2000), "handoff.md": "short" });
   const files = await readPromptFiles(places.memory, 1000);
   const prompt = systemPrompt(identity, places, files);
+  // Guards against: a long file filling the prompt, or left out without a word (ADR-0006).
   assert.ok(!prompt.includes("x".repeat(1001)));
-  assert.match(prompt, /always\.md is 2000 bytes/);
+  assert.ok(prompt.includes(join(places.memory, "always.md")), "the file left out is named");
+  assert.match(prompt, /\b2000\b/, "with its size");
   assert.ok(prompt.includes("short"));
 });
 
@@ -90,10 +96,11 @@ test("with folding on, the system prompt says what folding leaves", async () => 
 });
 
 test("the request before folding names no way to answer it", () => {
-  assert.equal(
-    foldAskInput(),
-    "This turn is about to be folded. Write anything from it you want to keep. No tool runs while you answer.",
-  );
+  // Guards against: a request that tells her how or what to keep, or points her at a tool (ADR-0015).
+  const ask = foldAskInput();
+  assert.match(ask, /fold/i, "it says the turn is about to be folded");
+  for (const tool of ["reply", "bash", "write", "schedule_add", "self_event"]) assert.ok(!ask.includes(tool), tool);
+  assert.ok(!ask.includes("\n"), "one short request");
 });
 
 test("the system prompt says what the fields of <events> are", async () => {

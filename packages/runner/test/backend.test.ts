@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { after, before, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import type { DeliveredEvent } from "@penelope/contract";
 
@@ -9,11 +9,12 @@ import { FakeBackend, TOKEN } from "./fake-backend.ts";
 let fake: FakeBackend;
 let backend: Backend;
 
-before(async () => {
+// Each test has a backend of its own, so that what one sent is not seen by the next.
+beforeEach(async () => {
   fake = new FakeBackend();
   backend = new Backend({ url: await fake.url, token: TOKEN, agent: "main" });
 });
-after(() => fake.close());
+afterEach(() => fake.close());
 
 const event: DeliveredEvent = {
   seq: 1,
