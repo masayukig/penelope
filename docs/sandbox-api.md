@@ -43,6 +43,7 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 - ack の無いままもう一度渡す出来事は、`seq` が `after` 以下でも返す。runner は再起動の後、`after` を省いて（0 として）取り直す。
 - 応答は `{events: [...]}`。1 件ごとに `seq`・`source`・`id`・`stream`・`occurred_at`・`received_at`・`summary`・`delivery`・足された場所（`appended`: `path` と `lines` の 1 始まり・両端を含む範囲）・添付の場所（`attachments`）を持つ。inline の出来事だけが `inline: true` と `payload` を持つ。
 - runner はターンの最中も取り続ける。`now` の出来事をターンの途中に steer で入れるためである。
+- runner は、扱っている最中か扱い済みの `seq` がもう一度渡されたら捨てる。重複は `after` ではなく `seq` で見る。ターンが失敗して ack しなかった出来事だけは、もう一度渡されたら取り直す。
 
 未決:
 
@@ -71,6 +72,9 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 
 - body は `{agent, activities: [...]}`。runner が Pi の出来事を購読し、**ブロックが閉じるごとに**送る。トークンごとには送らない。
 - 1 件は `kind`・`at`（RFC 3339）・`turn_id` を持つ。
+- `turn_id` は runner がターンごとに付ける UUID である。runner の 1 ターンは、Pi の 1 回の実行（入力を渡してから、Pi がそれ以上自分で続けなくなるまで）で、その間に steer と follow-up で入った出来事も含む。
+- `tool_result` の `output` は、結果の文字の部分を改行でつないだものである。画像などの文字でない部分は `[image/png]` のように種類だけを書く。16,000 文字を超えた分は送らず、`[N more characters]` と数だけを添える。
+- 送れなかった途中経過は送り直さない。記録と UI の写しだけのためである。
 
 | `kind` | ほかの欄 |
 | --- | --- |
@@ -80,12 +84,6 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 | `tool_result` | `call_id`・`is_error`・`output`（文字列） |
 | `message` | `text`（返答の区切り） |
 | `turn_end` | なし |
-
-未決:
-
-- `turn_id` は runner が付ける（案: ターンごとの UUID）。
-- `tool_result` の `output` の長さの上限と、画像などの文字でない結果の扱い（案: 文字の部分だけを、上限で切って送る）。
-- 送れなかった途中経過を送り直すか（案: 送り直さない。記録と UI の写しだけのため）。
 
 ## ターンの終わり
 
@@ -108,10 +106,11 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 
 - 夜の切り替え（制御の出来事、[events.md](events.md) の「制御の出来事」）を終え、新しいセッションが動き出したら、runner が送る。body は `{agent}`。
 - そのあと runner は、制御の出来事を ack する。
+- runner は、新しいセッションに切り替えたときに、その制御の出来事の `seq` をセッションの記録の場所に残す。同じ `seq` がもう一度渡されたら、手順は回さずに知らせと ack だけを送り直す。新しいセッションに切り替える前に止まったときは、もう一度渡された出来事で、振り返りからやり直す。
 
 未決:
 
-- 切り替えの途中で runner が止まったとき（制御の出来事がもう一度渡されたとき）に、どこからやり直すか。整理係のターンが失敗したときの扱いとともに、backend の仕様書で決める（[ADR-0007](adr/0007-one-session-switched-nightly-with-a-one-turn-curator.md) の「本 ADR で決定しないこと」）。
+- 整理係のターンが失敗したときの扱い。backend の仕様書で決める（[ADR-0007](adr/0007-one-session-switched-nightly-with-a-one-turn-curator.md) の「本 ADR で決定しないこと」）。runner は今、失敗しても新しいセッションへ進む。
 
 ## 状態コード
 
