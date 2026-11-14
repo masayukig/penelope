@@ -95,3 +95,18 @@ export type ScheduleListResponse = { schedules: Schedule[] };
 
 /** `POST /v1/sessions/rotated`: the nightly switch is done and a new session runs. */
 export type SessionRotatedRequest = FromAgent;
+
+/** Where a task an agent sent over A2A is (docs/a2a.md). `working` and `input-required` are open. */
+export type A2ATaskState = "working" | "input-required" | "completed" | "failed" | "rejected";
+
+/**
+ * `POST /v1/a2a/replies`: her answer in the task of the `a2a` event `in_reply_to`.
+ * `completed` closes the task, `text` optional; `input-required` asks the sender
+ * `text` and keeps the task open for its answer.
+ */
+export type A2AReplyRequest = FromAgent & {
+  in_reply_to: number;
+  state: "completed" | "input-required";
+  text?: string;
+};
+export type A2AReplyResponse = { task_id: string; state: A2ATaskState };

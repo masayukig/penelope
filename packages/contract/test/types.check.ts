@@ -3,6 +3,9 @@
 // `@ts-expect-error` is one it must reject (tsc fails if the error goes away).
 
 import type {
+  A2APayload,
+  A2AReplyRequest,
+  A2AReplyResponse,
   AckRequest,
   Activity,
   ActivityRequest,
@@ -242,3 +245,23 @@ export const streamed = [
 
 // @ts-expect-error the states are thinking and waiting
 export const sleeping = { event: "state", data: { agent: "main", state: "sleeping" } } satisfies StreamEvent;
+
+// --- A2A (docs/a2a.md) ---
+
+export const a2aRequest = {
+  kind: "request",
+  task_id: "t-1",
+  context_id: "c-1",
+  message_id: "m-1",
+  text: "Look at the cluster's alerts.",
+} satisfies A2APayload;
+
+export const a2aClose = { agent: "main", in_reply_to: 12, state: "completed", text: "Done." } satisfies A2AReplyRequest;
+export const a2aCloseQuietly = { agent: "main", in_reply_to: 12, state: "completed" } satisfies A2AReplyRequest;
+export const a2aAsk = { agent: "main", in_reply_to: 12, state: "input-required", text: "Which namespace?" } satisfies A2AReplyRequest;
+// @ts-expect-error her reply closes or asks; the backend fails and rejects tasks
+export const a2aFail = { agent: "main", in_reply_to: 12, state: "failed" } satisfies A2AReplyRequest;
+// @ts-expect-error the reply names the event it answers
+export const a2aNoEvent = { agent: "main", state: "completed" } satisfies A2AReplyRequest;
+
+export const a2aReplied = { task_id: "t-1", state: "completed" } satisfies A2AReplyResponse;
