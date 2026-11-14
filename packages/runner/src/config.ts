@@ -27,6 +27,8 @@ export interface Config {
   /** HOME: the working directory of the session (ADR-0011). */
   home: string;
   memoryDir: string;
+  /** The owner's skills, mounted read-only; left out, there are none. */
+  ownerSkillsDir?: string;
   sourcesDir: string;
   /** Pi's directory: its settings, credentials, models and skills. */
   agentDir: string;
@@ -104,6 +106,7 @@ export function readConfig(env: Env): Config {
     ...(thinkingLevel ? { thinkingLevel } : {}),
     home,
     memoryDir: env.PENELOPE_MEMORY || "/memory",
+    ...(env.PENELOPE_OWNER_SKILLS_DIR ? { ownerSkillsDir: env.PENELOPE_OWNER_SKILLS_DIR } : {}),
     sourcesDir: env.PENELOPE_SOURCES || "/sources",
     agentDir,
     sessionDir: env.PENELOPE_SESSIONS || join(agentDir, "sessions", "main"),

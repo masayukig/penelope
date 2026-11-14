@@ -83,7 +83,11 @@ export async function openSession(
 ): Promise<AgentSession> {
   const { config, modelRuntime } = setup;
   const settingsManager = setup.settings();
-  const skills = join(config.memoryDir, "skills");
+  // Pi keeps the first skill of a name, so the owner's come first.
+  const skillPaths = [];
+  for (const dir of [config.ownerSkillsDir, join(config.memoryDir, "skills")]) {
+    if (dir && (await exists(dir))) skillPaths.push(dir);
+  }
   const resourceLoader = new DefaultResourceLoader({
     cwd: config.home,
     agentDir: config.agentDir,
@@ -93,7 +97,7 @@ export async function openSession(
     noContextFiles: true,
     noPromptTemplates: true,
     noThemes: true,
-    ...((await exists(skills)) ? { additionalSkillPaths: [skills] } : {}),
+    ...(skillPaths.length > 0 ? { additionalSkillPaths: skillPaths } : {}),
     systemPrompt,
   });
   await resourceLoader.reload();
