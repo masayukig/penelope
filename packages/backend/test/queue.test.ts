@@ -102,11 +102,13 @@ describe("the queue", () => {
       const { queue, sourcesDir } = setup(t);
       queue.accept(event({ source: "ui", payload: { text: "look" } }), {
         builtin: true,
-        attachments: [{ name: "a.png", data: new Uint8Array([1]) }],
+        attachments: [{ name: "a.png", type: "image/png", data: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) }],
       });
       const [taken] = queue.take({ after: 0 });
-      assert.deepEqual(taken?.attachments, [path.join(sourcesDir, "ui/files/1-a.png")]);
-      assert.deepEqual(JSON.parse(readFileSync(taken!.appended.path, "utf8")).attachments, taken?.attachments);
+      const where = path.join(sourcesDir, "ui/files/1-a.png");
+      assert.deepEqual(taken?.attachments, [{ path: where, mime_type: "image/png", size: 8 }]);
+      // The line keeps only the paths.
+      assert.deepEqual(JSON.parse(readFileSync(taken!.appended.path, "utf8")).attachments, [where]);
     });
   });
 

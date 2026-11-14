@@ -95,17 +95,17 @@ describe("the intake", () => {
     const { queue, target, sourcesDir } = await setup(t);
     const { body, contentType } = await multipart([
       ["event", JSON.stringify(envelope)],
-      ["file", new Blob(["graph"]), "graph.png"],
-      ["file", new Blob(["log"]), "alert.log"],
+      ["file", new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])]), "graph.png"],
+      ["file", new Blob(["log"], { type: "text/plain" }), "alert.log"],
     ]);
     const answer = await ask(target, "/v1/events", { body, headers: { "content-type": contentType } });
     assert.equal(answer.status, 202);
     const [taken] = queue.take({ after: 0 });
     assert.deepEqual(taken?.attachments, [
-      path.join(sourcesDir, "alertmanager/files/1-graph.png"),
-      path.join(sourcesDir, "alertmanager/files/1-alert.log"),
+      { path: path.join(sourcesDir, "alertmanager/files/1-graph.png"), mime_type: "image/png", size: 8 },
+      { path: path.join(sourcesDir, "alertmanager/files/1-alert.log"), mime_type: "text/plain", size: 3 },
     ]);
-    assert.equal(readFileSync(taken!.attachments![1]!, "utf8"), "log");
+    assert.equal(readFileSync(taken!.attachments![1]!.path, "utf8"), "log");
   });
 
   it("takes the envelope of a multipart body as a JSON file part too", async (t) => {

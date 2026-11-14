@@ -154,7 +154,7 @@ async function messageFromForm(form: FormData): Promise<{ text: string; attachme
   const attachments: Attachment[] = [];
   for (const file of form.getAll("file")) {
     if (typeof file === "string") throw new HttpError(400, "a file part must be a file");
-    attachments.push({ name: file.name, data: new Uint8Array(await file.arrayBuffer()) });
+    attachments.push({ name: file.name, type: file.type, data: new Uint8Array(await file.arrayBuffer()) });
   }
   return { text, attachments };
 }

@@ -3,12 +3,12 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import type { Appended, SourcesLine } from "@penelope/contract";
+import type { Appended, DeliveredAttachment, SourcesLine } from "@penelope/contract";
 
 import { dayIn } from "./time.ts";
 
-/** A file that came with an event. */
-export type Attachment = { name: string; data: Uint8Array };
+/** A file that came with an event: its name and media type as the sender gave them ("" for none). */
+export type Attachment = { name: string; type: string; data: Uint8Array };
 
 /**
  * The files under /sources. Writes are synchronous so that the queue can keep
@@ -43,11 +43,12 @@ export class Sources {
   }
 
   /**
-   * Writes the files to `<source>/files/<seq>-<name>` and returns where. The
-   * name keeps only letters, digits, `.`, `_` and `-` of its last segment; a
-   * name that comes twice gets `-2`, `-3`… before its extension.
+   * Writes the files to `<source>/files/<seq>-<name>` and returns where, with
+   * each one's media type and size. The name keeps only letters, digits, `.`,
+   * `_` and `-` of its last segment; a name that comes twice gets `-2`, `-3`…
+   * before its extension.
    */
-  saveAttachments(source: string, seq: number, files: readonly Attachment[]): string[] {
+  saveAttachments(source: string, seq: number, files: readonly Attachment[]): DeliveredAttachment[] {
     if (files.length === 0) return [];
     const folder = path.join(this.dir, source, "files");
     mkdirSync(folder, { recursive: true });
@@ -56,7 +57,7 @@ export class Sources {
       const name = unique(safeName(file.name), taken);
       const where = path.join(folder, `${seq}-${name}`);
       writeFileSync(where, file.data);
-      return where;
+      return { path: where, mime_type: mediaType(file), size: file.data.byteLength };
     });
   }
 }
@@ -98,4 +99,32 @@ function unique(name: string, taken: Set<string>): string {
   }
   taken.add(candidate);
   return candidate;
+}
+
+/** The image types the runner can put into a turn, by their first bytes. */
+const SIGNATURES: Array<[type: string, matches: (bytes: Uint8Array) => boolean]> = [
+  ["image/png", (b) => starts(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
+  ["image/jpeg", (b) => starts(b, [0xff, 0xd8, 0xff])],
+  ["image/gif", (b) => starts(b, [...Buffer.from("GIF87a")]) || starts(b, [...Buffer.from("GIF89a")])],
+  ["image/webp", (b) => starts(b, [...Buffer.from("RIFF")]) && starts(b.subarray(8), [...Buffer.from("WEBP")])],
+];
+
+const MEDIA_TYPE = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+(\s*;.*)?$/i;
+
+/**
+ * PNG, JPEG, GIF and WebP by their first bytes, whatever the sender said.
+ * Otherwise the type the sender gave, unless it is one of those images that
+ * the bytes do not bear out, so that what is said to be an image is one.
+ * application/octet-stream when nothing else will do.
+ */
+function mediaType(file: Attachment): string {
+  const found = SIGNATURES.find(([, matches]) => matches(file.data));
+  if (found) return found[0];
+  const said = file.type.trim();
+  if (!MEDIA_TYPE.test(said) || SIGNATURES.some(([type]) => said.toLowerCase().startsWith(type))) return "application/octet-stream";
+  return said;
+}
+
+function starts(bytes: Uint8Array, prefix: readonly number[]): boolean {
+  return bytes.length >= prefix.length && prefix.every((byte, i) => bytes[i] === byte);
 }

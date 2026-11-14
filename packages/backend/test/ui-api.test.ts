@@ -238,12 +238,12 @@ describe("the UI's API", () => {
       const env = await setup(t);
       const { body, contentType } = await multipart([
         ["text", "see this"],
-        ["file", new Blob(["png"]), "shot.png"],
+        ["file", new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], { type: "image/png" }), "shot.png"],
       ]);
       const answer = await env.call("/api/messages", env.signIn(), { body, headers: { "content-type": contentType } });
       assert.equal(answer.status, 202);
       const [event] = env.queue.take({ after: 0 });
-      assert.deepEqual(event?.attachments, [path.join(env.sourcesDir, "ui/files/1-shot.png")]);
+      assert.deepEqual(event?.attachments, [{ path: path.join(env.sourcesDir, "ui/files/1-shot.png"), mime_type: "image/png", size: 8 }]);
     });
 
     it("is refused with no text and no files", async (t) => {

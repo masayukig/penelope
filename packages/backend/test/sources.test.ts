@@ -73,20 +73,57 @@ describe("/sources", () => {
     const dir = tempDir(t);
     const sources = new Sources(dir, "UTC");
     const saved = sources.saveAttachments("ui", 13, [
-      { name: "screenshot.png", data: new Uint8Array([1, 2, 3]) },
-      { name: "../../etc/passwd", data: new Uint8Array([4]) },
-      { name: "screenshot.png", data: new Uint8Array([5]) },
-      { name: "メモ 1.txt", data: new Uint8Array([6]) },
-      { name: "", data: new Uint8Array([7]) },
+      { name: "screenshot.png", type: "image/png", data: new Uint8Array([1, 2, 3]) },
+      { name: "../../etc/passwd", type: "", data: new Uint8Array([4]) },
+      { name: "screenshot.png", type: "", data: new Uint8Array([5]) },
+      { name: "メモ 1.txt", type: "text/plain", data: new Uint8Array([6]) },
+      { name: "", type: "", data: new Uint8Array([7]) },
     ]);
-    assert.deepEqual(saved, [
+    assert.deepEqual(saved.map((file) => file.path), [
       path.join(dir, "ui/files/13-screenshot.png"),
       path.join(dir, "ui/files/13-passwd"),
       path.join(dir, "ui/files/13-screenshot-2.png"),
       path.join(dir, "ui/files/13-___1.txt"),
       path.join(dir, "ui/files/13-file"),
     ]);
-    assert.deepEqual([...readFileSync(saved[0]!)], [1, 2, 3]);
-    assert.deepEqual([...readFileSync(saved[2]!)], [5]);
+    assert.deepEqual([...readFileSync(saved[0]!.path)], [1, 2, 3]);
+    assert.deepEqual([...readFileSync(saved[2]!.path)], [5]);
+  });
+
+  it("says how big each attachment is", (t) => {
+    const [saved] = new Sources(tempDir(t), "UTC").saveAttachments("ui", 1, [
+      { name: "a.bin", type: "", data: new Uint8Array(1234) },
+    ]);
+    assert.equal(saved?.size, 1234);
+  });
+
+  it("takes an image's type from its first bytes, whatever the sender said", (t) => {
+    const images: Array<[string, number[]]> = [
+      ["image/png", [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]],
+      ["image/jpeg", [0xff, 0xd8, 0xff, 0xe0, 0]],
+      ["image/gif", [...Buffer.from("GIF89a"), 0]],
+      ["image/webp", [...Buffer.from("RIFF"), 0, 0, 0, 0, ...Buffer.from("WEBP"), 0]],
+    ];
+    const saved = new Sources(tempDir(t), "UTC").saveAttachments(
+      "ui",
+      1,
+      images.map(([, bytes], n) => ({ name: `f${n}`, type: "application/octet-stream", data: new Uint8Array(bytes) })),
+    );
+    assert.deepEqual(saved.map((file) => file.mime_type), images.map(([type]) => type));
+  });
+
+  it("takes any other file's type as the sender said, but not an image type its bytes do not bear out", (t) => {
+    const saved = new Sources(tempDir(t), "UTC").saveAttachments("ui", 1, [
+      { name: "a.txt", type: "text/plain; charset=utf-8", data: new Uint8Array([0x61]) },
+      { name: "b.png", type: "image/png", data: new Uint8Array([0x61]) },
+      { name: "c", type: "", data: new Uint8Array([0x61]) },
+      { name: "d", type: "not a type", data: new Uint8Array([0x61]) },
+    ]);
+    assert.deepEqual(saved.map((file) => file.mime_type), [
+      "text/plain; charset=utf-8",
+      "application/octet-stream",
+      "application/octet-stream",
+      "application/octet-stream",
+    ]);
   });
 });

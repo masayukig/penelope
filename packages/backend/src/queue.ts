@@ -3,7 +3,7 @@
 // runner has acked.
 import type { DatabaseSync } from "node:sqlite";
 
-import type { DeliveredEvent, Delivery, Event } from "@penelope/contract";
+import type { DeliveredAttachment, DeliveredEvent, Delivery, Event } from "@penelope/contract";
 
 import { transaction } from "./db.ts";
 import type { Attachment, Sources } from "./sources.ts";
@@ -101,7 +101,7 @@ export class Queue {
         ...(event.stream === undefined ? {} : { stream: event.stream }),
         id: event.id,
         summary: event.summary,
-        ...(saved.length === 0 ? {} : { attachments: saved }),
+        ...(saved.length === 0 ? {} : { attachments: saved.map((file) => file.path) }),
         payload: event.payload,
       });
       this.db
@@ -217,7 +217,7 @@ function delivered(row: Row): DeliveredEvent {
     summary: row.summary,
     delivery: row.delivery,
     appended: { path: row.path, lines: [row.line, row.line] as [number, number] },
-    ...(row.attachments === null ? {} : { attachments: JSON.parse(row.attachments) as string[] }),
+    ...(row.attachments === null ? {} : { attachments: JSON.parse(row.attachments) as DeliveredAttachment[] }),
   };
   return row.inline === 1 ? { ...base, inline: true, payload: JSON.parse(row.payload) } : { ...base, inline: false };
 }
