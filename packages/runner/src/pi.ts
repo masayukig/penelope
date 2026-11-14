@@ -1,0 +1,122 @@
+// Opening Pi's sessions: hers, which persists and goes on after a restart, and
+// the curator's, which starts empty every night. Pi's own tools are kept as
+// Pi sets them; the backend's tools are added beside them.
+
+import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+
+import {
+  type AgentSession,
+  createAgentSession,
+  DefaultResourceLoader,
+  type ModelRuntime,
+  SessionManager,
+  type SettingsManager,
+  type ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
+
+import type { Config } from "./config.ts";
+
+export interface PiSetup {
+  config: Config;
+  modelRuntime: ModelRuntime;
+  /** Pi's settings. A deployment reads them from Pi's directory. */
+  settings: () => SettingsManager;
+  tools: ToolDefinition[];
+}
+
+/** Which session is hers, and the last nightly event that switched it. */
+export interface SessionState {
+  file: string;
+  nightly?: number;
+}
+
+const stateFile = (config: Config) => join(config.sessionDir, "current.json");
+
+export async function readState(config: Config): Promise<SessionState | undefined> {
+  try {
+    const state = JSON.parse(await readFile(stateFile(config), "utf8")) as SessionState;
+    await access(state.file);
+    return state;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function writeState(config: Config, state: SessionState): Promise<void> {
+  const path = stateFile(config);
+  await writeFile(`${path}.tmp`, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+  await rename(`${path}.tmp`, path);
+}
+
+/**
+ * A new session file of hers. Pi writes the file only after the first answer,
+ * so its header is written here: a restart before that still finds it.
+ */
+export async function newSessionFile(config: Config): Promise<string> {
+  await mkdir(config.sessionDir, { recursive: true });
+  const manager = SessionManager.create(config.home, config.sessionDir);
+  const file = manager.getSessionFile();
+  const header = manager.getHeader();
+  if (!file || !header) throw new Error("Pi did not make a session file");
+  await writeFile(file, `${JSON.stringify(header)}\n`, { flag: "wx", mode: 0o600 });
+  return file;
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A session with the given system prompt, over `sessionManager`. */
+export async function openSession(
+  setup: PiSetup,
+  systemPrompt: string,
+  sessionManager: SessionManager,
+): Promise<AgentSession> {
+  const { config, modelRuntime } = setup;
+  const settingsManager = setup.settings();
+  const skills = join(config.memoryDir, "skills");
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: config.home,
+    agentDir: config.agentDir,
+    settingsManager,
+    noExtensions: true,
+    noContextFiles: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    ...((await exists(skills)) ? { additionalSkillPaths: [skills] } : {}),
+    systemPrompt,
+  });
+  await resourceLoader.reload();
+  let model;
+  if (config.model) {
+    model = modelRuntime.getModel(config.model.provider, config.model.id);
+    if (!model) throw new Error(`Pi has no model ${config.model.provider}/${config.model.id}`);
+  }
+  const { session } = await createAgentSession({
+    cwd: config.home,
+    agentDir: config.agentDir,
+    modelRuntime,
+    ...(model ? { model } : {}),
+    ...(config.thinkingLevel ? { thinkingLevel: config.thinkingLevel } : {}),
+    settingsManager,
+    resourceLoader,
+    sessionManager,
+    customTools: setup.tools,
+  });
+  return session;
+}
+
+export function openFile(config: Config, file: string): SessionManager {
+  return SessionManager.open(file, config.sessionDir, config.home);
+}
+
+/** The curator's sessions are kept beside hers, for the record. */
+export function curatorManager(config: Config): SessionManager {
+  return SessionManager.create(config.home, join(config.sessionDir, "curator"));
+}

@@ -1,0 +1,117 @@
+// A client of the backend's API for the sandbox (docs/sandbox-api.md). Every
+// request carries the agent and the surrogate token; the Sentinel puts the
+// real token in its place.
+
+import type {
+  Activity,
+  AgentId,
+  DeliveredEvent,
+  PollResponse,
+  ReplyRequest,
+  ReplyResponse,
+  Schedule,
+  ScheduleListResponse,
+  ScheduleWhen,
+  SelfEventRequest,
+} from "@penelope/contract";
+
+export class BackendError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "BackendError";
+    this.status = status;
+  }
+}
+
+export interface BackendOptions {
+  url: string;
+  token: string;
+  agent: AgentId;
+}
+
+type Without<T> = Omit<T, "agent">;
+
+export class Backend {
+  private readonly url: string;
+  private readonly token: string;
+  readonly agent: AgentId;
+
+  constructor(options: BackendOptions) {
+    this.url = options.url.replace(/\/+$/, "");
+    this.token = options.token;
+    this.agent = options.agent;
+  }
+
+  /** `GET /v1/events`: waits up to `wait` seconds for events after `after`. */
+  async poll(after: number, wait: number, signal?: AbortSignal): Promise<DeliveredEvent[]> {
+    const query = new URLSearchParams({ agent: this.agent, after: String(after), wait: String(wait) });
+    const response = (await this.request("GET", `/v1/events?${query}`, undefined, signal)) as PollResponse;
+    return response.events;
+  }
+
+  async ack(seqs: number[]): Promise<void> {
+    await this.post("/v1/events/ack", { seqs });
+  }
+
+  async activity(activities: Activity[]): Promise<void> {
+    await this.post("/v1/activity", { activities });
+  }
+
+  async turnEnd(turnId: string): Promise<void> {
+    await this.post("/v1/turns/end", { turn_id: turnId });
+  }
+
+  async reply(reply: Without<ReplyRequest>): Promise<ReplyResponse> {
+    return (await this.post("/v1/replies", reply)) as ReplyResponse;
+  }
+
+  async selfEvent(event: Without<SelfEventRequest>): Promise<void> {
+    await this.post("/v1/self-events", event);
+  }
+
+  async createSchedule(schedule: { reason: string } & ScheduleWhen): Promise<Schedule> {
+    return (await this.post("/v1/schedules", schedule)) as Schedule;
+  }
+
+  async listSchedules(): Promise<Schedule[]> {
+    const query = new URLSearchParams({ agent: this.agent });
+    return ((await this.request("GET", `/v1/schedules?${query}`)) as ScheduleListResponse).schedules;
+  }
+
+  async deleteSchedule(id: string): Promise<void> {
+    const query = new URLSearchParams({ agent: this.agent });
+    await this.request("DELETE", `/v1/schedules/${encodeURIComponent(id)}?${query}`);
+  }
+
+  async rotated(): Promise<void> {
+    await this.post("/v1/sessions/rotated", {});
+  }
+
+  private post(path: string, body: object): Promise<unknown> {
+    return this.request("POST", path, { agent: this.agent, ...body });
+  }
+
+  private async request(method: string, path: string, body?: object, signal?: AbortSignal): Promise<unknown> {
+    const response = await fetch(`${this.url}${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${this.token}`,
+        ...(body ? { "content-type": "application/json" } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      ...(signal ? { signal } : {}),
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      let detail = text;
+      try {
+        detail = (JSON.parse(text) as { error?: string }).error ?? text;
+      } catch {
+        // Not JSON: keep the text as it came.
+      }
+      throw new BackendError(response.status, `${method} ${path.split("?")[0]}: ${response.status} ${detail}`.trim());
+    }
+    return text ? (JSON.parse(text) as unknown) : undefined;
+  }
+}

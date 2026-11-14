@@ -1,0 +1,110 @@
+// The runner's settings, all from the environment. The deployment sets them;
+// nothing here names a character (ADR-0001).
+
+import { join } from "node:path";
+
+import type { AgentId } from "@penelope/contract";
+
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+/** Who she is. Goes into the system prompt as it is. */
+export interface Identity {
+  name: string;
+  role: string;
+  owner: string;
+}
+
+export interface Config {
+  /** Only the main agent for now (docs/sandbox-api.md). */
+  agent: AgentId;
+  /** The backend's API for the sandbox, through the Sentinel; the token is the surrogate. */
+  backend: { url: string; token: string };
+  identity: Identity;
+  /** Left out, Pi's own settings choose the model. */
+  model?: { provider: string; id: string };
+  thinkingLevel?: ThinkingLevel;
+  /** HOME: the working directory of the session (ADR-0011). */
+  home: string;
+  memoryDir: string;
+  sourcesDir: string;
+  /** Pi's directory: its settings, credentials, models and skills. */
+  agentDir: string;
+  /** Where the session records are kept; persistent. */
+  sessionDir: string;
+  /** A memory file larger than this is not put into the system prompt. */
+  promptFileMaxBytes: number;
+  /** An image of the owner's message larger than this is left as a path. */
+  imageMaxBytes: number;
+  pollWaitSeconds: number;
+}
+
+export class ConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConfigError";
+  }
+}
+
+type Env = Readonly<Record<string, string | undefined>>;
+
+function positiveInteger(env: Env, name: string, fallback: number, problems: string[]): number {
+  const value = env[name];
+  if (value === undefined || value === "") return fallback;
+  if (!/^[1-9][0-9]*$/.test(value)) {
+    problems.push(`${name} must be a positive integer`);
+    return fallback;
+  }
+  return Number(value);
+}
+
+export function readConfig(env: Env): Config {
+  const problems: string[] = [];
+  const required = (name: string): string => {
+    const value = env[name];
+    if (!value) problems.push(`${name} is not set`);
+    return value ?? "";
+  };
+  const home = required("HOME");
+  const backend = { url: required("PENELOPE_BACKEND_URL"), token: required("PENELOPE_BACKEND_TOKEN") };
+  const identity = { name: required("PENELOPE_NAME"), role: required("PENELOPE_ROLE"), owner: required("PENELOPE_OWNER") };
+
+  let model: Config["model"];
+  if (env.PENELOPE_MODEL) {
+    const slash = env.PENELOPE_MODEL.indexOf("/");
+    if (slash <= 0 || slash === env.PENELOPE_MODEL.length - 1) {
+      problems.push("PENELOPE_MODEL must be <provider>/<model>");
+    } else {
+      model = { provider: env.PENELOPE_MODEL.slice(0, slash), id: env.PENELOPE_MODEL.slice(slash + 1) };
+    }
+  }
+  let thinkingLevel: ThinkingLevel | undefined;
+  if (env.PENELOPE_THINKING) {
+    if ((THINKING_LEVELS as readonly string[]).includes(env.PENELOPE_THINKING)) {
+      thinkingLevel = env.PENELOPE_THINKING as ThinkingLevel;
+    } else {
+      problems.push(`PENELOPE_THINKING must be one of ${THINKING_LEVELS.join(", ")}`);
+    }
+  }
+  const promptFileMaxBytes = positiveInteger(env, "PENELOPE_PROMPT_FILE_MAX_BYTES", 65536, problems);
+  const imageMaxBytes = positiveInteger(env, "PENELOPE_IMAGE_MAX_BYTES", 5 * 1024 * 1024, problems);
+  const pollWaitSeconds = positiveInteger(env, "PENELOPE_POLL_WAIT_SECONDS", 30, problems);
+  if (problems.length > 0) throw new ConfigError(problems.join("; "));
+
+  const agentDir = env.PI_CODING_AGENT_DIR || join(home, ".pi", "agent");
+  return {
+    agent: "main",
+    backend,
+    identity,
+    ...(model ? { model } : {}),
+    ...(thinkingLevel ? { thinkingLevel } : {}),
+    home,
+    memoryDir: env.PENELOPE_MEMORY || "/memory",
+    sourcesDir: env.PENELOPE_SOURCES || "/sources",
+    agentDir,
+    sessionDir: env.PENELOPE_SESSIONS || join(agentDir, "sessions", "main"),
+    promptFileMaxBytes,
+    imageMaxBytes,
+    pollWaitSeconds,
+  };
+}

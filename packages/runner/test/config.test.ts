@@ -1,0 +1,81 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import { ConfigError, readConfig } from "../src/config.ts";
+
+const required = {
+  HOME: "/home/agent",
+  PENELOPE_BACKEND_URL: "https://backend.example.com",
+  PENELOPE_BACKEND_TOKEN: "surrogate-example-0002",
+  PENELOPE_NAME: "Example",
+  PENELOPE_ROLE: "the operator of a Kubernetes cluster",
+  PENELOPE_OWNER: "Owner",
+};
+
+test("the required settings and the defaults", () => {
+  const config = readConfig(required);
+  assert.deepEqual(config, {
+    agent: "main",
+    backend: { url: "https://backend.example.com", token: "surrogate-example-0002" },
+    identity: { name: "Example", role: "the operator of a Kubernetes cluster", owner: "Owner" },
+    home: "/home/agent",
+    memoryDir: "/memory",
+    sourcesDir: "/sources",
+    agentDir: "/home/agent/.pi/agent",
+    sessionDir: "/home/agent/.pi/agent/sessions/main",
+    promptFileMaxBytes: 65536,
+    imageMaxBytes: 5242880,
+    pollWaitSeconds: 30,
+  });
+});
+
+test("the optional settings", () => {
+  const config = readConfig({
+    ...required,
+    PENELOPE_MODEL: "anthropic/claude-opus-5-5",
+    PENELOPE_THINKING: "high",
+    PENELOPE_MEMORY: "/m",
+    PENELOPE_SOURCES: "/s",
+    PI_CODING_AGENT_DIR: "/pi",
+    PENELOPE_SESSIONS: "/sessions",
+    PENELOPE_PROMPT_FILE_MAX_BYTES: "100",
+    PENELOPE_POLL_WAIT_SECONDS: "5",
+    PENELOPE_IMAGE_MAX_BYTES: "1000",
+  });
+  assert.equal(config.imageMaxBytes, 1000);
+  assert.deepEqual(config.model, { provider: "anthropic", id: "claude-opus-5-5" });
+  assert.equal(config.thinkingLevel, "high");
+  assert.equal(config.memoryDir, "/m");
+  assert.equal(config.sourcesDir, "/s");
+  assert.equal(config.agentDir, "/pi");
+  assert.equal(config.sessionDir, "/sessions");
+  assert.equal(config.promptFileMaxBytes, 100);
+  assert.equal(config.pollWaitSeconds, 5);
+});
+
+test("the sessions follow Pi's directory when only that is given", () => {
+  assert.equal(readConfig({ ...required, PI_CODING_AGENT_DIR: "/pi" }).sessionDir, "/pi/sessions/main");
+});
+
+test("a missing setting is named", () => {
+  const { PENELOPE_BACKEND_TOKEN: _, PENELOPE_OWNER: __, ...rest } = required;
+  assert.throws(() => readConfig(rest), (error: unknown) => {
+    assert.ok(error instanceof ConfigError);
+    assert.match(error.message, /PENELOPE_BACKEND_TOKEN/);
+    assert.match(error.message, /PENELOPE_OWNER/);
+    return true;
+  });
+});
+
+test("a model is provider/id", () => {
+  assert.throws(() => readConfig({ ...required, PENELOPE_MODEL: "opus" }), ConfigError);
+});
+
+test("a thinking level is one Pi knows", () => {
+  assert.throws(() => readConfig({ ...required, PENELOPE_THINKING: "very" }), ConfigError);
+});
+
+test("numbers are positive integers", () => {
+  assert.throws(() => readConfig({ ...required, PENELOPE_PROMPT_FILE_MAX_BYTES: "-1" }), ConfigError);
+  assert.throws(() => readConfig({ ...required, PENELOPE_POLL_WAIT_SECONDS: "x" }), ConfigError);
+});
