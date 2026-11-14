@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
-import type { Activity, ActivityRequest, DeliveredEvent } from "@penelope/contract";
+import type { Activity, ActivityRequest, DeliveredEvent, TurnLine } from "@penelope/contract";
 
 import { Backend } from "../src/backend.ts";
 import type { Config } from "../src/config.ts";
@@ -131,6 +131,12 @@ function activities(fake: FakeBackend): Activity[] {
   return (fake.sent("POST", "/v1/activity") as ActivityRequest[]).flatMap((request) => request.activities);
 }
 
+/** The lines of an input's `<events>`, read back as JSON; none when the input is not one. */
+function events(input: string): (TurnLine & Record<string, unknown>)[] {
+  const block = /^<events>\n([\s\S]*)\n<\/events>$/.exec(input)?.[1];
+  return block === undefined ? [] : block.split("\n").map((line) => JSON.parse(line) as TurnLine & Record<string, unknown>);
+}
+
 const acked = (fake: FakeBackend) => (fake.sent("POST", "/v1/events/ack") as { seqs: number[] }[]).flatMap((a) => a.seqs);
 
 /** Answers the owner with a reply, then stops. */
@@ -143,7 +149,11 @@ test("an event becomes a turn; the reply, the activities, the turn's end and the
   fake.push(ui(1, "hello"));
   await until(() => acked(fake).includes(1));
 
-  assert.match(calls[0]!.userTexts.at(-1)!, /\[seq 1\] ui[^\n]*\nhello/);
+  // Guards against: the owner's message not reaching the turn as the event it was.
+  assert.deepEqual(
+    events(calls[0]!.userTexts.at(-1)!).map((line) => [line.seq, line.source, line.text]),
+    [[1, "ui", "hello"]],
+  );
   assert.deepEqual(fake.sent("POST", "/v1/replies"), [{ agent: "main", text: "hi", in_reply_to: 1 }]);
 
   const sent = activities(fake);
@@ -239,7 +249,11 @@ test("a batch that comes during a turn follows it", async () => {
   await until(() => acked(fake).includes(3));
 
   const followed = calls.find((c) => c.userTexts.length === 2)!;
-  assert.match(followed.userTexts[1]!, /\[batch\] slack\/ops: 2 events/);
+  // Guards against: a batch steered into the running turn, or split into one input per event.
+  assert.deepEqual(
+    events(followed.userTexts[1]!).map((line) => [line.kind, line.source, line.stream, line.seqs]),
+    [["batch", "slack", "ops", [2, 3]]],
+  );
   assert.deepEqual(acked(fake).sort(), [1, 2, 3]);
 });
 
@@ -382,8 +396,14 @@ test("a now that comes with batched events steers the turn together with them", 
   await until(() => acked(fake).includes(3) && acked(fake).includes(2));
 
   const steered = calls.find((c) => c.userTexts.length === 2)!;
-  assert.match(steered.userTexts[1]!, /\[seq 3\] slack\/ops/);
-  assert.match(steered.userTexts[1]!, /\[batch\] slack\/ops: 1 event \(seq 2\)/);
+  // Guards against: the batch left behind the now, which then reaches her without the stream before it.
+  assert.deepEqual(
+    events(steered.userTexts[1]!).map((line) => [line.kind ?? "event", line.seq ?? line.seqs]),
+    [
+      ["event", 3],
+      ["batch", [2]],
+    ],
+  );
   assert.equal(fake.sent("POST", "/v1/turns/end").length, 1);
 });
 
@@ -414,6 +434,11 @@ test("a turn that ends without her own text is asked once; then it is folded", a
   const next = firstCallOf(calls, "thanks");
   const sent = JSON.stringify(next.messages);
   assert.ok(sent.includes("pods?"), "the event stays");
+  // Guards against: folding rewriting the events, which stay as the <events> she was given.
+  assert.deepEqual(
+    events(next.userTexts[0]!).map((line) => [line.seq, line.text]),
+    [[1, "pods?"]],
+  );
   assert.ok(sent.includes("The pods were all up."), "her answer stays");
   assert.ok(sent.includes("(folded) bash: echo pods-output"), "the call stays as a line");
   assert.ok(!sent.includes("pods-output\\n"), "the output goes");

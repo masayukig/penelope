@@ -11,6 +11,8 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
+import type { TurnLine } from "@penelope/contract";
+
 import {
   Browser,
   compose,
@@ -26,6 +28,7 @@ import {
   sleep,
   Stream,
   type StreamEvent,
+  textOf,
   where,
 } from "./support.ts";
 
@@ -48,6 +51,13 @@ async function callsFor(marker: string, steps?: number): Promise<ModelCall[]> {
 
 function streamed(event: string, test: (data: Record<string, unknown>) => boolean): StreamEvent | undefined {
   return stream.events.find((entry) => entry.event === event && test(entry.data as Record<string, unknown>));
+}
+
+/** The lines of an input's `<events>` (docs/events.md, "ターンに入る形"); fails unless the input is that block. */
+function eventLines(input: string): TurnLine[] {
+  const block = /^<events>\n([\s\S]*)\n<\/events>$/.exec(input)?.[1];
+  assert.ok(block !== undefined, `an <events> block: ${JSON.stringify(input)}`);
+  return block.split("\n").map((line) => JSON.parse(line) as TurnLine);
 }
 
 /** A scenario that, when it fails, has the logs of every container written out at the end. */
@@ -205,8 +215,10 @@ describe("the Pod end to end", () => {
     // The event and the reply stay, her text stays, the other calls are one line each, and no tool output is left.
     assert.ok(sent.includes("E2E-TURN-1 こんにちは"));
     assert.ok(sent.includes("E2E-TEXT-1"));
-    assert.ok(sent.includes("(folded) write: /memory/notes/e2e.md"), sent);
-    assert.ok(sent.includes("(folded) bash: echo E2E-BASH-$((40 + 2))"), sent);
+    // A folded call is read by its mark and its tool's name only; how the rest of the line looks is not the contract.
+    const folded = first.messages.map((message) => textOf(message.content)).filter((text) => text.includes("(folded)"));
+    assert.ok(folded.some((text) => /\bwrite\b/.test(text)), `write, folded: ${sent}`);
+    assert.ok(folded.some((text) => /\bbash\b/.test(text)), `bash, folded: ${sent}`);
     assert.ok(!sent.includes("E2E-BASH-42"), "the output of bash is folded away");
     assert.ok(!sent.includes("Successfully wrote"), "the output of write is folded away");
     const kept = first.messages.filter((message) => message.tool_calls?.some((call) => call.function.name === "reply"));
@@ -294,21 +306,26 @@ describe("the Pod end to end", () => {
     const now = { source: "e2e", stream: "feed", id: "now-1", occurred_at: new Date().toISOString(), summary: "E2E-NOW ping", delivery: "now", payload: { n: 2 } };
     assert.equal(intake(now), "202");
     await replied("E2E-REPLY-EVENTS");
-    // Both reach one turn, each pointing at where it was appended (docs/events.md, "ターンに入る形"):
-    // the now with its summary, the batch counted. Only what the contract fixes is read here, not
-    // how the runner writes it.
+    // Both reach one turn as lines of its <events>, each pointing at where it was appended
+    // (docs/events.md, "ターンに入る形"): the now with its summary, the batch as one line of its stream.
     const calls = await callsFor("E2E-NOW", 0);
     assert.equal(calls.length, 1, "one turn for the now and the batch");
-    const input = where(calls[0]!).input;
     const file = `/sources/e2e/feed/${day}.jsonl`;
-    assert.ok(input.includes("E2E-NOW ping"), "the now's summary");
-    assert.ok(input.includes(file), "the file both were appended to");
-    // The batch is line 1 of the file and the now line 2; each place names its lines after the path.
-    const numbers = input
-      .split("\n")
-      .filter((line) => line.includes(file))
-      .flatMap((line) => (line.slice(line.indexOf(file) + file.length).match(/\d+/g) ?? []).map(Number));
-    for (const line of [1, 2]) assert.ok(numbers.includes(line), `line ${line} of ${file}, in ${JSON.stringify(input)}`);
+    const turn = eventLines(where(calls[0]!).input);
+    // The batch is line 1 of the file and the now line 2.
+    const nowLine = turn.find((line) => line.kind === undefined);
+    assert.ok(nowLine && nowLine.kind === undefined, JSON.stringify(turn));
+    assert.deepEqual(
+      [nowLine.source, nowLine.stream, nowLine.delivery, nowLine.summary, nowLine.appended],
+      ["e2e", "feed", "now", "E2E-NOW ping", { path: file, lines: [2, 2] }],
+    );
+    const batchLine = turn.find((line) => line.kind === "batch");
+    assert.ok(batchLine && batchLine.kind === "batch", JSON.stringify(turn));
+    assert.deepEqual(
+      [batchLine.source, batchLine.stream, batchLine.count, batchLine.summary, batchLine.appended],
+      ["e2e", "feed", 1, "E2E-BATCH one", [{ path: file, lines: [1, 1] }]],
+    );
+    assert.ok(batchLine.seqs[0]! < nowLine.seq, "the batch came before the now");
   }));
 
   // Last, as from here on a night comes every minute.
