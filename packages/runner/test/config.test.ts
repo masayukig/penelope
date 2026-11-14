@@ -24,6 +24,7 @@ test("the required settings and the defaults", () => {
     agentDir: "/home/agent/.pi/agent",
     sessionDir: "/home/agent/.pi/agent/sessions/main",
     promptFileMaxBytes: 65536,
+    imageMaxBytes: 5242880,
     pollWaitSeconds: 30,
   });
 });
@@ -39,7 +40,9 @@ test("the optional settings", () => {
     PENELOPE_SESSIONS: "/sessions",
     PENELOPE_PROMPT_FILE_MAX_BYTES: "100",
     PENELOPE_POLL_WAIT_SECONDS: "5",
+    PENELOPE_IMAGE_MAX_BYTES: "1000",
   });
+  assert.equal(config.imageMaxBytes, 1000);
   assert.deepEqual(config.model, { provider: "anthropic", id: "claude-opus-5-5" });
   assert.equal(config.thinkingLevel, "high");
   assert.equal(config.memoryDir, "/m");

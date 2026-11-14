@@ -1,7 +1,8 @@
 // A stand-in for the backend's API for the sandbox (docs/sandbox-api.md), on a
 // loopback port. It keeps what it was sent so that the tests can look at it,
-// and hands events over the way the backend does: in seq order, unacked ones
-// again after a restart.
+// and hands events over the way the backend does: in seq order, one never
+// handed over whatever `after` says, and one handed over but not acked again
+// after a while (the backend's 5 minutes are `redeliverMs` here).
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -25,6 +26,9 @@ export class FakeBackend {
   readonly dropAcks = new Set<number>();
   private readonly events: DeliveredEvent[] = [];
   private readonly acked = new Set<number>();
+  /** When each event was last handed over. */
+  private readonly handed = new Map<number, number>();
+  redeliverMs = 300;
   private readonly schedules: Schedule[] = [];
   private waiters: (() => void)[] = [];
   private replies = 0;
@@ -63,7 +67,12 @@ export class FakeBackend {
   }
 
   private available(after: number): DeliveredEvent[] {
-    return this.events.filter((event) => event.seq > after && !this.acked.has(event.seq));
+    const now = Date.now();
+    return this.events.filter((event) => {
+      if (this.acked.has(event.seq)) return false;
+      const handed = this.handed.get(event.seq);
+      return handed === undefined || event.seq > after || now - handed >= this.redeliverMs;
+    });
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -94,6 +103,9 @@ export class FakeBackend {
       const after = Number(received.query.after ?? "0");
       const wait = Math.min(Number(received.query.wait ?? "0"), 2);
       if (this.available(after).length === 0 && wait > 0) {
+        const again = setInterval(() => {
+          if (this.available(after).length > 0) for (const wake of this.waiters.splice(0)) wake();
+        }, 50);
         await new Promise<void>((resolve) => {
           const timer = setTimeout(resolve, wait * 1000);
           this.waiters.push(() => {
@@ -101,8 +113,11 @@ export class FakeBackend {
             resolve();
           });
         });
+        clearInterval(again);
       }
-      return answer(200, { events: this.available(after) });
+      const events = this.available(after);
+      for (const event of events) this.handed.set(event.seq, Date.now());
+      return answer(200, { events });
     }
     if (key === "POST /v1/events/ack") {
       for (const seq of (body as { seqs: number[] }).seqs) if (!this.dropAcks.has(seq)) this.acked.add(seq);

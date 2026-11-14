@@ -45,6 +45,7 @@ async function world(): Promise<World> {
     agentDir: join(home, ".pi", "agent"),
     sessionDir: join(home, ".pi", "agent", "sessions", "main"),
     promptFileMaxBytes: 65536,
+    imageMaxBytes: 1_000_000,
     pollWaitSeconds: 1,
   };
   const calls: Call[] = [];
@@ -326,4 +327,28 @@ test("an event that comes during the switch waits for the new session", async ()
   const late = calls.find((c) => c.userTexts.at(-1)!.includes("late message"))!;
   assert.ok(!late.systemPrompt.includes("You are the curator"));
   assert.equal(late.userTexts.length, 1);
+});
+
+test("the images of the owner's message go into the turn as images", async () => {
+  const { fake, start, calls, config } = await world();
+  await mkdir(join(config.sourcesDir, "ui", "files"), { recursive: true });
+  const png = join(config.sourcesDir, "ui", "files", "1-shot.png");
+  // A 1x1 PNG.
+  await writeFile(png, Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63f8cfc0f01f00050001ff89993d1d0000000049454e44ae426082", "hex"));
+  await start(replying);
+  fake.push({ ...ui(1, "look"), attachments: [png] });
+  await until(() => acked(fake).includes(1));
+  assert.deepEqual(calls[0]!.lastImages, ["image/png"]);
+  assert.ok(calls[0]!.lastText.includes(png), "the path is in the text too");
+});
+
+test("an event handled already is dropped when it comes again", async () => {
+  const { fake, start, calls } = await world();
+  await start(replying);
+  fake.dropAcks.add(1);
+  fake.push(ui(1, "once"));
+  await until(() => acked(fake).includes(1));
+  // The backend hands it over again, as it does when an ack is lost.
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  assert.equal(calls.filter((c) => c.lastRole === "user" && c.lastText.includes("once")).length, 1);
 });

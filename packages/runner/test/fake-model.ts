@@ -25,6 +25,8 @@ export interface Call {
   lastRole: string;
   /** The text of the last message. */
   lastText: string;
+  /** The mime types of the images in the last message. */
+  lastImages: string[];
 }
 
 /** Decides each answer from the call. Called once per model request. */
@@ -109,6 +111,11 @@ export async function fakeRuntime(root: string, script: Script): Promise<ModelRu
           userTexts: userTexts(rest),
           lastRole: last?.role ?? "",
           lastText: textOf(last?.content),
+          lastImages: Array.isArray(last?.content)
+            ? (last.content as { type: string; mimeType?: string }[])
+                .filter((part) => part.type === "image")
+                .map((part) => part.mimeType ?? "")
+            : [],
         });
         push({ type: "start", partial: message });
         if (answer.thinking) {
@@ -148,7 +155,7 @@ export async function fakeRuntime(root: string, script: Script): Promise<ModelRu
         id: MODEL,
         name: MODEL,
         reasoning: true,
-        input: ["text"],
+        input: ["text", "image"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: 200_000,
         maxTokens: 8_192,

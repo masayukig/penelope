@@ -34,6 +34,8 @@ export interface Config {
   sessionDir: string;
   /** A memory file larger than this is not put into the system prompt. */
   promptFileMaxBytes: number;
+  /** An image of the owner's message larger than this is left as a path. */
+  imageMaxBytes: number;
   pollWaitSeconds: number;
 }
 
@@ -85,6 +87,7 @@ export function readConfig(env: Env): Config {
     }
   }
   const promptFileMaxBytes = positiveInteger(env, "PENELOPE_PROMPT_FILE_MAX_BYTES", 65536, problems);
+  const imageMaxBytes = positiveInteger(env, "PENELOPE_IMAGE_MAX_BYTES", 5 * 1024 * 1024, problems);
   const pollWaitSeconds = positiveInteger(env, "PENELOPE_POLL_WAIT_SECONDS", 30, problems);
   if (problems.length > 0) throw new ConfigError(problems.join("; "));
 
@@ -101,6 +104,7 @@ export function readConfig(env: Env): Config {
     agentDir,
     sessionDir: env.PENELOPE_SESSIONS || join(agentDir, "sessions", "main"),
     promptFileMaxBytes,
+    imageMaxBytes,
     pollWaitSeconds,
   };
 }

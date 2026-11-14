@@ -5,16 +5,19 @@
 // One turn is one run of Pi: from the prompt until Pi will not go on by
 // itself. An event that comes during a turn joins it: `now` as a steer,
 // `batch` as a follow-up. The events of a turn are acked after the backend
-// has been told the turn ended.
+// has been told the turn ended. An event that comes again, as the backend
+// hands over one that is not acked yet, is dropped by its seq.
 
 import { randomUUID } from "node:crypto";
 
+import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { Activity, ControlPayload, DeliveredEvent } from "@penelope/contract";
 
 import { TurnRecorder } from "./activities.ts";
 import type { Backend } from "./backend.ts";
 import type { Config } from "./config.ts";
+import { inlineImages } from "./images.ts";
 import {
   curatorManager,
   newSessionFile,
@@ -73,7 +76,7 @@ export class Runner {
   private session: AgentSession | undefined;
   private state: SessionState | undefined;
   private turn: Turn | undefined;
-  /** Events taken but not yet acked: a second delivery of one is not taken again. */
+  /** Events being handled or handled: a second delivery of one is dropped. */
   private readonly taken = new Set<number>();
   private readonly inbox: DeliveredEvent[] = [];
   private wake: (() => void) | undefined;
@@ -158,9 +161,17 @@ export class Runner {
     }
     const now = events.filter((event) => event.delivery === "now");
     const batch = events.filter((event) => event.delivery === "batch");
-    if (now.length > 0) turn.queued.push(turn.session.steer(formatEvents(now)));
-    if (batch.length > 0) turn.queued.push(turn.session.followUp(formatEvents(batch)));
     turn.seqs.push(...events.map((event) => event.seq));
+    if (now.length > 0) turn.queued.push(this.input(now).then(([text, images]) => turn.session.steer(text, images)));
+    if (batch.length > 0) {
+      turn.queued.push(this.input(batch).then(([text, images]) => turn.session.followUp(text, images)));
+    }
+  }
+
+  /** The text of the events, and the images of the owner's messages among them. */
+  private async input(events: DeliveredEvent[]): Promise<[string, ImageContent[] | undefined]> {
+    const images = await inlineImages(events, this.config.imageMaxBytes);
+    return [formatEvents(events), images.length > 0 ? images : undefined];
   }
 
   // ── Making turns ──
@@ -180,10 +191,13 @@ export class Runner {
       }
       const until = this.inbox.findIndex((event) => event.source === "control");
       const events = this.inbox.splice(0, until < 0 ? this.inbox.length : until);
+      const [text, images] = await this.input(events);
       await this.turnOf(
         this.session!,
-        formatEvents(events),
+        text,
         events.map((event) => event.seq),
+        true,
+        images,
       );
     }
   }
@@ -200,7 +214,13 @@ export class Runner {
    * acked. A turn that fails is not acked: the backend hands its events over
    * again.
    */
-  private async turnOf(session: AgentSession, input: string, seqs: number[], joinable = true): Promise<void> {
+  private async turnOf(
+    session: AgentSession,
+    input: string,
+    seqs: number[],
+    joinable = true,
+    images?: ImageContent[],
+  ): Promise<void> {
     const recorder = new TurnRecorder(randomUUID(), () => new Date().toISOString(), (activity) => this.send(activity));
     const unsubscribe = session.subscribe((event) => recorder.handle(event));
     const turn: Turn = { session, seqs: [...seqs], queued: [] };
@@ -209,8 +229,10 @@ export class Runner {
     let failed = false;
     try {
       let text = input;
+      let withImages = images;
       for (;;) {
-        await session.prompt(text);
+        await session.prompt(text, withImages ? { images: withImages } : undefined);
+        withImages = undefined;
         // Pi may have finished before a steer or follow-up reached it; what is
         // left in its queue is run as a prompt of the same turn.
         let count = 0;
@@ -250,7 +272,6 @@ export class Runner {
     } catch (error) {
       this.log(`ack not sent: ${(error as Error).message}`);
     }
-    for (const seq of seqs) this.taken.delete(seq);
   }
 
   // ── The nightly switch ──
