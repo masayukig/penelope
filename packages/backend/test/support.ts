@@ -1,0 +1,145 @@
+// What the tests share: temporary places, a clock the test moves, and an
+// HTTP client that talks over a Unix socket or a TCP port.
+import { mkdtempSync, rmSync } from "node:fs";
+import http from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+/** A fresh directory, removed when the test ends. */
+export function tempDir(t: { after: (fn: () => void) => void }): string {
+  // Unix socket paths are short (about 100 bytes), so this stays near /tmp.
+  const dir = mkdtempSync(path.join(tmpdir(), "pb-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+/** A clock that only moves when the test says so. */
+export class FakeClock {
+  ms: number;
+  constructor(iso: string) {
+    this.ms = Date.parse(iso);
+  }
+  now = (): number => this.ms;
+  advance(minutes: number): void {
+    this.ms += minutes * 60_000;
+  }
+  set(iso: string): void {
+    this.ms = Date.parse(iso);
+  }
+}
+
+export type Target = { socketPath: string } | { port: number };
+
+export type Answer = { status: number; headers: http.IncomingHttpHeaders; text: string; json: () => any };
+
+export type Ask = {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string | Buffer | Uint8Array;
+  json?: unknown;
+};
+
+/** One HTTP request; the whole answer is read. */
+export function ask(target: Target, pathname: string, options: Ask = {}): Promise<Answer> {
+  const headers: Record<string, string> = { ...options.headers };
+  let body = options.body;
+  if (options.json !== undefined) {
+    body = JSON.stringify(options.json);
+    headers["content-type"] ??= "application/json";
+  }
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      { ...target, host: "localhost", path: pathname, method: options.method ?? (body ? "POST" : "GET"), headers },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          resolve({ status: response.statusCode ?? 0, headers: response.headers, text, json: () => JSON.parse(text) });
+        });
+        response.on("error", reject);
+      },
+    );
+    request.on("error", reject);
+    request.end(body);
+  });
+}
+
+/** A multipart/form-data body, built the way the platform builds one. */
+export async function multipart(parts: Array<[name: string, value: string | Blob, filename?: string]>): Promise<{
+  body: Buffer;
+  contentType: string;
+}> {
+  const form = new FormData();
+  for (const [name, value, filename] of parts) {
+    if (typeof value === "string") form.append(name, value);
+    else form.append(name, value, filename);
+  }
+  const request = new Request("http://localhost/", { method: "POST", body: form });
+  return {
+    body: Buffer.from(await request.arrayBuffer()),
+    contentType: request.headers.get("content-type") ?? "",
+  };
+}
+
+/** Server-sent events read off a stream until the test stops it. */
+export class SseReader {
+  readonly events: Array<{ id?: string; event: string; data: any }> = [];
+  private buffer = "";
+  private waiters: Array<() => void> = [];
+  private request: http.ClientRequest | undefined;
+  status = 0;
+
+  open(target: Target, pathname: string, headers: Record<string, string>): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.request = http.get({ ...target, host: "localhost", path: pathname, headers }, (response) => {
+        this.status = response.statusCode ?? 0;
+        response.setEncoding("utf8");
+        response.on("data", (chunk: string) => this.feed(chunk));
+        response.on("error", () => {});
+        resolve();
+      });
+      this.request.on("error", reject);
+    });
+  }
+
+  private feed(chunk: string): void {
+    this.buffer += chunk;
+    let end: number;
+    while ((end = this.buffer.indexOf("\n\n")) >= 0) {
+      const block = this.buffer.slice(0, end);
+      this.buffer = this.buffer.slice(end + 2);
+      const fields: Record<string, string> = {};
+      for (const line of block.split("\n")) {
+        if (line.startsWith(":")) continue;
+        const colon = line.indexOf(":");
+        if (colon < 0) continue;
+        fields[line.slice(0, colon)] = line.slice(colon + 1).trimStart();
+      }
+      if (fields.event && fields.data !== undefined) {
+        this.events.push({ id: fields.id, event: fields.event, data: JSON.parse(fields.data) });
+        for (const wake of this.waiters.splice(0)) wake();
+      }
+    }
+  }
+
+  /** Waits until `count` events have come, or fails after a while. */
+  async waitFor(count: number, ms = 2000): Promise<void> {
+    const deadline = Date.now() + ms;
+    while (this.events.length < count) {
+      const left = deadline - Date.now();
+      if (left <= 0) throw new Error(`only ${this.events.length} of ${count} server-sent events came`);
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, left);
+        this.waiters.push(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    }
+  }
+
+  close(): void {
+    this.request?.destroy();
+  }
+}
