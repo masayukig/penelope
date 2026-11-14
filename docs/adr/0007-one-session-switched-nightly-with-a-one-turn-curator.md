@@ -38,9 +38,9 @@ penelope では、記憶の検査をやめる（ADR-0006）。Pi は sandbox の
 
 ### 本 ADR で決定しないこと
 
-- 夜の時刻（委譲先: backend の設定）
+- 夜の時刻（委譲先: [backend の設定](../backend.md)）
 - 振り返りと整理係のプロンプトの文面（委譲先: プロンプトのファイル。ADR-0008 の方針に従う）
-- 整理係のターンが失敗したときの扱い（委譲先: backend の仕様書）
+- 整理係のターンが失敗したときの扱い（委譲先: [backend の仕様書](../backend.md)）
 - 日中のセッションの compaction の設定（委譲先: backend の設定。最初は Pi の既定）
 
 ## Consequences

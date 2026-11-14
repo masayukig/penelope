@@ -18,9 +18,7 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 - 本体は `main`。サブエージェントは、親が付ける名前。最初の版は `main` だけである。
 - 同じ UID で動くエージェントを、backend と UI が見分けるための欄である。確かめはしない（sandbox の中の名乗り）。
 
-未決:
-
-- サブエージェントが出来事を取るか（`agent` ごとに列を分けるか）。最初の版は `main` の 1 本だけで、`agent` が `main` でない `GET /v1/events` の扱いは、サブエージェントを作るときの ADR で決める。
+- サブエージェントが出来事を取るか（`agent` ごとに列を分けるか）は、サブエージェントを作るときの ADR で決める。それまで、`agent` が `main` でない `GET /v1/events` は `400` で断る。
 
 ## 口の一覧
 
@@ -41,13 +39,11 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 - 返したものは「渡した」になる。渡したまま一定時間 ack の無いものは、次の poll でもう一度渡す。
 - 返すのは、渡す時が来たものだけである。`batch` の待ちと起きている時間は backend が数える（[events.md](events.md) の「いつ渡すか」）。runner は受け取った分をターンに入れるだけである。
 - ack の無いままもう一度渡す出来事は、`seq` が `after` 以下でも返す。runner は再起動の後、`after` を省いて（0 として）取り直す。
+- まだ一度も渡していない出来事も、`seq` が `after` 以下でも返す。`batch` の出来事は、後に来た `now` の出来事より後に渡ることがあり、そのとき `seq` は runner が受け取った最大の `seq` より小さい。
+- 一定時間は backend の設定で、既定は 5 分（[backend.md](backend.md) の `PENELOPE_REDELIVER_MINUTES`）。ターンがそれより長く続くと、そのターンに入れたまま ack していない出来事も、もう一度渡る。
+- `wait` の上限は 60 秒で、それより長い値は 60 秒として扱う。一度に返すのは 100 件まで。
 - 応答は `{events: [...]}`。1 件ごとに `seq`・`source`・`id`・`stream`・`occurred_at`・`received_at`・`summary`・`delivery`・足された場所（`appended`: `path` と `lines` の 1 始まり・両端を含む範囲）・添付の場所（`attachments`）を持つ。inline の出来事だけが `inline: true` と `payload` を持つ。
 - runner はターンの最中も取り続ける。`now` の出来事をターンの途中に steer で入れるためである。
-
-未決:
-
-- 「一定時間」の長さ（案: backend の設定、既定 5 分）。
-- `wait` の上限（案: 60 秒）と、一度に返す件数の上限。
 
 ## 済んだ出来事を知らせる
 
@@ -59,13 +55,14 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 - body は `{agent, id, summary, payload}`。backend は `source` が `self` の出来事として列に入れる（取り込み口と同じ処理）。`delivery` は backend の設定（既定 `now`）。
 - サブエージェントが終わったことの知らせや、自分の作業の区切りに使う。取り込み口は Unix socket で sandbox から見えないため、この口を置く。
 - `id` は呼び手が付ける。同じ `id` は重複として落ちる。
+- 応答は `202` で、body は無い（取り込み口と同じ）。
 
 ## 返事
 
 - body は `{agent, text, expression?, in_reply_to?}`。
   - `expression`: 表情。欄だけを持つ。最初の Web UI は表示しない（[ADR-0009](adr/0009-web-ui-first-with-a-new-api-and-astryx.md)）。
   - `in_reply_to`: 答えている出来事の `seq`。
-- 応答は `{id}`。backend は会話の履歴に残し、UI の流れへ送る（[ui-api.md](ui-api.md)）。
+- 応答は `201` と `{id}`。backend は会話の履歴に残し、UI の流れへ送る（[ui-api.md](ui-api.md)）。
 
 ## 途中経過
 
@@ -81,6 +78,9 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 | `message` | `text`（返答の区切り） |
 | `turn_end` | なし |
 
+- backend は 1 件ずつ記録に残し、UI の流れへ送る。`turn_start` でエージェントを `thinking`、`turn_end` で `waiting` にする。
+- 1 件でも形が違えば、要求の全体を `400` で断り、何も残さない。
+
 未決:
 
 - `turn_id` は runner が付ける（案: ターンごとの UUID）。
@@ -89,7 +89,9 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 
 ## ターンの終わり
 
-- body は `{agent, turn_id}`。backend が `/memory` の作業ツリーの変わったものをコミットする合図である（[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)）。
+- body は `{agent, turn_id}`。backend が `/memory` の作業ツリーの変わったものをコミットする合図である（[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)）。コミットの形は [backend.md](backend.md) の「`/memory` のコミット」にある。
+- backend はコミットを終えてから `204` で答える。コミットに失敗したら `500` で答える。
+- UI の流れでは、エージェントを `waiting` にする。
 - 途中経過の `turn_end` は UI と記録のため、この口はコミットのために、別に置く。
 
 ## 予約
@@ -99,20 +101,16 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 - `GET /v1/schedules?agent=` は `{schedules: [...]}`。`DELETE /v1/schedules/<id>` で消す。
 - 時刻が来たら、backend が `source` が `cron` の出来事を列に入れる（[events.md](events.md) の「予約の出来事」）。1 回の予約は、出来事にしたら消える。
 
-未決:
-
-- cron の式の方言と時間帯（案: 5 欄の式を backend の設定の時間帯で）。
-- 応答の状態コード（案: 作ったら `201`、消したら `204`、無ければ `404`）。
+- cron の式は 5 欄（分・時・日・月・曜日）で、backend の設定の時間帯で読む。式か時刻が読めなければ `400`。
+- 作ったら `201`、消したら `204`、消す予約が無ければ `404`。
 
 ## セッションの切り替えの知らせ
 
 - 夜の切り替え（制御の出来事、[events.md](events.md) の「制御の出来事」）を終え、新しいセッションが動き出したら、runner が送る。body は `{agent}`。
 - そのあと runner は、制御の出来事を ack する。
 
-未決:
-
-- 切り替えの途中で runner が止まったとき（制御の出来事がもう一度渡されたとき）に、どこからやり直すか。整理係のターンが失敗したときの扱いとともに、backend の仕様書で決める（[ADR-0007](adr/0007-one-session-switched-nightly-with-a-one-turn-curator.md) の「本 ADR で決定しないこと」）。
+- backend は切り替えの段を数えず、制御の出来事も ack が無ければもう一度渡すだけである。切り替えの途中で runner が止まったとき（制御の出来事がもう一度渡されたとき）にどこからやり直すか、整理係のターンが失敗したときにどうするかは、runner が決める（[backend.md](backend.md) の「夜の切り替え」）。
 
 ## 状態コード
 
-決めていない口の状態コードは、案として次に揃える。成功で body の無いもの（ack・途中経過・ターンの終わり・切り替えの知らせ）は `204`、形が違えば `400`、認証が通らなければ `401`。
+成功で body の無いもの（ack・途中経過・ターンの終わり・切り替えの知らせ）は `204`、形が違えば `400`、認証が通らなければ `401`、口の無い道は `404`、道はあるが method が違えば `405`、body が上限（16 MiB）より大きければ `413`。backend が本物の token を設定されていなければ、すべての要求を `401` で断る。
