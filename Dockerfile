@@ -65,7 +65,8 @@ ENTRYPOINT ["/sentinel"]
 # The backend runs git to commit /memory (ADR-0006). This RUN is the only one
 # in a final stage, so the release builds it for arm64 under QEMU. The
 # warning that node:sqlite is experimental is turned off: there is nothing to
-# act on in it.
+# act on in it. The built Web UI is served from /app/web, PENELOPE_WEB_DIR's
+# default (docs/ui-api.md).
 FROM node:24.22.3-trixie-slim AS backend
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends git \
@@ -76,6 +77,7 @@ WORKDIR /app
 COPY --from=ts-build /src/packages/backend/package.json ./
 COPY --from=backend-deps /src/node_modules ./node_modules
 COPY --from=ts-build /src/packages/backend/dist ./dist
+COPY --from=ts-build /src/packages/web/dist ./web
 USER 1001:1001
 ENTRYPOINT ["node", "--disable-warning=ExperimentalWarning", "/app/dist/main.js"]
 CMD ["serve"]

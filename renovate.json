@@ -49,6 +49,12 @@
       "matchPackageNames": ["@types/node"],
       "matchUpdateTypes": ["major"],
       "enabled": false
+    },
+    {
+      "description": "Astryx is in beta: a 0.x release can change components and how they look even in a patch, which CI does not see. Its packages are pinned and move together on one branch, merged by hand after the screens are looked at",
+      "matchPackageNames": ["@astryxdesign/**"],
+      "groupName": "astryx",
+      "automerge": false
     }
   ]
 }
