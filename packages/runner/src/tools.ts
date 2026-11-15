@@ -1,11 +1,14 @@
-// The tools that reach the backend: the reply to the owner, the answer to an
-// agent that asked over A2A, her schedules and events to herself. Each only calls the backend's API (docs/sandbox-api.md);
-// their descriptions state what they do (ADR-0008).
+// The tools that only the main agent has: those that reach the backend (the
+// reply to the owner, the answer to an agent that asked over A2A, her
+// schedules and events to herself), each only calling the backend's API
+// (docs/sandbox-api.md), and those that start and talk to her sub-agents
+// (ADR-0022). Their descriptions state what they do (ADR-0008).
 
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import type { Backend } from "./backend.ts";
+import type { SubAgents } from "./subagents.ts";
 
 function text(value: string) {
   return { content: [{ type: "text" as const, text: value }], details: undefined };
@@ -110,4 +113,64 @@ export function backendTools(backend: Backend): ToolDefinition[] {
   });
 
   return [reply, replyToAgent, scheduleAdd, scheduleList, scheduleRemove, selfEvent] as ToolDefinition[];
+}
+
+export function subAgentTools(agents: SubAgents): ToolDefinition[] {
+  const start = defineTool({
+    name: "subagent_start",
+    label: "Start a sub-agent",
+    description:
+      "Start a sub-agent: another Pi session, run by the runner in this sandbox, with Pi's tools and the shell but none of reply, reply_to_agent, the schedules, self_event or the subagent_ tools. It returns as soon as the sub-agent has started, and the sub-agent runs in the background. Each time it stops, a `self` event reaches you with its name as the stream; the payload has why it stopped (`stopped`, `failed`, or `interrupted` when the runner stopped during its run), its purpose, and the whole text of its last answer. Its system prompt says it is your sub-agent, its purpose and working directory, the sandbox, the connectors and the skills, followed by the body of /memory/agents/<role>.md, or of /memory/agents/default.md when no role is given. It is not given your personality or your memory files. A name is used once, and is not used again after the sub-agent is closed.",
+    parameters: Type.Object({
+      name: Type.String({
+        description:
+          "Its name: lowercase letters, digits and -, starting with a letter or a digit, at most 63 characters, not main. The stream of its events, and its working directory ~/agents/<name>/ when none is given.",
+      }),
+      purpose: Type.String({ description: "One line on what it is for, shown by subagent_list and on your owner's screen." }),
+      prompt: Type.String({ description: "The first request, given to it as it is." }),
+      role: Type.Optional(Type.String({ description: "A role: the file /memory/agents/<role>.md." })),
+      cwd: Type.Optional(Type.String({ description: "Its working directory, which must exist. Left out, ~/agents/<name>/ is made." })),
+    }),
+    async execute(_id, params) {
+      return text(await agents.start(params));
+    },
+  });
+
+  const send = defineTool({
+    name: "subagent_send",
+    label: "Send to a sub-agent",
+    description:
+      "Send more words to a sub-agent that has stopped and is waiting. It goes on in the same session, in the background, and another `self` event reaches you when it stops again. A running sub-agent takes no words.",
+    parameters: Type.Object({
+      name: Type.String({ description: "The sub-agent's name." }),
+      text: Type.String({ description: "The words, given to it as they are." }),
+    }),
+    async execute(_id, params) {
+      return text(await agents.send(params.name, params.text));
+    },
+  });
+
+  const list = defineTool({
+    name: "subagent_list",
+    label: "List sub-agents",
+    description:
+      "List the sub-agents that are not closed, as JSON: each one's name, state (running, or waiting after it stopped), purpose and working directory. Sub-agents stay until they are closed, across nights.",
+    parameters: Type.Object({}),
+    async execute() {
+      return text(JSON.stringify(agents.list()));
+    },
+  });
+
+  const close = defineTool({
+    name: "subagent_close",
+    label: "Close a sub-agent",
+    description:
+      "Close a sub-agent. A run it is in is cancelled, with no event for it. A closed sub-agent takes no more words. Its working directory and the record of its session are kept.",
+    parameters: Type.Object({ name: Type.String({ description: "The sub-agent's name." }) }),
+    async execute(_id, params) {
+      return text(await agents.close(params.name));
+    },
+  });
+
+  return [start, send, list, close] as ToolDefinition[];
 }

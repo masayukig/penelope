@@ -57,8 +57,13 @@ export async function writeState(config: Config, state: SessionState): Promise<v
  * so its header is written here: a restart before that still finds it.
  */
 export async function newSessionFile(config: Config): Promise<string> {
-  await mkdir(config.sessionDir, { recursive: true });
-  const manager = SessionManager.create(config.home, config.sessionDir);
+  return newSessionFileIn(config.home, config.sessionDir);
+}
+
+/** A new session file in `dir`, of a session working in `cwd`. */
+export async function newSessionFileIn(cwd: string, dir: string): Promise<string> {
+  await mkdir(dir, { recursive: true });
+  const manager = SessionManager.create(cwd, dir);
   const file = manager.getSessionFile();
   const header = manager.getHeader();
   if (!file || !header) throw new Error("Pi did not make a session file");
@@ -75,11 +80,15 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-/** A session with the given system prompt, over `sessionManager`. */
+/**
+ * A session with the given system prompt, over `sessionManager`, working in
+ * `cwd` (HOME unless given). The skills are found from HOME whatever `cwd` is.
+ */
 export async function openSession(
   setup: PiSetup,
   systemPrompt: string,
   sessionManager: SessionManager,
+  cwd = setup.config.home,
 ): Promise<AgentSession> {
   const { config, modelRuntime } = setup;
   const settingsManager = setup.settings();
@@ -107,7 +116,7 @@ export async function openSession(
     if (!model) throw new Error(`Pi has no model ${config.model.provider}/${config.model.id}`);
   }
   const { session } = await createAgentSession({
-    cwd: config.home,
+    cwd,
     agentDir: config.agentDir,
     modelRuntime,
     ...(model ? { model } : {}),

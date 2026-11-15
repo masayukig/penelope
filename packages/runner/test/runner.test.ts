@@ -1,104 +1,15 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, test } from "node:test";
+import { test } from "node:test";
 
-import { SettingsManager } from "@earendil-works/pi-coding-agent";
-import type { Activity, ActivityRequest, DeliveredEvent, TurnLine } from "@penelope/contract";
+import type { DeliveredEvent, TurnLine } from "@penelope/contract";
 
-import { Backend } from "../src/backend.ts";
 import type { Config } from "../src/config.ts";
 import { curatorSystemPrompt, FOLDING, foldAskInput, type Places, reflectionInput } from "../src/prompts.ts";
-import { Runner } from "../src/runner.ts";
-import { FakeBackend, TOKEN, until } from "./fake-backend.ts";
-import { type Call, fakeRuntime, MODEL, PROVIDER, type Script } from "./fake-model.ts";
-
-const closers: (() => Promise<void>)[] = [];
-afterEach(async () => {
-  for (const close of closers.splice(0).reverse()) await close();
-});
-
-interface World {
-  fake: FakeBackend;
-  config: Config;
-  calls: Call[];
-  /** The runner's log lines. */
-  logs: string[];
-  /** Start a runner over the same places; stop it with the function it returns. */
-  start(script: Script): Promise<() => Promise<void>>;
-}
-
-async function world(options: { turnFold?: boolean; ownerSkills?: boolean; connectors?: boolean } = {}): Promise<World> {
-  const root = await mkdtemp(join(tmpdir(), "runner-"));
-  const home = join(root, "home");
-  const memoryDir = join(root, "memory");
-  await mkdir(home, { recursive: true });
-  await mkdir(memoryDir, { recursive: true });
-  const fake = new FakeBackend();
-  closers.push(() => fake.close());
-  const config: Config = {
-    agent: "main",
-    backend: { url: await fake.url, token: TOKEN },
-    identity: { name: "Example", role: "an operator", owner: "Owner" },
-    model: { provider: PROVIDER, id: MODEL },
-    home,
-    memoryDir,
-    sourcesDir: join(root, "sources"),
-    agentDir: join(home, ".pi", "agent"),
-    sessionDir: join(home, ".pi", "agent", "sessions", "main"),
-    promptFileMaxBytes: 65536,
-    imageMaxBytes: 1_000_000,
-    pollWaitSeconds: 1,
-    turnFold: options.turnFold ?? true,
-    ...(options.ownerSkills ? { ownerSkillsDir: join(root, "skills") } : {}),
-    ...(options.connectors ? { connectorsDir: join(root, "connectors") } : {}),
-  };
-  const calls: Call[] = [];
-  const logs: string[] = [];
-  return {
-    fake,
-    config,
-    calls,
-    logs,
-    async start(script) {
-      const modelRuntime = await fakeRuntime(root, (call) => {
-        calls.push(call);
-        return script(call);
-      });
-      const controller = new AbortController();
-      const runner = new Runner({
-        config,
-        backend: new Backend({ url: config.backend.url, token: TOKEN, agent: "main" }),
-        modelRuntime,
-        settings: () => SettingsManager.inMemory({ retry: { enabled: false } }),
-        log: (line) => logs.push(line),
-      });
-      const running = runner.run(controller.signal);
-      const stop = async () => {
-        controller.abort();
-        await running;
-      };
-      closers.push(stop);
-      return stop;
-    },
-  };
-}
-
-function ui(seq: number, text: string, delivery: "now" | "batch" = "now"): DeliveredEvent {
-  return {
-    seq,
-    source: "ui",
-    id: `m-${seq}`,
-    occurred_at: "2026-11-14T09:00:00Z",
-    received_at: "2026-11-14T09:00:00Z",
-    summary: text,
-    delivery,
-    inline: true,
-    payload: { text },
-    appended: { path: "/sources/ui/2026-11-14.jsonl", lines: [seq, seq] },
-  };
-}
+import { until } from "./fake-backend.ts";
+import type { Call, Script } from "./fake-model.ts";
+import { acked, activities, closers, ui, world } from "./world.ts";
 
 function slack(seq: number, delivery: "now" | "batch"): DeliveredEvent {
   return {
@@ -130,17 +41,11 @@ function nightly(seq: number): DeliveredEvent {
   };
 }
 
-function activities(fake: FakeBackend): Activity[] {
-  return (fake.sent("POST", "/v1/activity") as ActivityRequest[]).flatMap((request) => request.activities);
-}
-
 /** The lines of an input's `<events>`, read back as JSON; none when the input is not one. */
 function events(input: string): (TurnLine & Record<string, unknown>)[] {
   const block = /^<events>\n([\s\S]*)\n<\/events>$/.exec(input)?.[1];
   return block === undefined ? [] : block.split("\n").map((line) => JSON.parse(line) as TurnLine & Record<string, unknown>);
 }
-
-const acked = (fake: FakeBackend) => (fake.sent("POST", "/v1/events/ack") as { seqs: number[] }[]).flatMap((a) => a.seqs);
 
 /** Answers the owner with a reply, then stops. */
 const replying: Script = (call) =>
