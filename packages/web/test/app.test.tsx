@@ -3,6 +3,8 @@ import { afterEach, describe, it } from "node:test";
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
+import type { Activity, StreamEvent, SubAgent } from "@penelope/contract";
+
 import { App } from "../src/ui/App.tsx";
 import { FakeBackend } from "./fake-backend.ts";
 
@@ -219,5 +221,167 @@ describe("the Web UI on a phone", () => {
     await act(async () => fireEvent.click(opener!));
     const sheet = await screen.findByRole("dialog", { name: "いまのエージェント" });
     assert.ok(within(sheet).getByText("待っている"));
+  });
+});
+
+describe("the sub-agents in the Web UI", () => {
+  const since = new Date(Date.now() - 60_000).toISOString();
+  const three = (): SubAgent[] => [
+    { agent: "cluster-test", purpose: "try the update on the test cluster", state: "thinking", started_at: since, state_since: since },
+    { agent: "renovate-review", purpose: "look over the Renovate PRs", state: "thinking", started_at: since, state_since: since },
+    { agent: "fleet-fix", purpose: "fix the failing Kustomization", state: "waiting", started_at: since, state_since: since },
+  ];
+  const column = () => within(panel()).queryByRole("region", { name: "サブエージェント" });
+  const opener = (name: string) => within(column()!).getByRole("button", { name: new RegExp(name) });
+  const subActivity = (agent: string, activity: Activity): StreamEvent => ({ event: "activity", data: { agent, activity } });
+
+  // docs/design/README.md 11-5: no empty frame, no heading.
+  it("shows no column of sub-agents when there are none", async () => {
+    const backend = start();
+    await backend.connected();
+    await waitFor(() => assert.ok(backend.agentsRead > 0));
+    await waitFor(() => within(panel()).getByText("待っている"));
+    assert.equal(column(), null);
+    assert.equal(screen.queryByText(/サブエージェント/), null);
+  });
+
+  it("lists them in the order they were started, with how many run and wait", async () => {
+    const backend = new FakeBackend();
+    backend.agents = three();
+    start(backend);
+    await backend.connected();
+    await waitFor(() => assert.ok(column()));
+    const text = column()!.textContent ?? "";
+    assert.ok(text.indexOf("cluster-test") < text.indexOf("renovate-review"));
+    assert.ok(text.indexOf("renovate-review") < text.indexOf("fleet-fix"));
+    assert.match(text, /走っている 2 ・ 待っている 1/);
+    assert.match(text, /止まって待っている/);
+    assert.match(text, /look over the Renovate PRs/);
+  });
+
+  it("opens one at a time", async () => {
+    const backend = new FakeBackend();
+    backend.agents = three();
+    start(backend);
+    await backend.connected();
+    await waitFor(() => assert.ok(column()));
+    await act(async () => fireEvent.click(opener("cluster-test")));
+    await waitFor(() => assert.equal(opener("cluster-test").getAttribute("aria-expanded"), "true"));
+    await act(async () => fireEvent.click(opener("fleet-fix")));
+    await waitFor(() => assert.equal(opener("fleet-fix").getAttribute("aria-expanded"), "true"));
+    assert.equal(opener("cluster-test").getAttribute("aria-expanded"), "false");
+    assert.equal(opener("renovate-review").getAttribute("aria-expanded"), "false");
+  });
+
+  // The purpose is told once: in full in its frame once it is opened, not again at the head of the flow.
+  it("tells the purpose once when a frame is opened", async () => {
+    const backend = new FakeBackend();
+    backend.agents = three();
+    start(backend);
+    await backend.connected();
+    await waitFor(() => assert.ok(column()));
+    await act(async () => fireEvent.click(opener("cluster-test")));
+    await waitFor(() => assert.equal(opener("cluster-test").getAttribute("aria-expanded"), "true"));
+    assert.equal(within(column()!).getAllByText("try the update on the test cluster").length, 1);
+  });
+
+  it("follows the stream: a state that changes, one started, one closed", async () => {
+    const backend = new FakeBackend();
+    backend.agents = three();
+    start(backend);
+    await backend.connected();
+    await waitFor(() => assert.ok(column()));
+    const at = new Date().toISOString();
+    await act(async () => {
+      backend.send({ event: "state", data: { agent: "fleet-fix", state: "thinking" } });
+      backend.send(subActivity("fleet-fix", { kind: "turn_start", at, turn_id: "f-1" }));
+      backend.send(subActivity("fleet-fix", { kind: "tool_call", at, turn_id: "f-1", call_id: "c-1", name: "bash", arguments: { command: "flux get kustomizations" } }));
+    });
+    await waitFor(() => assert.match(within(column()!).getByRole("heading").parentElement!.textContent ?? "", /走っている 3$/));
+    assert.match(column()!.textContent ?? "", /bash: flux get kustomizations/);
+    await act(async () => {
+      backend.send({ event: "agent", data: { agent: "cluster-test", purpose: "try the update on the test cluster", closed: true } });
+      backend.send({ event: "agent", data: { agent: "cert-audit", purpose: "list the certificates", closed: false } });
+    });
+    await waitFor(() => assert.match(column()!.textContent ?? "", /cert-audit/));
+    const text = column()!.textContent ?? "";
+    assert.doesNotMatch(text, /cluster-test/);
+    assert.ok(text.indexOf("fleet-fix") < text.indexOf("cert-audit"));
+    await act(async () => {
+      for (const agent of ["renovate-review", "fleet-fix", "cert-audit"]) backend.send({ event: "agent", data: { agent, purpose: "", closed: true } });
+    });
+    await waitFor(() => assert.equal(column(), null));
+  });
+
+  it("reads the list again when the stream comes back", async () => {
+    const backend = new FakeBackend();
+    backend.agents = three();
+    start(backend);
+    await backend.connected();
+    await waitFor(() => assert.ok(column()));
+    await act(async () => backend.drop());
+    await waitFor(() => screen.getByText(/接続が切れました/));
+    backend.agents = [three()[1]!];
+    await act(async () => backend.up());
+    await backend.connected(2);
+    await waitFor(() => assert.doesNotMatch(column()!.textContent ?? "", /cluster-test/));
+    assert.match(column()!.textContent ?? "", /renovate-review/);
+    assert.ok(backend.agentsRead >= 2);
+  });
+
+  // While the panel is closed, the count stands by her name in the header (11-6).
+  it("counts them by her name when the panel is closed", async () => {
+    const backend = new FakeBackend();
+    backend.agents = three();
+    start(backend);
+    await backend.connected();
+    await waitFor(() => assert.ok(column()));
+    const toggle = screen.getByRole("button", { name: "いまのエージェントを開く・閉じる" });
+    assert.equal(within(toggle).queryByText("サブ 3"), null);
+    await act(async () => fireEvent.click(toggle));
+    await waitFor(() => assert.equal(screen.queryByRole("complementary"), null));
+    assert.ok(within(toggle).getByText("サブ 3"));
+  });
+
+  it("keeps the sub-agents' turns out of the main agent's now and out of the timeline", async () => {
+    const backend = new FakeBackend();
+    backend.agents = three();
+    backend.history = [{ kind: "owner", id: "m-1", at: new Date().toISOString(), text: "check the cluster" }];
+    start(backend);
+    await backend.connected();
+    await waitFor(() => assert.ok(column()));
+    const at = new Date().toISOString();
+    await act(async () => {
+      backend.send(subActivity("cluster-test", { kind: "turn_start", at, turn_id: "c-1" }));
+      backend.send(subActivity("cluster-test", { kind: "thinking", at, turn_id: "c-1", text: "drain the workers one by one" }));
+      backend.send(subActivity("cluster-test", { kind: "tool_call", at, turn_id: "c-1", call_id: "c-1", name: "bash", arguments: { command: "kubectl get nodes" } }));
+    });
+    await waitFor(() => assert.match(column()!.textContent ?? "", /kubectl get nodes/));
+    const now = within(panel()).getByRole("region", { name: "Iris（本体）" });
+    assert.ok(within(now).getByText("待っている"));
+    assert.doesNotMatch(now.textContent ?? "", /kubectl get nodes|drain the workers/);
+    assert.doesNotMatch(timeline().textContent ?? "", /kubectl get nodes|drain the workers/);
+  });
+});
+
+describe("the sub-agents on a phone", () => {
+  afterEach(() => (window as unknown as { happyDOM: { setViewport: (v: { width: number }) => void } }).happyDOM.setViewport({ width: 1024 }));
+
+  it("counts them on the strip, and lists them in the sheet", async () => {
+    (window as unknown as { happyDOM: { setViewport: (v: { width: number; height: number }) => void } }).happyDOM.setViewport({ width: 390, height: 844 });
+    const backend = new FakeBackend();
+    const since = new Date().toISOString();
+    backend.agents = [
+      { agent: "cluster-test", purpose: "try the update", state: "thinking", started_at: since, state_since: since },
+      { agent: "fleet-fix", purpose: "fix the Kustomization", state: "waiting", started_at: since, state_since: since },
+    ];
+    start(backend);
+    await backend.connected();
+    const strip = await screen.findByRole("button", { name: /^いまのエージェントを開く$/ });
+    await waitFor(() => assert.ok(within(strip).getByText("サブ 2")));
+    await act(async () => fireEvent.click(strip));
+    const sheet = await screen.findByRole("dialog", { name: "いまのエージェント" });
+    const list = within(sheet).getByRole("region", { name: "サブエージェント" });
+    assert.match(list.textContent ?? "", /走っている 1 ・ 待っている 1/);
   });
 });

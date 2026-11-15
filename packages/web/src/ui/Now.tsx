@@ -55,7 +55,8 @@ export function Now({ status, flow }: { status: Status; flow: FlowItem[] }) {
   );
 }
 
-function FlowLine({ item, all }: { item: FlowItem; all: FlowItem[] }) {
+/** One block of a turn. A tool's result is shown under its call, so it takes the whole flow. */
+export function FlowLine({ item, all }: { item: FlowItem; all: readonly FlowItem[] }) {
   switch (item.kind) {
     case "turn_start":
       return (

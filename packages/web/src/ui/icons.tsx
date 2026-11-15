@@ -56,3 +56,10 @@ export const ChevronUpIcon = (props: Props) => (
     <path d="M6 15l6-6 6 6" />
   </svg>
 );
+/** Stopped and waiting: two bars, filled, so that it is told from the running dot by its shape. */
+export const PauseIcon = (props: Props) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden {...props}>
+    <rect x="6" y="4" width="4" height="16" rx="1.5" />
+    <rect x="14" y="4" width="4" height="16" rx="1.5" />
+  </svg>
+);

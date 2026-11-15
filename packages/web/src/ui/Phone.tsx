@@ -13,6 +13,7 @@ import type { ScreenProps } from "./Desktop.tsx";
 import { ChevronUpIcon, MenuIcon } from "./icons.tsx";
 import { StatusLabel } from "./Now.tsx";
 import { AgentNow } from "./Panel.tsx";
+import { SubAgentCount } from "./SubAgents.tsx";
 import { type Place, PlaceItems, Placeholder } from "./places.tsx";
 import { Talk } from "./Talk.tsx";
 import { words } from "./words.ts";
@@ -32,6 +33,7 @@ export function Phone(props: ScreenProps) {
       ) : (
         <span className="status-strip-detail" />
       )}
+      <SubAgentCount agents={props.subAgents} />
       <Icon icon={ChevronUpIcon} size="sm" />
     </button>
   );
@@ -56,7 +58,7 @@ export function Phone(props: ScreenProps) {
         <Button label={words.logout} variant="ghost" onClick={props.onLogout} />
       </MobileNav>
       <BottomSheet isOpen={sheet} onOpenChange={setSheet} label={words.panel} height="tall" snapPoints={[0.5]}>
-        <AgentNow status={props.status} flow={props.flow} expression={props.expression} avatarSize={96} />
+        <AgentNow status={props.status} flow={props.flow} subAgents={props.subAgents} expression={props.expression} avatarSize={96} />
       </BottomSheet>
     </div>
   );

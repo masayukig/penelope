@@ -117,6 +117,96 @@ body {
   font-weight: 600;
   color: var(--color-text-secondary);
 }
+/* The sub-agents: one frame each, the latest line, opened in place. */
+.subs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.subs-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.subs-head h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.subs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sub {
+  padding: 2px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-element);
+}
+.sub-head {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: start;
+}
+.sub-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.sub-line .astryx-icon {
+  color: var(--color-text-secondary);
+}
+.sub-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-family-code);
+  font-size: 13px;
+  font-weight: 600;
+}
+.sub-state,
+.sub-since {
+  flex: none;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-secondary);
+}
+.sub-purpose,
+.sub-latest {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 400;
+}
+.sub-latest {
+  font-family: var(--font-family-code);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.sub-flow {
+  gap: 12px;
+  padding: 10px 0 12px;
+  border-top: 1px solid var(--color-border);
+  font-size: 13px;
+}
+.sub-purpose.open {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .now {
   display: flex;
   flex-direction: column;
@@ -329,6 +419,9 @@ body {
 .status-strip .status {
   color: var(--color-text-primary);
   font-weight: 600;
+}
+.status-strip .sub-count > * {
+  background: var(--color-background-surface);
 }
 .status-strip-detail {
   flex: 1;

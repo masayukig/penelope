@@ -1,7 +1,7 @@
 // What the screen shows, kept as one state that actions change: the
 // conversation's timeline, what the agent is doing now, and whether the
 // stream is up. Plain functions, so that the tests drive it without a DOM.
-import type { Activity, AgentState, HistoryEntry, StreamEvent } from "@penelope/contract";
+import type { Activity, AgentState, HistoryEntry, StreamEvent, SubAgent } from "@penelope/contract";
 
 export type Connection = "connecting" | "online" | "offline";
 
@@ -39,7 +39,14 @@ export type State = {
   interrupts: Interrupt[];
   connection: Connection;
   signedIn: boolean | undefined;
+  /** The sub-agents that are not closed, in the order they were started. */
+  subAgents: SubAgentEntry[];
+  /** The blocks of each sub-agent's turn under way, by its name. */
+  subTurns: Record<string, Activity[]>;
 };
+
+/** A sub-agent as the screen keeps it: times are RFC 3339. */
+export type SubAgentEntry = { agent: string; purpose: string; state: AgentState; startedAt: string; stateSince: string };
 
 export const initialState: State = {
   items: [],
@@ -50,12 +57,16 @@ export const initialState: State = {
   interrupts: [],
   connection: "connecting",
   signedIn: undefined,
+  subAgents: [],
+  subTurns: {},
 };
 
 export type Action =
   | { type: "history"; entries: HistoryEntry[]; before?: string; older?: boolean }
   | { type: "stream-open" }
   | { type: "stream"; event: StreamEvent }
+  /** GET /api/agents, read on each connection. */
+  | { type: "agents"; agents: SubAgent[] }
   | { type: "connection"; state: Connection }
   | { type: "signed-in" }
   | { type: "unauthorized" }
@@ -77,9 +88,16 @@ export function reduce(state: State, action: Action): State {
     }
     case "stream-open":
       // The backend replays all it kept: what was known is rebuilt from it.
-      return { ...state, agentState: "waiting", turn: [], connection: "online", signedIn: true };
+      // The sub-agents themselves are read again (GET /api/agents): they
+      // outlive what the replay holds.
+      return { ...state, agentState: "waiting", turn: [], subTurns: {}, connection: "online", signedIn: true };
     case "stream":
       return onStream(state, action.event);
+    case "agents":
+      return {
+        ...state,
+        subAgents: action.agents.map((a) => ({ agent: a.agent, purpose: a.purpose, state: a.state, startedAt: a.started_at, stateSince: a.state_since })),
+      };
     case "connection":
       return { ...state, connection: action.state };
     case "signed-in":
@@ -118,20 +136,40 @@ function onStream(state: State, event: StreamEvent): State {
   switch (event.event) {
     case "reply":
       return { ...state, items: merge(state.items, [fromHistory(event.data)]) };
-    case "state":
-      // Sub-agents get a column of their own later; the screen shows the main agent.
-      if (event.data.agent !== "main") return state;
-      return { ...state, agentState: event.data.state };
-    case "activity": {
-      if (event.data.agent !== "main") return state;
-      const activity = event.data.activity;
-      if (activity.kind === "turn_start") return { ...state, turn: [activity] };
-      return { ...state, turn: [...state.turn, activity] };
+    case "state": {
+      const { agent, state: next } = event.data;
+      if (agent === "main") return { ...state, agentState: next };
+      // The stream's state has no time: it changed when it came.
+      return withSubAgent(state, agent, (a) => (a.state === next ? a : { ...a, state: next, stateSince: new Date().toISOString() }));
     }
-    case "agent":
-      // The sub-agents' column comes later.
-      return state;
+    case "activity": {
+      const { agent, activity } = event.data;
+      if (agent === "main") {
+        if (activity.kind === "turn_start") return { ...state, turn: [activity] };
+        return { ...state, turn: [...state.turn, activity] };
+      }
+      const known = state.subTurns[agent] ?? [];
+      const subTurns = { ...state.subTurns, [agent]: activity.kind === "turn_start" ? [activity] : [...known, activity] };
+      // A turn's start and end tell the time of the state, as the backend takes it.
+      if (activity.kind === "turn_start") return withSubAgent({ ...state, subTurns }, agent, (a) => ({ ...a, state: "thinking", stateSince: activity.at }));
+      if (activity.kind === "turn_end") return withSubAgent({ ...state, subTurns }, agent, (a) => ({ ...a, state: "waiting", stateSince: activity.at }));
+      return { ...state, subTurns };
+    }
+    case "agent": {
+      const { agent, purpose, closed } = event.data;
+      if (closed) {
+        const { [agent]: _, ...subTurns } = state.subTurns;
+        return { ...state, subAgents: state.subAgents.filter((a) => a.agent !== agent), subTurns };
+      }
+      if (state.subAgents.some((a) => a.agent === agent)) return state;
+      const now = new Date().toISOString();
+      return { ...state, subAgents: [...state.subAgents, { agent, purpose, state: "waiting", startedAt: now, stateSince: now }] };
+    }
   }
+}
+
+function withSubAgent(state: State, agent: string, change: (a: SubAgentEntry) => SubAgentEntry): State {
+  return { ...state, subAgents: state.subAgents.map((a) => (a.agent === agent ? change(a) : a)) };
 }
 
 function fromHistory(entry: HistoryEntry): TimelineItem {
@@ -172,11 +210,52 @@ export type Status =
 
 export function statusOf(state: State): Status {
   if (state.connection === "offline") return { kind: "offline" };
-  if (state.agentState === "waiting") return { kind: "waiting" };
-  const done = new Set(state.turn.flatMap((a) => (a.kind === "tool_result" ? [a.call_id] : [])));
-  const open = state.turn.findLast((a) => a.kind === "tool_call" && !done.has(a.call_id));
+  return turnStatus(state.agentState, state.turn);
+}
+
+function turnStatus(agentState: AgentState, turn: Activity[]): Exclude<Status, { kind: "offline" }> {
+  if (agentState === "waiting") return { kind: "waiting" };
+  const done = new Set(turn.flatMap((a) => (a.kind === "tool_result" ? [a.call_id] : [])));
+  const open = turn.findLast((a) => a.kind === "tool_call" && !done.has(a.call_id));
   if (open?.kind === "tool_call") return { kind: "tool", tool: { name: open.name, detail: argumentsText(open.arguments) } };
   return { kind: "thinking" };
+}
+
+/** A sub-agent as its column shows it. */
+export type SubAgentView = SubAgentEntry & {
+  status: Exclude<Status, { kind: "offline" }>;
+  /** The latest block of its turn, in one line; none while it waits. */
+  latest: LatestLine | undefined;
+  /** The blocks of its turn under way; none while it waits. */
+  flow: Activity[];
+};
+
+export function subAgentsOf(state: State): SubAgentView[] {
+  return state.subAgents.map((a) => {
+    const flow = a.state === "waiting" ? [] : (state.subTurns[a.agent] ?? []);
+    return { ...a, status: turnStatus(a.state, flow), latest: latestLine(flow), flow };
+  });
+}
+
+/** How many sub-agents run and how many wait. */
+export function subAgentCounts(state: State): { running: number; waiting: number } {
+  const waiting = state.subAgents.filter((a) => a.state === "waiting").length;
+  return { running: state.subAgents.length - waiting, waiting };
+}
+
+export type LatestLine = { kind: "tool_call" | "thinking" | "message"; text: string };
+
+function latestLine(flow: Activity[]): LatestLine | undefined {
+  for (let i = flow.length - 1; i >= 0; i--) {
+    const block = flow[i]!;
+    if (block.kind === "tool_call") return { kind: "tool_call", text: `${block.name}: ${argumentsText(block.arguments)}` };
+    if (block.kind === "thinking" || block.kind === "message") return { kind: block.kind, text: firstLine(block.text) };
+  }
+  return undefined;
+}
+
+function firstLine(text: string): string {
+  return text.trim().split("\n")[0] ?? "";
 }
 
 /** The turn under way, with the owner's messages that came into it. Nothing while she waits. */
