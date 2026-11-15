@@ -4,6 +4,7 @@
 方針は [ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md) と
 [ADR-0013](adr/0013-event-contents-in-sources-and-summaries-in-turns.md)・[ADR-0017](adr/0017-turn-input-as-json-lines-in-events.md) にある。ここにはその形を書く。
 型は `packages/contract` の `src/events.ts`・`src/sandbox.ts`・`src/turn.ts` が正である。
+receivers のプラグインが封筒を作る形は [receivers.md](receivers.md) にある。
 
 「未決」と書いた点は、実装の作業単位が決めて、この文書を直す。
 
@@ -23,7 +24,7 @@
 
 backend は受けたときに、単調増加の整数 `seq` と、受けた時刻 `received_at` を付ける。順番は `seq` の順である。
 
-`source` と `stream` は `/sources` のパスの一部になる。使えるのは英小文字・数字・`.`・`_`・`-` で、`.` で始まらないものだけである。外れた出来事は `400` で断る。`/` や `..` で `/sources` の外や別の受信元の場所を指せないようにするためである。
+`source` と `stream` は `/sources` のパスの一部になる。使えるのは英小文字・数字・`.`・`_`・`-` で、`.` で始まらないものだけである。外れた出来事は `400` で断る。`/` や `..` で `/sources` の外や別の受信元の場所を指せないようにするためである。受信元の名前が制限に外れうるもの（Alertmanager の `alertname` など）から `stream` を作るときは、受信元の側で使える文字に写してから送る（[receivers.md](receivers.md) の「`stream` の写し方」）。
 
 ### 配送の約束
 
