@@ -1,0 +1,9 @@
+{
+  "plugins": [
+    {
+      "name": "fraction",
+      "plugin": "alertmanager",
+      "settings": { "token_file": "/run/secrets/e2e/alertmanager-token" }
+    }
+  ]
+}

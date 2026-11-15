@@ -171,17 +171,20 @@ services:
       - home:/home/agent
       - sources:/sources:ro
 
-  # There is no receivers plugin yet: the container stays up for the test's
-  # small sender (sender/send.ts) to run in it, with the intake socket.
+  # The receivers with the Alertmanager plugin on, at /v1/webhooks/fraction
+  # (config/receivers.json). The test also runs its small sender
+  # (sender/send.ts) in this container, to post envelopes of its own to the
+  # intake socket.
   receivers:
     image: penelope-receivers:${PENELOPE_E2E_TAG:?}
-    entrypoint: ["sleep", "infinity"]
-    init: true
     network_mode: service:pod
     depends_on:
       init: { condition: service_completed_successfully }
       volumes: { condition: service_completed_successfully }
+      backend: { condition: service_started }
     volumes:
       - *resolv
+      - ./config/receivers.json:/etc/penelope/receivers/config.json:ro
+      - ./.run/alertmanager-token:/run/secrets/e2e/alertmanager-token:ro
       - ./sender:/e2e/sender:ro
       - intake:/run/penelope/intake
