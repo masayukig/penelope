@@ -109,7 +109,11 @@ vuln: ## Report known vulnerabilities in the code paths the Go module calls.
 ##@ Test
 
 .PHONY: test
-test: test-go test-ts ## Unit tests of both languages. Need nothing but the toolchains.
+test: test-go test-ts test-renovate ## Unit tests and Renovate extraction checks. Need nothing but the toolchains.
+
+.PHONY: test-renovate
+test-renovate: ## Check the sandbox tools' Renovate extraction and release tag formats.
+	node --test .github/scripts/renovate-tools.test.mjs
 
 .PHONY: test-go
 test-go: ## Unit tests of the Go module.

@@ -109,8 +109,8 @@ RUN npm ci --omit=dev --ignore-scripts --workspace=@penelope/runner \
     && rm -rf node_modules/@penelope
 
 # The single-binary tools of the sandbox, fetched for the target's
-# architecture and checked against their releases' checksums. Renovate does
-# not read these versions yet; they are raised by hand.
+# architecture and checked against their releases' checksums. Renovate reads
+# these ARGs from GitHub releases, preserving the fetch script's tag/asset format.
 FROM --platform=$BUILDPLATFORM golang:1.27.4-trixie AS sandbox-tools
 ARG TARGETARCH
 ARG KUBECTL_VERSION=v1.36.6

@@ -25,6 +25,69 @@
       "datasourceTemplate": "golang-version"
     },
     {
+      "description": "kubectl uses the Kubernetes release tag in dl.k8s.io URLs",
+      "customType": "regex",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": ["(?:^|\\n)ARG KUBECTL_VERSION=(?<currentValue>v\\d+\\.\\d+\\.\\d+)[ \\t]*(?:\\r?\\n|$)"],
+      "depNameTemplate": "kubernetes/kubernetes",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^(?<version>v\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "Helm uses the release tag in get.helm.sh archive and checksum names",
+      "customType": "regex",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": ["(?:^|\\n)ARG HELM_VERSION=(?<currentValue>v\\d+\\.\\d+\\.\\d+)[ \\t]*(?:\\r?\\n|$)"],
+      "depNameTemplate": "helm/helm",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^(?<version>v\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "Only kustomize/v tags are CLI releases; kyaml and other module releases are not. The fetch script adds kustomize/ to the version",
+      "customType": "regex",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": ["(?:^|\\n)ARG KUSTOMIZE_VERSION=(?<currentValue>v\\d+\\.\\d+\\.\\d+)[ \\t]*(?:\\r?\\n|$)"],
+      "depNameTemplate": "kubernetes-sigs/kustomize",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^kustomize/(?<version>v\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "sops uses the release tag in both download URLs and asset names",
+      "customType": "regex",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": ["(?:^|\\n)ARG SOPS_VERSION=(?<currentValue>v\\d+\\.\\d+\\.\\d+)[ \\t]*(?:\\r?\\n|$)"],
+      "depNameTemplate": "getsops/sops",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^(?<version>v\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "gh asset names omit the v; the fetch script adds it to the release URL",
+      "customType": "regex",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": ["(?:^|\\n)ARG GH_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)[ \\t]*(?:\\r?\\n|$)"],
+      "depNameTemplate": "cli/cli",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "vmctl is released by vmapi, with the v in both the release tag and archive name",
+      "customType": "regex",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": ["(?:^|\\n)ARG VMCTL_VERSION=(?<currentValue>v\\d+\\.\\d+\\.\\d+)[ \\t]*(?:\\r?\\n|$)"],
+      "depNameTemplate": "yuanying/vmapi",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^(?<version>v\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "a2a asset names omit the v; the fetch script adds it to the release URL",
+      "customType": "regex",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": ["(?:^|\\n)ARG A2A_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)[ \\t]*(?:\\r?\\n|$)"],
+      "depNameTemplate": "a2aproject/a2a-cli",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
       "description": "porkadot is not on RubyGems; the sandbox's image builds its gem from a tag of its repository, so its version is read from the repository's tags",
       "customType": "regex",
       "managerFilePatterns": ["/^Dockerfile$/"],
