@@ -52,6 +52,17 @@ describe("the receivers' settings", () => {
     assert.equal(typeof activation!.handle, "function");
   });
 
+  test("take the GitHub plugin of the example of docs/receivers.md beside Alertmanager", () => {
+    const secret = "/run/secrets/penelope-receivers/github-webhook-secret";
+    const githubPlugin = { name: "github", plugin: "github", settings: { secret_file: secret, authors: ["renovate[bot]", "example-bot[bot]"], reviewers: ["example-operator"] } };
+    const config = load({ plugins: [fraction, githubPlugin] }, { [secret]: "secret\n" });
+    assert.deepEqual(config.activations.map((activation) => [activation.name, activation.plugin, activation.source, activation.kind]), [
+      ["fraction", "alertmanager", "alertmanager", "webhook"],
+      ["github", "github", "github", "webhook"],
+    ]);
+    refused({ plugins: [fraction, { ...githubPlugin, settings: { ...githubPlugin.settings, reviewers: [] } }] }, /^plugins\[1\]\.settings\.reviewers: /, { [secret]: "secret\n" });
+  });
+
   test("take two of one plugin under other names and sources", () => {
     const config = load({ plugins: [fraction, { ...fraction, name: "lab", source: "alertmanager-lab" }] });
     assert.deepEqual(config.activations.map((activation) => activation.source), ["alertmanager", "alertmanager-lab"]);

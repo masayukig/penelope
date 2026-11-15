@@ -14,6 +14,7 @@ import {
   type WebhookPlugin,
   type WebhookRequest,
 } from "../plugin.ts";
+import { streamOf, summaryLine } from "./text.ts";
 
 /** One alert as the webhook sends it, as far as the plugin reads it. */
 type Alert = {
@@ -31,9 +32,6 @@ const isTime = (value: unknown): value is string => typeof value === "string" &&
 
 /** What Alertmanager sends as endsAt while an alert is firing. */
 const ZERO_TIME = "0001-01-01T00:00:00Z";
-
-const STREAM_MAX = 100;
-const SUMMARY_MAX = 200;
 
 const digest = (text: string) => createHash("sha256").update(text, "utf8").digest();
 
@@ -140,21 +138,6 @@ function endOf(endsAt: unknown, receivedAt: Date): string {
   return isTime(endsAt) && endsAt !== ZERO_TIME ? endsAt : receivedAt.toISOString();
 }
 
-/**
- * The stream of an alertname (docs/receivers.md, "`stream` の写し方"): upper
- * case to lower, each other character outside the segment's own to `_`, a
- * leading `.` to `_`, cut at 100. Nothing when there is nothing left.
- */
-export function streamOf(alertname: string | undefined): string | undefined {
-  if (alertname === undefined) return undefined;
-  const mapped = [...alertname]
-    .map((char) => (/^[A-Z]$/.test(char) ? char.toLowerCase() : /^[a-z0-9._-]$/.test(char) ? char : "_"))
-    .join("")
-    .replace(/^\./, "_")
-    .slice(0, STREAM_MAX);
-  return mapped === "" ? undefined : mapped;
-}
-
 /** `[FIRING critical] <alertname>: <annotations.summary>` in one line of up to 200 code points. */
 export function summaryOf(alert: Pick<Alert, "status" | "labels" | "fingerprint" | "annotations">): string {
   const state = alert.status === "firing" ? "FIRING" : "RESOLVED";
@@ -162,5 +145,5 @@ export function summaryOf(alert: Pick<Alert, "status" | "labels" | "fingerprint"
   const name = alert.labels.alertname || alert.fingerprint;
   const said = isObject(alert.annotations) && typeof alert.annotations.summary === "string" ? alert.annotations.summary : "";
   const line = `[${state}${severity}] ${name}${said ? `: ${said}` : ""}`;
-  return [...line.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")].slice(0, SUMMARY_MAX).join("");
+  return summaryLine(line);
 }
