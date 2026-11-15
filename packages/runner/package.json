@@ -12,6 +12,6 @@
     "@earendil-works/pi-ai": "1.5.2",
     "@earendil-works/pi-coding-agent": "1.5.2",
     "@penelope/contract": "0.0.0",
-    "typebox": "1.3.27"
+    "typebox": "1.4.7"
   }
 }
