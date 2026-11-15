@@ -12,7 +12,7 @@
 | sandbox | 1000（ユーザー `agent`、HOME `/home/agent`） | runner と Pi、開発の道具。サロゲートだけ |
 | backend | 1001 | 取り込み口と待ち行列、sandbox 向けの口、UI 向けの API |
 | Sentinel | 65532（distroless の `nonroot`） | 透過の受け口、本物の鍵、CA の鍵、管理口 |
-| receivers | 1002 | 受信のプラグイン、受信の鍵 |
+| receivers | 1002 | 受信のプラグイン、受信の鍵（[receivers.md](receivers.md)） |
 
 - 4 つとも別の UID にする。網の向け直しは sandbox の UID で選ぶので（下の「網」）、ほかのコンテナが同じ UID だと、その外向きまで Sentinel へ向け直される。
 - backend と receivers の image は、ユーザーを作らず数値の UID と GID で動く。
@@ -55,7 +55,7 @@ Pod の中のコンテナは網の名前空間を共有するので、TCP の待
 | --- | --- | --- |
 | backend | 取り込み口、sandbox 向けの口 | Pod の外から呼ばれる口（UI 向けの API と A2A の受け口） |
 | Sentinel | 管理口 | 向け直しの受け口（直に届いた通信は断る） |
-| receivers | なし | Pod の外から呼ばれる口（webhook の受け口） |
+| receivers | なし | Pod の外から呼ばれる口（webhook の受け口。[receivers.md](receivers.md) の「HTTP の口」） |
 | sandbox | — | sandbox の自由（loopback は止めない） |
 
 - TCP で待ち受ける Pod の外から呼ばれる口は、Pod の外から届くのと同じ確かめ（ログインのセッション、ServiceAccount の token、webhook の署名）を通す。sandbox からも loopback で届くが、扱いは外から届くのと同じである。
