@@ -195,6 +195,27 @@ func TestAConfigurationThatCannotBeServedIsRefused(t *testing.T) {
 	}
 }
 
+// YAML diagnostics retain locations and unknown field names, never values.
+func TestYAMLErrorShapes(t *testing.T) {
+	const prefix = "the configuration is not YAML of the configuration's shape: "
+	tests := []struct {
+		name, src, want string
+	}{
+		{"unknown field", "hosts:\n  - name: api.example.com\n    uptream: surrogate-example-0001\n", "line 3: unknown field uptream"},
+		{"wrong shape", "hosts:\n  - port: surrogate-example-0001\n", "line 2: a value of the wrong shape"},
+		{"multiple errors", "hosts:\n  - port: surrogate-example-0001\n    credentials: surrogate-example-0002\n", "line 2: a value of the wrong shape; line 3: a value of the wrong shape"},
+		{"syntax error", "hosts: [surrogate-example-0001\n", "line 2: not YAML"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := config.Parse([]byte(tt.src))
+			if err == nil || err.Error() != prefix+tt.want {
+				t.Fatalf("Parse = %v, want %q", err, prefix+tt.want)
+			}
+		})
+	}
+}
+
 func TestTheSentinelsOwnPartIsRequired(t *testing.T) {
 	tests := map[string]string{
 		"no DNS listener": "listen:\n  proxy: [\"127.0.0.1:15001\"]\nca: {cert: a, key: b}\n",
