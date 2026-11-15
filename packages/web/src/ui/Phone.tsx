@@ -8,6 +8,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { MobileNav } from "@astryxdesign/core/MobileNav";
 import { useState } from "react";
 
+import { callText } from "../model/store.ts";
 import { AgentAvatar, useAgent } from "./agent.tsx";
 import type { ScreenProps } from "./Desktop.tsx";
 import { ChevronUpIcon, MenuIcon } from "./icons.tsx";
@@ -28,7 +29,7 @@ export function Phone(props: ScreenProps) {
       <StatusLabel status={props.status} />
       {props.status.kind === "tool" ? (
         <span className="status-strip-detail">
-          {props.status.tool.name}: {props.status.tool.detail}
+          {callText(props.status.tool.name, props.status.tool.detail)}
         </span>
       ) : (
         <span className="status-strip-detail" />

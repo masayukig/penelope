@@ -130,11 +130,13 @@ describe("the Web UI", () => {
     await act(async () =>
       backend.send({
         event: "activity",
-        data: { agent: "main", activity: { kind: "tool_call", at, turn_id: "t-1", call_id: "c-1", name: "bash", arguments: { command: "kubectl get pods -A" } } },
+        data: { agent: "main", activity: { kind: "tool_call", at, turn_id: "t-1", call_id: "c-1", name: "bash", arguments: { command: "kubectl get pods -A", timeout: 60 } } },
       }),
     );
     await waitFor(() => within(panel()).getByText("ツールを使っている"));
-    assert.match(panel().textContent ?? "", /kubectl get pods -A/);
+    // The command, not the JSON of the arguments.
+    assert.match(panel().textContent ?? "", /bash: kubectl get pods -A/);
+    assert.doesNotMatch(panel().textContent ?? "", /"command"|timeout/);
     await act(async () => {
       backend.send({ event: "activity", data: { agent: "main", activity: { kind: "turn_end", at, turn_id: "t-1" } } });
       backend.send({ event: "state", data: { agent: "main", state: "waiting" } });
@@ -295,10 +297,11 @@ describe("the sub-agents in the Web UI", () => {
     await act(async () => {
       backend.send({ event: "state", data: { agent: "fleet-fix", state: "thinking" } });
       backend.send(subActivity("fleet-fix", { kind: "turn_start", at, turn_id: "f-1" }));
-      backend.send(subActivity("fleet-fix", { kind: "tool_call", at, turn_id: "f-1", call_id: "c-1", name: "bash", arguments: { command: "flux get kustomizations" } }));
+      backend.send(subActivity("fleet-fix", { kind: "tool_call", at, turn_id: "f-1", call_id: "c-1", name: "bash", arguments: { command: "flux get kustomizations", timeout: 60 } }));
     });
     await waitFor(() => assert.match(within(column()!).getByRole("heading").parentElement!.textContent ?? "", /走っている 3$/));
     assert.match(column()!.textContent ?? "", /bash: flux get kustomizations/);
+    assert.doesNotMatch(column()!.textContent ?? "", /"command"|timeout/);
     await act(async () => {
       backend.send({ event: "agent", data: { agent: "cluster-test", purpose: "try the update on the test cluster", closed: true } });
       backend.send({ event: "agent", data: { agent: "cert-audit", purpose: "list the certificates", closed: false } });
@@ -354,7 +357,7 @@ describe("the sub-agents in the Web UI", () => {
     await act(async () => {
       backend.send(subActivity("cluster-test", { kind: "turn_start", at, turn_id: "c-1" }));
       backend.send(subActivity("cluster-test", { kind: "thinking", at, turn_id: "c-1", text: "drain the workers one by one" }));
-      backend.send(subActivity("cluster-test", { kind: "tool_call", at, turn_id: "c-1", call_id: "c-1", name: "bash", arguments: { command: "kubectl get nodes" } }));
+      backend.send(subActivity("cluster-test", { kind: "tool_call", at, turn_id: "c-1", call_id: "c-1", name: "bash", arguments: { command: "kubectl get nodes", timeout: 60 } }));
     });
     await waitFor(() => assert.match(column()!.textContent ?? "", /kubectl get nodes/));
     const now = within(panel()).getByRole("region", { name: "Iris（本体）" });

@@ -248,7 +248,7 @@ export type LatestLine = { kind: "tool_call" | "thinking" | "message"; text: str
 function latestLine(flow: Activity[]): LatestLine | undefined {
   for (let i = flow.length - 1; i >= 0; i--) {
     const block = flow[i]!;
-    if (block.kind === "tool_call") return { kind: "tool_call", text: `${block.name}: ${argumentsText(block.arguments)}` };
+    if (block.kind === "tool_call") return { kind: "tool_call", text: callText(block.name, block.arguments) };
     if (block.kind === "thinking" || block.kind === "message") return { kind: block.kind, text: firstLine(block.text) };
   }
   return undefined;
@@ -295,12 +295,32 @@ export function faceOf(state: State, now: number): string | undefined {
   return undefined;
 }
 
-/** A tool's arguments in one line: a lone string as it is (a command, a path), else JSON. */
+/** A tool's call in one line: its name, and what it is about when there is something to show. */
+export function callText(name: string, args: unknown): string {
+  const what = argumentsText(args);
+  return what === "" ? name : `${name}: ${what}`;
+}
+
+/**
+ * A tool's arguments in one line, as Pi's tools have them: bash's command;
+ * what grep and find look for, and where; the path of read, edit, write and
+ * ls; else a lone string (a query); else short JSON. Nothing for no arguments.
+ */
 export function argumentsText(args: unknown): string {
   if (typeof args === "string") return args;
-  if (args !== null && typeof args === "object") {
-    const values = Object.values(args);
-    if (values.length === 1 && typeof values[0] === "string") return values[0];
-  }
-  return JSON.stringify(args) ?? "";
+  if (args === null || args === undefined) return "";
+  if (typeof args !== "object" || Array.isArray(args)) return JSON.stringify(args) ?? "";
+  const record = args as Record<string, unknown>;
+  const str = (key: string) => (typeof record[key] === "string" ? (record[key] as string) : undefined);
+  const command = str("command");
+  if (command !== undefined) return command;
+  const pattern = str("pattern");
+  const path = str("path");
+  if (pattern !== undefined) return path !== undefined ? `${pattern} in ${path}` : pattern;
+  if (path !== undefined) return path;
+  const values = Object.values(record);
+  if (values.length === 0) return "";
+  const strings = values.filter((value): value is string => typeof value === "string");
+  if (strings.length === 1) return strings[0]!;
+  return JSON.stringify(args);
 }

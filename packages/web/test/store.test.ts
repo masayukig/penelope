@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import type { Activity, HistoryEntry, StreamEvent, SubAgent } from "@penelope/contract";
 
-import { type Action, currentFlow, faceOf, FACE_RESET_MS, initialState, reduce, type State, statusOf, subAgentsOf } from "../src/model/store.ts";
+import { type Action, callText, currentFlow, faceOf, FACE_RESET_MS, initialState, reduce, type State, statusOf, subAgentsOf } from "../src/model/store.ts";
 
 const T = "turn-1";
 const run = (actions: Action[], state: State = initialState) => actions.reduce(reduce, state);
@@ -109,12 +109,12 @@ describe("what the agent is doing", () => {
     let s = run([
       stream(state("thinking")),
       stream(activity({ kind: "turn_start", at: "2026-11-14T09:00:00Z", turn_id: T })),
-      stream(activity({ kind: "tool_call", at: "2026-11-14T09:00:01Z", turn_id: T, call_id: "c-1", name: "bash", arguments: { command: "kubectl get pods" } })),
+      stream(activity({ kind: "tool_call", at: "2026-11-14T09:00:01Z", turn_id: T, call_id: "c-1", name: "bash", arguments: { command: "kubectl get pods", timeout: 60 } })),
     ]);
     const status = statusOf(s);
     assert.equal(status.kind, "tool");
     assert.equal(status.kind === "tool" && status.tool.name, "bash");
-    assert.match(status.kind === "tool" ? status.tool.detail : "", /kubectl get pods/);
+    assert.equal(status.kind === "tool" ? status.tool.detail : "", "kubectl get pods");
     s = run([stream(activity({ kind: "tool_result", at: "2026-11-14T09:00:02Z", turn_id: T, call_id: "c-1", is_error: false, output: "ok" }))], s);
     assert.equal(statusOf(s).kind, "thinking");
   });
@@ -229,7 +229,7 @@ describe("the sub-agents", () => {
       stream(subState("a", "thinking")),
       stream(subActivity("a", { kind: "turn_start", at, turn_id: "a-1" })),
       stream(subActivity("a", { kind: "thinking", at, turn_id: "a-1", text: "look at the nodes" })),
-      stream(subActivity("a", { kind: "tool_call", at, turn_id: "a-1", call_id: "c-1", name: "bash", arguments: { command: "kubectl get nodes" } })),
+      stream(subActivity("a", { kind: "tool_call", at, turn_id: "a-1", call_id: "c-1", name: "bash", arguments: { command: "kubectl get nodes", timeout: 60 } })),
     ]);
     const [a, b] = subAgentsOf(s);
     assert.deepEqual(a!.status, { kind: "tool", tool: { name: "bash", detail: "kubectl get nodes" } });
@@ -262,5 +262,46 @@ describe("the sub-agents", () => {
       { type: "agents", agents: [sub("b"), sub("c")] },
     ]);
     assert.deepEqual(names(s), ["b", "c"]);
+  });
+});
+
+// A tool's call in one line, as the now, the strip and a sub-agent's latest
+// line show it. The arguments are an object, as Pi's tools have them
+// (pi-coding-agent's tool schemas): what the call is about, not its JSON.
+describe("a tool's call in one line", () => {
+  it("shows the command of bash, without its timeout", () => {
+    assert.equal(callText("bash", { command: "kubectl --kubeconfig /home/agent/.kube/config get nodes", timeout: 120 }), "bash: kubectl --kubeconfig /home/agent/.kube/config get nodes");
+  });
+
+  it("shows the path of read, edit, write and ls, without the rest", () => {
+    assert.equal(callText("read", { path: "/memory/x.md", offset: 10, limit: 50 }), "read: /memory/x.md");
+    assert.equal(callText("edit", { path: "/memory/x.md", edits: [{ oldText: "a", newText: "b" }] }), "edit: /memory/x.md");
+    assert.equal(callText("write", { path: "/memory/x.md", content: "a long body\nof the file" }), "write: /memory/x.md");
+    assert.equal(callText("ls", { path: "/memory", limit: 100 }), "ls: /memory");
+  });
+
+  it("shows what grep and find look for, and where when it is told", () => {
+    assert.equal(callText("grep", { pattern: "OOMKilled", path: "/var/log", glob: "*.log", ignoreCase: true }), "grep: OOMKilled in /var/log");
+    assert.equal(callText("grep", { pattern: "OOMKilled" }), "grep: OOMKilled");
+    assert.equal(callText("find", { pattern: "*.yaml", path: "apps", limit: 20 }), "find: *.yaml in apps");
+  });
+
+  it("shows the name alone when there is nothing to show", () => {
+    assert.equal(callText("ls", {}), "ls");
+    assert.equal(callText("ls", undefined), "ls");
+  });
+
+  it("shows the lone string of another tool, else its arguments as short JSON", () => {
+    assert.equal(callText("search", { query: "cert-manager 1.19", limit: 5 }), "search: cert-manager 1.19");
+    assert.equal(callText("check", "plain words"), "check: plain words");
+    assert.equal(callText("vote", { a: 1, b: [2] }), 'vote: {"a":1,"b":[2]}');
+  });
+
+  it("names a sub-agent's latest tool call in that line", () => {
+    const s = run([
+      { type: "agents", agents: [{ agent: "a", purpose: "p", state: "thinking", started_at: "2026-11-14T09:00:00Z", state_since: "2026-11-14T09:00:00Z" }] },
+      stream({ event: "activity", data: { agent: "a", activity: { kind: "tool_call", at: "2026-11-14T09:00:01Z", turn_id: "a-1", call_id: "c-1", name: "bash", arguments: { command: "kubectl get nodes", timeout: 30 } } } }),
+    ]);
+    assert.deepEqual(subAgentsOf(s)[0]!.latest, { kind: "tool_call", text: "bash: kubectl get nodes" });
   });
 });
