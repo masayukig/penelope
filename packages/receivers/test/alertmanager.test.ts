@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import type { WebhookOutcome, WebhookRequest } from "../src/plugin.ts";
-import { alertmanager, streamOf, summaryOf } from "../src/plugins/alertmanager.ts";
+import { alertmanager, summaryOf } from "../src/plugins/alertmanager.ts";
+import { streamOf } from "../src/plugins/text.ts";
 import { SettingsError } from "../src/plugin.ts";
 
 const TOKEN = "example-token-0001";

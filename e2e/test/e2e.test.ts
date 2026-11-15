@@ -7,6 +7,7 @@
 // before left it.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHmac, randomUUID } from "node:crypto";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -294,7 +295,7 @@ describe("the Pod end to end", () => {
 
   it("has no real key in the sandbox, and only its surrogates", track(async () => {
     // Guards against: a real key, or the intake, becoming reachable from the sandbox.
-    const keys = ["model-key", "backend-token", "github-client-secret", "kube-token", "sender-token", "stranger-token", "alertmanager-token", "sentinel-ca.key", "outside-ca.key", "outside.key"]
+    const keys = ["model-key", "backend-token", "github-client-secret", "kube-token", "sender-token", "stranger-token", "alertmanager-token", "github-webhook-secret", "sentinel-ca.key", "outside-ca.key", "outside.key"]
       .map((name) => readFileSync(join(RUN_DIR, name), "utf8").trim().split("\n").filter((line) => line && !line.startsWith("-----")))
       .flat();
     const found = exec(
@@ -400,6 +401,65 @@ describe("the Pod end to end", () => {
     assert.deepEqual(
       [line.source, line.stream, line.delivery, line.summary, line.appended],
       ["alertmanager", "kubepodcrashlooping", "now", "[FIRING critical] KubePodCrashLooping: E2E-ALERT Pod default/web-0 is crash looping.", { path: file, lines: [1, 1] }],
+    );
+  }));
+
+  it("takes GitHub's request for a review in the receivers, and brings it into a turn as a batch", track(async () => {
+    // Guards against: a delivery reaching the agent without GitHub's signature, a request for a review not reaching a
+    // turn after its batch wait, a redelivery written twice, or a pull request outside the authors coming in.
+    const secret = readFileSync(join(RUN_DIR, "github-webhook-secret"), "utf8").trim();
+    const url = new URL("/v1/webhooks/github", pod.url);
+    url.port = "8081";
+    const repo = { id: 1, name: "example-repo", full_name: "example-org/example-repo", owner: { login: "example-org", type: "Organization" } };
+    const reviewRequested = (author: string) => ({
+      action: "review_requested",
+      number: 7,
+      pull_request: {
+        html_url: "https://github.com/example-org/example-repo/pull/7",
+        number: 7,
+        state: "open",
+        title: "E2E-GITHUB Update dependency example to v1.2.3",
+        user: { login: author, type: "Bot" },
+        body: "This PR contains the following updates.",
+        head: { ref: "renovate/example-1.x", sha: "0123456789abcdef0123456789abcdef01234567", repo },
+        base: { ref: "main", sha: "89abcdef0123456789abcdef0123456789abcdef", repo },
+      },
+      requested_reviewer: { login: "example-operator", type: "User" },
+      repository: repo,
+      sender: { login: author, type: "Bot" },
+    });
+    const deliver = (event: string, delivery: string, body: string, signature = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`) =>
+      fromOutside("POST", url.href, {
+        "content-type": "application/json",
+        "x-github-event": event,
+        "x-github-delivery": delivery,
+        "x-hub-signature-256": signature,
+      }, body).status;
+
+    const body = JSON.stringify(reviewRequested("renovate[bot]"));
+    const delivery = randomUUID();
+    assert.equal(deliver("pull_request", delivery, body, `sha256=${createHmac("sha256", "wrong").update(body).digest("hex")}`), 401);
+    assert.equal(deliver("ping", randomUUID(), JSON.stringify({ zen: "Design for failure.", hook_id: 1 })), 200);
+    assert.equal(deliver("pull_request", randomUUID(), JSON.stringify(reviewRequested("someone-else"))), 200, "not an author's: taken and dropped");
+    const sent = new Date().toISOString();
+    assert.equal(deliver("pull_request", delivery, body), 200);
+    assert.equal(deliver("pull_request", delivery, body), 200, "a redelivery is taken as received");
+
+    const file = `/sources/github/example-org.example-repo/${sent.slice(0, 10)}.jsonl`;
+    const lines = exec("sandbox", `cat ${file}`).stdout.trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(lines.length, 1, "one line: the redelivery is a duplicate and the other author's is dropped");
+    assert.deepEqual([lines[0].id, lines[0].payload.delivery, lines[0].payload.reviewer, lines[0].payload.author], [delivery, delivery, "example-operator", "renovate[bot]"]);
+    assert.equal(JSON.stringify(lines[0]).includes("This PR contains"), false, "the body of the pull request is left out");
+
+    // A batch waits for its quiet minute, then reaches a turn of its own.
+    await replied("E2E-REPLY-GITHUB", 180_000);
+    const calls = await callsFor("E2E-GITHUB", 0);
+    assert.equal(calls.length, 1, "one turn for the request");
+    const [line] = eventLines(where(calls[0]!).input);
+    assert.ok(line && line.kind === "batch", JSON.stringify(line));
+    assert.deepEqual(
+      [line.source, line.stream, line.count, line.summary, line.appended],
+      ["github", "example-org.example-repo", 1, "[review requested] example-org/example-repo#7: E2E-GITHUB Update dependency example to v1.2.3", [{ path: file, lines: [1, 1] }]],
     );
   }));
 

@@ -25,8 +25,8 @@ rm -f outside.csr outside.ext outside-ca.srl
 # kube-token is the backend's ServiceAccount token, which the fake API server takes for TokenReview;
 # sender-token and stranger-token are the ServiceAccount tokens of an A2A sender and of a ServiceAccount
 # that is not one, held only by the test. alertmanager-token is what Alertmanager would send to the
-# receivers' webhook.
-for name in model-key backend-token github-client-secret kube-token sender-token stranger-token alertmanager-token; do
+# receivers' webhook, and github-webhook-secret what GitHub would sign its deliveries with.
+for name in model-key backend-token github-client-secret kube-token sender-token stranger-token alertmanager-token github-webhook-secret; do
   openssl rand -hex 24 > "$name"
 done
 # The containers run as different users; these are the test's own throwaway keys.

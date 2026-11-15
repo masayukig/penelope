@@ -24,7 +24,7 @@ make e2e
 
 - volume と mount は pod.md の表のとおり。`/memory/.git` は別の volume で、sandbox には読み取りで重ねる。取り込み口と管理口の socket は sandbox に mount しない。
 - sandbox に置くのはサロゲートと Sentinel の CA の公開の証明書だけである。本物の鍵（モデルの鍵、backend の token、OAuth の client secret）は Sentinel・backend・偽物にだけ mount する。
-- receivers は image のまま `serve` で動き、Alertmanager のプラグインを `/v1/webhooks/fraction` で有効にする（`config/receivers.json`）。token は走らせるたびに作る `alertmanager-token` で、receivers にだけ mount する。テストは同じコンテナで小さな送り手（`sender/send.ts`）も動かし、自分で作った封筒で取り込み口の socket を叩く。
+- receivers は image のまま `serve` で動き、Alertmanager のプラグインを `/v1/webhooks/fraction` で、GitHub のプラグインを `/v1/webhooks/github` で有効にする（`config/receivers.json`）。Alertmanager の token と GitHub の webhook の秘密は走らせるたびに作る `alertmanager-token` と `github-webhook-secret` で、receivers にだけ mount する。テストは同じコンテナで小さな送り手（`sender/send.ts`）も動かし、自分で作った封筒で取り込み口の socket を叩く。
 
 ## 偽物
 
@@ -38,7 +38,7 @@ make e2e
 - gated（`auth.example.com`）: assertion に署名する鍵の JWKS を配り、テストが頼むと、その鍵で assertion に署名する（gated が token を落として assertion に置き換えた呼び出しの代わり）。
 - 制御の口: テストが偽物の受けたものを読む。outside のコンテナの loopback だけで待ち受ける。
 
-テストは backend の UI 向けの API と偽物の制御の口を、`outside` のコンテナの中から呼ぶ（`outside/client.ts`）。receivers の webhook も同じく `outside` から、Alertmanager の代わりに呼ぶ。オーナーのブラウザが Pod の外にいるのと同じ形で、テストを動かすマシンにポートを公開しない。
+テストは backend の UI 向けの API と偽物の制御の口を、`outside` のコンテナの中から呼ぶ（`outside/client.ts`）。receivers の webhook も同じく `outside` から、Alertmanager と GitHub の代わりに呼ぶ。オーナーのブラウザが Pod の外にいるのと同じ形で、テストを動かすマシンにポートを公開しない。
 
 ## Pod とのずれ
 
@@ -47,6 +47,7 @@ make e2e
 - **volume の持ち主**: Pod は `fsGroup` で共有の volume を 1 つのグループに置く。ここでは `volumes` のコンテナが持ち主を UID ごとに決める。
 - **ServiceAccount の token と kubeconfig**: クラスタが無いので、どのコンテナにも無い。backend の TokenReview のための token は、偽の API server が知っている値（`kube-token`）を mount し、API server の名前と CA は設定で偽物に向ける。
 - **gated**: 前段の gated は置かない。送り手の呼び出しは backend に直に届き、gated の assertion の呼び出しは、テストが偽の gated に署名させた assertion を自分で付ける。
+- **`batch` の待ち**: backend の `PENELOPE_BATCH_QUIET_MINUTES` を、使える最も短い 1 分にする。GitHub の出来事は `batch` だけで届くので、既定の 5 分ではテストが長くなる。
 - **夜の切り替え**: テストは最後に backend を作り直し、`PENELOPE_NIGHTLY_CRON` を毎分（`* * * * *`）にして次の切り替えを待つ。起動にかかった時間や今の時刻に左右されない。取り込み口は `control` の出来事を断るので、外から夜を起こす道は無い。
 
 ## 通すシナリオ
@@ -60,6 +61,7 @@ make e2e
 5. sandbox に本物の鍵が無い。取り込み口の socket が見えない。backend の UI 向けの口に loopback で届いても、ログインを求められる。
 6. receivers から取り込み口へ出来事を入れ、`/sources` に追記される。重複は受けたことになり、`control` は断られる。`batch` は待ち、後から来た `now` が待っている `batch` を連れて 1 つのターンに届く。
 7. Alertmanager の形の POST を Pod の外から receivers の webhook に送る。token が違えば `401` で断られる。`critical` の鳴り始めは `/sources/alertmanager/kubepodcrashlooping/` に追記され、`now` として 1 つのターンに入る。同じ POST の送り直しは重複として落ち、印のラベル（`sender="penelope"`）のアラートは出来事にならない。
-8. ほかのエージェントが A2A で頼む。token なしで Agent Card が読める。allow-list に無い ServiceAccount は、TokenReview でも gated の assertion でも断られる。送り手が ServiceAccount の token で頼み（TokenReview）、ターンが `reply_to_agent` で聞き返し、送り手が gated の assertion で答え、ターンが閉じた答えを送り手が `GetTask` で読む。依頼と答えは `/sources/a2a/claude/` に追記され、API server には backend 自身の token で尋ねている。
-9. 本体がサブエージェントを起こす（`subagent_start`）。サブエージェントは自分のシステムプロンプトと作業の場所で、本体の道具（`reply`・`reply_to_agent`・`self_event`・`subagent_*`）を持たずに走り、`/memory` に書いて問いで止まる。その地の文が `self` の出来事として本体に届き（`/sources/self/<名前>/`）、本体が続きを送り（`subagent_send`）、同じセッションで続いたサブエージェントの結果を受けて閉じる（`subagent_close`）。サブエージェントの書いたものは、そのターンの終わりに `Agent: <名前>` でコミットされる。UI の流れには起こした・閉じたことと途中経過が乗り、閉じたサブエージェントは `/api/agents` に載らない。
-10. 夜の制御の出来事で、振り返り → 整理係 → 新しいセッションが回り、`handoff.md` と整理係の変えたものがコミットされる。新しいセッションのシステムプロンプトに `handoff.md` が入り、前の日の会話は無い。次の切り替えの後も、ターンは回り続ける。
+8. GitHub の形の配送（`pull_request` の `review_requested`）を Pod の外から receivers の webhook に送る。署名が違えば `401` で断られ、`ping` と `authors` に無い作者の PR は出来事にならない。署名の合う依頼は `/sources/github/example-org.example-repo/` に `batch` として追記され、同じ `X-GitHub-Delivery` の送り直しは重複として落ちる。PR の本文は残らない。`batch` の待ちの後、その出来事だけで 1 つのターンに入る。
+9. ほかのエージェントが A2A で頼む。token なしで Agent Card が読める。allow-list に無い ServiceAccount は、TokenReview でも gated の assertion でも断られる。送り手が ServiceAccount の token で頼み（TokenReview）、ターンが `reply_to_agent` で聞き返し、送り手が gated の assertion で答え、ターンが閉じた答えを送り手が `GetTask` で読む。依頼と答えは `/sources/a2a/claude/` に追記され、API server には backend 自身の token で尋ねている。
+10. 本体がサブエージェントを起こす（`subagent_start`）。サブエージェントは自分のシステムプロンプトと作業の場所で、本体の道具（`reply`・`reply_to_agent`・`self_event`・`subagent_*`）を持たずに走り、`/memory` に書いて問いで止まる。その地の文が `self` の出来事として本体に届き（`/sources/self/<名前>/`）、本体が続きを送り（`subagent_send`）、同じセッションで続いたサブエージェントの結果を受けて閉じる（`subagent_close`）。サブエージェントの書いたものは、そのターンの終わりに `Agent: <名前>` でコミットされる。UI の流れには起こした・閉じたことと途中経過が乗り、閉じたサブエージェントは `/api/agents` に載らない。
+11. 夜の制御の出来事で、振り返り → 整理係 → 新しいセッションが回り、`handoff.md` と整理係の変えたものがコミットされる。新しいセッションのシステムプロンプトに `handoff.md` が入り、前の日の会話は無い。次の切り替えの後も、ターンは回り続ける。
