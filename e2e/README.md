@@ -30,10 +30,11 @@ make e2e
 
 `outside` のコンテナ 1 つが、Pod の外を受け持つ（`outside/`）。
 
-- 名前解決: テストの名前（`model.example.com`・`backend.example.com`・`plain.example.net`・`github.com`・`api.github.com`・`kubernetes.example.com`・`auth.example.com`）を自分のアドレスで答え、ほかは無いと答える。Pod のすべてのコンテナの `resolv.conf` はこれを指す（クラスタの DNS に当たる）。テストはマシンの外に出ない。
+- 名前解決: テストの名前（`model.example.com`・`backend.example.com`・`plain.example.net`・`github.com`・`api.github.com`・`kubernetes.example.com`・`auth.example.com`・`a.apps.example.com`）を自分のアドレスで答え、ほかは無いと答える。Pod のすべてのコンテナの `resolv.conf` はこれを指す（クラスタの DNS に当たる）。テストはマシンの外に出ない。
 - モデル: Pi の `openai-completions` が話す chat completions の偽物。テストの印（`E2E-TURN-1` など）を見て、決まった返事と道具の呼び出し（`write`・`bash`・`reply`）を返す。受けた入力をすべて覚え、`Authorization` が本物の鍵だったか（Sentinel が差し替えたか）を記録する。
 - GitHub の OAuth と API: token の交換（client secret と PKCE を確かめる）と `/user`。
 - 素通しの宛先: `plain.example.net`（HTTPS と平文の HTTP）。
+- アプリ（`a.apps.example.com`）: Sentinel のワイルドカードの登録（`*.apps.example.com`）に当たる名前。届いた `Authorization` が本物の鍵だったかを返す。
 - クラスタの API server の TokenReview（`kubernetes.example.com`）: backend 自身の ServiceAccount の token（`kube-token`）で尋ねられたときだけ答える。A2A の送り手の token（`sender-token`、`system:serviceaccount:e2e:claude`）と、allow-list に無い ServiceAccount の token（`stranger-token`）を知っている。
 - gated（`auth.example.com`）: assertion に署名する鍵の JWKS を配り、テストが頼むと、その鍵で assertion に署名する（gated が token を落として assertion に置き換えた呼び出しの代わり）。
 - 制御の口: テストが偽物の受けたものを読む。outside のコンテナの loopback だけで待ち受ける。
@@ -57,7 +58,7 @@ make e2e
 1. GitHub の OAuth でログインする。backend が Web UI の build（ページ、script、styles）を配り、エージェントの名前（`/api/agent` と manifest）と、選んだアバターの表情の画像が設定から来る。メッセージを送る。sandbox の runner がターンを回し、返事が履歴と流れ（SSE）に届く。途中経過（`turn_start`・`tool_call`・`tool_result`・`message`・`turn_end`）と状態（`thinking`・`waiting`）が流れに乗る。モデルにはサロゲートではなく本物の鍵が届く。
 2. ターンの終わりに `/memory` がコミットされる（`Turn <turn_id>` と `Agent: main`）。sandbox は `/memory/.git` に書けず、履歴は読める。
 3. 2 つめのターンのモデルへの入力で、1 つめのターンが畳まれている（出来事・地の文・`reply` は残り、ほかの呼び出しは 1 行、道具の出力は無い）。
-4. sandbox の外向きが Sentinel を通り、記録に残る。素通し（`plain.example.net`）、開く宛先（モデルと backend）、名前解決、登録の無いホストへのサロゲート・リンクローカル・受け口へ直に届いた通信を断る。sandbox の loopback は向け直されず、記録にも残らない。
+4. sandbox の外向きが Sentinel を通り、記録に残る。素通し（`plain.example.net`）、開く宛先（モデルと backend と、ワイルドカードの登録に当たるアプリ）、名前解決、登録の無いホストへのサロゲート・リンクローカル・受け口へ直に届いた通信を断る。sandbox の loopback は向け直されず、記録にも残らない。
 5. sandbox に本物の鍵が無い。取り込み口の socket が見えない。backend の UI 向けの口に loopback で届いても、ログインを求められる。
 6. receivers から取り込み口へ出来事を入れ、`/sources` に追記される。重複は受けたことになり、`control` は断られる。`batch` は待ち、後から来た `now` が待っている `batch` を連れて 1 つのターンに届く。
 7. Alertmanager の形の POST を Pod の外から receivers の webhook に送る。token が違えば `401` で断られる。`critical` の鳴り始めは `/sources/alertmanager/kubepodcrashlooping/` に追記され、`now` として 1 つのターンに入る。同じ POST の送り直しは重複として落ち、印のラベル（`sender="penelope"`）のアラートは出来事にならない。

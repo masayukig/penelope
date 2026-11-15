@@ -74,6 +74,8 @@ type CA struct {
 
 // Host is one registered host: opened, and its requests' surrogates swapped.
 type Host struct {
+	// Name is a full name, or a wildcard ("*.example.com") that answers
+	// for one label in place of its '*' (ADR-0025).
 	Name     string
 	Port     uint16
 	Upstream Upstream
@@ -87,7 +89,9 @@ type Upstream struct {
 	// Scheme is https, http or unix.
 	Scheme string
 	// Address is host:port for https and http, and the socket's path for
-	// unix.
+	// unix. It is empty for a wildcard registration with no upstream
+	// written: its requests go over https to the name asked for, at the
+	// registration's port.
 	Address string
 }
 
@@ -220,7 +224,7 @@ func parseHost(rh rawHost, seen map[string]bool) (*Host, error) {
 		return nil, errors.New("connector_config without a connector this version knows")
 	}
 	name := Normalize(rh.Name)
-	if err := checkName(name); err != nil {
+	if err := checkRegisteredName(name); err != nil {
 		return nil, fmt.Errorf("name %q: %w", rh.Name, err)
 	}
 	h := &Host{Name: name, Port: 443}
@@ -261,6 +265,9 @@ func parseHost(rh rawHost, seen map[string]bool) (*Host, error) {
 }
 
 func parseUpstream(s string, h *Host) (Upstream, error) {
+	if s == "" && h.Wildcard() {
+		return Upstream{Scheme: "https"}, nil
+	}
 	if s == "" {
 		return Upstream{Scheme: "https", Address: net.JoinHostPort(h.Name, strconv.Itoa(int(h.Port)))}, nil
 	}
@@ -319,9 +326,28 @@ func parseCredential(rc rawCredential) (Credential, error) {
 	return cr, nil
 }
 
-// Lookup returns the registration of name and port, or nil.
+// Lookup returns the registration of name and port, or nil. A
+// registration of the full name wins over a wildcard one (ADR-0025).
 func (c *Config) Lookup(name string, port uint16) *Host {
-	return c.byKey[hostKey(Normalize(name), port)]
+	name = Normalize(name)
+	if name == "" || strings.Contains(name, "*") {
+		return nil
+	}
+	if h := c.byKey[hostKey(name, port)]; h != nil {
+		return h
+	}
+	_, parent, ok := strings.Cut(name, ".")
+	if !ok || parent == "" {
+		return nil
+	}
+	return c.byKey[hostKey(wildcardPrefix+parent, port)]
+}
+
+const wildcardPrefix = "*."
+
+// Wildcard reports whether h's name is a wildcard.
+func (h *Host) Wildcard() bool {
+	return strings.HasPrefix(h.Name, wildcardPrefix)
 }
 
 // Surrogates are every surrogate of every registration.
@@ -351,6 +377,26 @@ func Normalize(name string) string {
 
 func hostKey(name string, port uint16) string {
 	return net.JoinHostPort(name, strconv.Itoa(int(port)))
+}
+
+// checkRegisteredName holds the name of a registration to a DNS name, or
+// to a wildcard: '*' as the whole of the left-most label, with at least two
+// labels of a DNS name under it.
+func checkRegisteredName(name string) error {
+	parent, ok := strings.CutPrefix(name, wildcardPrefix)
+	if !ok {
+		if strings.Contains(name, "*") {
+			return errors.New("'*' is only taken as the whole of the left-most label")
+		}
+		return checkName(name)
+	}
+	if err := checkName(parent); err != nil {
+		return fmt.Errorf("under the wildcard: %w", err)
+	}
+	if !strings.Contains(parent, ".") {
+		return errors.New("a wildcard needs at least two labels under it")
+	}
+	return nil
 }
 
 // checkName holds name to the shape of a DNS name: dot separated labels of

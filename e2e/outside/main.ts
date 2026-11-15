@@ -2,7 +2,8 @@
 //
 //   :53/udp   a name server for the test's names, all of them this container
 //   :443      HTTPS, by Host: the model's API, GitHub's OAuth and API, the
-//             cluster's API server and gated's keys, and a host the Sentinel
+//             cluster's API server and gated's keys, an app under the
+//             Sentinel's wildcard registration, and a host the Sentinel
 //             passes through
 //   :80       plain HTTP for the host the Sentinel passes through
 //   :8081     the control API the test reads what came here from, on loopback
@@ -43,7 +44,9 @@ const MODEL = "model.example.com";
 const GITHUB = "github.com";
 const GITHUB_API = "api.github.com";
 const PLAIN = "plain.example.net";
-const NAMES = new Set([MODEL, GITHUB, GITHUB_API, PLAIN, KUBERNETES, GATED, "backend.example.com"]);
+/** An app under the Sentinel's wildcard registration. */
+const APP = "a.apps.example.com";
+const NAMES = new Set([MODEL, GITHUB, GITHUB_API, PLAIN, KUBERNETES, GATED, APP, "backend.example.com"]);
 const fakeCluster = cluster({
   backend: secret("OUTSIDE_KUBE_TOKEN_FILE"),
   sender: secret("OUTSIDE_SENDER_TOKEN_FILE"),
@@ -145,6 +148,11 @@ function outside(scheme: "https" | "http") {
       if (scheme === "https" && host === GITHUB_API) return githubApi(request, response);
       if (scheme === "https" && host === KUBERNETES) return fakeCluster.tokenReview(request, await body(request), response);
       if (scheme === "https" && host === GATED) return fakeCluster.gatedKeys(request, response);
+      if (scheme === "https" && host === APP) {
+        await body(request);
+        response.writeHead(200, { "content-type": "text/plain" });
+        return response.end(`app ${host} ${credentialOf(request, MODEL_KEY, MODEL_SURROGATE)}\n`);
+      }
       if (host === PLAIN) {
         await body(request);
         response.writeHead(200, { "content-type": "text/plain" });

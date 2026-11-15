@@ -21,4 +21,11 @@ hosts:
       - place: bearer
         surrogate: e2e-surrogate-backend-0001
         source: { file: /run/secrets/e2e/backend-token }
+  # One registration for every app's name (ADR-0025).
+  - name: "*.apps.example.com"
+    upstream_ca: /run/secrets/e2e/outside-ca.crt
+    credentials:
+      - place: bearer
+        surrogate: e2e-surrogate-apps-0001
+        source: { file: /run/secrets/e2e/model-key }
 allow: []
