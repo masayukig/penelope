@@ -13,13 +13,17 @@ export type TalkProps = {
   onSend: (text: string, files: File[]) => void;
   onOlder: (() => Promise<void>) | undefined;
   strip?: ReactNode;
+  /** Room at the top of the timeline for what floats over it (the phone's avatar). */
+  topInset?: boolean;
+  /** How tight the timeline is: the phone's narrow screen takes compact. */
+  density?: "compact" | "spacious";
 };
 
-export function Talk({ items, busy, offline, onSend, onOlder, strip }: TalkProps) {
+export function Talk({ items, busy, offline, onSend, onOlder, strip, topInset = false, density = "spacious" }: TalkProps) {
   return (
     <div className="talk">
       <ChatLayout density="spacious" composer={<Composer offline={offline} strip={strip} onSend={onSend} />} emptyState={<EmptyTimeline />}>
-        {items.length > 0 || busy ? <Timeline items={items} busy={busy} onOlder={onOlder} /> : null}
+        {items.length > 0 || busy ? <Timeline items={items} busy={busy} onOlder={onOlder} topInset={topInset} density={density} /> : null}
       </ChatLayout>
     </div>
   );

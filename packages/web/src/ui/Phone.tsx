@@ -46,7 +46,7 @@ export function Phone(props: ScreenProps) {
         </button>
         <span />
       </div>
-      {place === "talk" ? <Talk {...props} strip={strip} /> : <Placeholder place={place} />}
+      {place === "talk" ? <Talk {...props} strip={strip} topInset density="compact" /> : <Placeholder place={place} />}
       <MobileNav isOpen={menu} onOpenChange={setMenu} header={agent.name} side="start">
         <PlaceItems
           place={place}

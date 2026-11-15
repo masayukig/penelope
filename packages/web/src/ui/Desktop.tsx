@@ -2,6 +2,8 @@
 // conversation in the middle, the agent now on the right.
 import { AppShell } from "@astryxdesign/core/AppShell";
 import { Button } from "@astryxdesign/core/Button";
+import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
 import { Layout, LayoutPanel } from "@astryxdesign/core/Layout";
 import { SideNav } from "@astryxdesign/core/SideNav";
 import { useState } from "react";
@@ -9,6 +11,7 @@ import { useState } from "react";
 import type { FlowItem, Status, SubAgentView } from "../model/store.ts";
 import { AgentAvatar, useAgent } from "./agent.tsx";
 import { StatusLabel } from "./Now.tsx";
+import { LogoutIcon } from "./icons.tsx";
 import { AgentNow } from "./Panel.tsx";
 import { SubAgentCount } from "./SubAgents.tsx";
 import { type Place, PlaceItems, Placeholder } from "./places.tsx";
@@ -21,8 +24,15 @@ export function Desktop(props: ScreenProps) {
   const agent = useAgent();
   const [place, setPlace] = useState<Place>("talk");
   const [open, setOpen] = useState(true);
+  // The rail starts folded to its icons, to leave the width to the conversation.
+  const [folded, setFolded] = useState(true);
+  const logout = folded ? (
+    <IconButton icon={<Icon icon={LogoutIcon} />} label={words.logout} variant="ghost" size="sm" onClick={props.onLogout} />
+  ) : (
+    <Button label={words.logout} variant="ghost" size="sm" onClick={props.onLogout} />
+  );
   const nav = (
-    <SideNav aria-label="場所" collapsible footer={<Button label={words.logout} variant="ghost" size="sm" onClick={props.onLogout} />}>
+    <SideNav aria-label="場所" collapsible={{ isCollapsed: folded, onCollapsedChange: setFolded }} footer={logout}>
       <PlaceItems place={place} onChange={setPlace} />
     </SideNav>
   );

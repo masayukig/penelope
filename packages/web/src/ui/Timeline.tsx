@@ -12,12 +12,28 @@ import type { AgentItem, LocalFile, OwnerItem, TimelineItem } from "../model/sto
 import { AgentAvatar, useAgent } from "./agent.tsx";
 import { dayOf, faceWord, sourceWord, timeOf, words } from "./words.ts";
 
-export function Timeline({ items, busy, onOlder }: { items: TimelineItem[]; busy: boolean; onOlder?: (() => Promise<void>) | undefined }) {
+export function Timeline({
+  items,
+  busy,
+  onOlder,
+  topInset = false,
+  density = "spacious",
+}: {
+  items: TimelineItem[];
+  busy: boolean;
+  onOlder?: (() => Promise<void>) | undefined;
+  topInset?: boolean;
+  density?: "compact" | "spacious";
+}) {
   const [shown, setShown] = useState<LocalFile | undefined>(undefined);
+  // On a narrow screen her replies take the whole width (docs/design/README.md, 4).
+  const wide = density === "compact";
   let lastDay: string | undefined;
   return (
     <>
-      <ChatMessageList density="spacious" isStreaming={busy} {...(onOlder ? { scrollToTopAction: onOlder } : {})}>
+      <ChatMessageList density={density} isStreaming={busy} {...(onOlder ? { scrollToTopAction: onOlder } : {})}>
+        {/* Scrolled with the timeline, so that what floats over its top hides nothing until it is scrolled. */}
+        {topInset ? <div className="timeline-inset" aria-hidden /> : null}
         {items.map((item) => {
           const day = dayOf(item.at);
           const divider = day !== lastDay ? <ChatSystemMessage variant="divider">{day}</ChatSystemMessage> : null;
@@ -25,7 +41,7 @@ export function Timeline({ items, busy, onOlder }: { items: TimelineItem[]; busy
           return (
             <Fragment key={item.key}>
               {divider}
-              {item.kind === "agent" ? <Reply item={item} /> : <OwnerMessage item={item} onOpen={setShown} />}
+              {item.kind === "agent" ? <Reply item={item} wide={wide} /> : <OwnerMessage item={item} onOpen={setShown} />}
             </Fragment>
           );
         })}
@@ -42,7 +58,7 @@ export function EmptyTimeline() {
   return <EmptyState title={words.emptyTitle} description={words.emptyBody} headingLevel={2} />;
 }
 
-function Reply({ item }: { item: AgentItem }) {
+function Reply({ item, wide }: { item: AgentItem; wide: boolean }) {
   const agent = useAgent();
   // A reply to the owner's own message needs no word of what started it.
   const trigger = item.trigger !== undefined && item.trigger.source !== "ui" ? item.trigger : undefined;
@@ -54,9 +70,18 @@ function Reply({ item }: { item: AgentItem }) {
       {trigger ? <Badge label={`${sourceWord(trigger.source)} ・ ${trigger.summary}`} /> : null}
     </span>
   );
+  const metadata = <ChatMessageMetadata timestamp={timeOf(item.at)} />;
+  // Without a bubble, the reply and its name and time sit flush with the row's edge.
+  if (wide) {
+    return (
+      <ChatMessage sender="assistant" name={name} metadata={metadata}>
+        <Markdown>{item.text}</Markdown>
+      </ChatMessage>
+    );
+  }
   return (
     <ChatMessage sender="assistant">
-      <ChatMessageBubble variant="ghost" name={name} metadata={<ChatMessageMetadata timestamp={timeOf(item.at)} />}>
+      <ChatMessageBubble variant="ghost" name={name} metadata={metadata}>
         <Markdown>{item.text}</Markdown>
       </ChatMessageBubble>
     </ChatMessage>

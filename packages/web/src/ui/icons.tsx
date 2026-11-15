@@ -63,3 +63,9 @@ export const PauseIcon = (props: Props) => (
     <rect x="14" y="4" width="4" height="16" rx="1.5" />
   </svg>
 );
+export const LogoutIcon = (props: Props) => (
+  <svg {...base} strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <path d="M10 4H5v16h5" />
+    <path d="M14 8l4 4-4 4M18 12H9" />
+  </svg>
+);
