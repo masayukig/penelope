@@ -396,14 +396,14 @@ func isToken(s string) bool {
 // yamlErrorShape keeps the line numbers of a YAML error and drops what it
 // quotes of the document, which could be a surrogate.
 func yamlErrorShape(err error) string {
-	if te, ok := errors.AsType[*yaml.TypeError](err); ok {
+	if le, ok := errors.AsType[*yaml.LoadErrors](err); ok {
 		var lines []string
-		for _, e := range te.Errors {
-			line, rest, _ := strings.Cut(e, ":")
-			if strings.Contains(rest, "not found in type") {
+		for _, e := range le.Errors {
+			line := fmt.Sprintf("line %d", e.Mark.Line)
+			if strings.Contains(e.Message, "not found in type") {
 				// An unknown field: its name is the document's,
 				// not a value.
-				field, _, _ := strings.Cut(strings.TrimPrefix(rest, " field "), " ")
+				field, _, _ := strings.Cut(strings.TrimPrefix(e.Message, "field "), " ")
 				lines = append(lines, line+": unknown field "+field)
 				continue
 			}
@@ -411,9 +411,8 @@ func yamlErrorShape(err error) string {
 		}
 		return strings.Join(lines, "; ")
 	}
-	if rest, ok := strings.CutPrefix(err.Error(), "yaml: line "); ok {
-		n, _, _ := strings.Cut(rest, ":")
-		return "line " + n + ": not YAML"
+	if le, ok := errors.AsType[*yaml.LoadError](err); ok && le.Mark.Line > 0 {
+		return fmt.Sprintf("line %d: not YAML", le.Mark.Line)
 	}
 	return "not YAML"
 }
