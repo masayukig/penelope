@@ -17,7 +17,7 @@ make e2e
 | サービス | 役目 |
 | --- | --- |
 | `pod` | 網の名前空間の持ち主。Pod の pause コンテナに当たる |
-| `init` | `NET_ADMIN` を持つ init container。sandbox の UID（1000）の TCP と名前解決を、IPv4 と IPv6 とも Sentinel へ向け直す。loopback はそのまま（`init/redirect.sh`） |
+| `init` | `NET_ADMIN` を持つ init container。sandbox の UID（1000）の TCP と名前解決を、IPv4 と IPv6 とも Sentinel へ向け直す。loopback はそのまま（`init/redirect.sh`）。Pod と同じく root のファイルシステムは読み取り専用 |
 | `volumes` | volume の持ち主を決め、sandbox の HOME に Pi の設定（`config/models.json`）を置く。Pod の `fsGroup` と配置の役目に当たる |
 | `sentinel`・`backend`・`sandbox`・`receivers` | リポジトリの image そのまま。`network_mode: service:pod` で名前空間を共有する |
 | `outside` | Pod の外の偽物（下の「偽物」） |

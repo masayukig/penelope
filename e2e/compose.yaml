@@ -60,6 +60,8 @@ services:
     command: ["/e2e/init/redirect.sh"]
     network_mode: service:pod
     cap_add: [NET_ADMIN]
+    # The root file system is read-only, as the Pod's init container's is.
+    read_only: true
     depends_on:
       pod: { condition: service_started }
 
