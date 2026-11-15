@@ -74,11 +74,11 @@ func (p *Proxy) serveOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cn, h := tc.conn, tc.host
-	rec := p.request(r, cn, record.Open, h.Name)
+	rec := p.request(r, cn, record.Open, tc.name)
 
-	if !sameHost(r.Host, h, cn.dst.Port()) {
+	if !sameHost(r.Host, tc.name, cn.dst.Port()) {
 		p.deny(w, rec, http.StatusForbidden, ReasonHostMismatch,
-			fmt.Sprintf("the Host of the request is not %s, the name the connection was opened for", h.Name))
+			fmt.Sprintf("the Host of the request is not %s, the name the connection was opened for", tc.name))
 		return
 	}
 	if err := credentials.Swap(r.Context(), r, h, cn.policy.Surrogates(), p.cfg.Keys); err != nil {
@@ -172,14 +172,15 @@ func unmark(resp *http.Response) error {
 	return nil
 }
 
-// sameHost reports whether the Host of a request is the registration's
-// name, with no port or the port the connection was made to.
-func sameHost(hostport string, h *config.Host, port uint16) bool {
+// sameHost reports whether the Host of a request is the name the
+// connection was opened for, with no port or the port the connection was
+// made to.
+func sameHost(hostport, name string, port uint16) bool {
 	host, p, err := net.SplitHostPort(hostport)
 	if err != nil {
 		host, p = hostport, ""
 	}
-	if config.Normalize(host) != h.Name {
+	if config.Normalize(host) != name {
 		return false
 	}
 	return p == "" || p == strconv.Itoa(int(port))
@@ -239,13 +240,21 @@ func (u *upstreams) make(h *config.Host) *upstream {
 			return u.dial(ctx, "tcp", h.Upstream.Address)
 		}
 		serverName string
+		// toName is a wildcard's with no upstream written: each
+		// request goes to the name it was opened for, which is also
+		// the name the upstream's certificate is checked for.
+		toName = h.Upstream.Address == ""
 	)
-	switch h.Upstream.Scheme {
-	case "https":
+	switch {
+	case toName:
+		dial = func(ctx context.Context, _, addr string) (net.Conn, error) {
+			return u.dial(ctx, "tcp", addr)
+		}
+	case h.Upstream.Scheme == "https":
 		serverName = hostOnly(h.Upstream.Address)
-	case "http":
+	case h.Upstream.Scheme == "http":
 		scheme = "http"
-	case "unix":
+	case h.Upstream.Scheme == "unix":
 		scheme = "http"
 		dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return u.dial(ctx, "unix", h.Upstream.Address)
@@ -255,9 +264,16 @@ func (u *upstreams) make(h *config.Host) *upstream {
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Scheme = scheme
-			pr.Out.URL.Host = h.Upstream.Address
-			if h.Upstream.Scheme == "unix" {
-				pr.Out.URL.Host = h.Name
+			// The Host was checked to be the name the
+			// connection was opened for.
+			name := config.Normalize(hostOnly(pr.In.Host))
+			switch {
+			case toName:
+				pr.Out.URL.Host = net.JoinHostPort(name, strconv.Itoa(int(h.Port)))
+			case h.Upstream.Scheme == "unix":
+				pr.Out.URL.Host = name
+			default:
+				pr.Out.URL.Host = h.Upstream.Address
 			}
 			pr.Out.Host = pr.In.Host
 		},

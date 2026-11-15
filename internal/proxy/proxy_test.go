@@ -709,3 +709,105 @@ func TestANewConfigurationAppliesToNewConnections(t *testing.T) {
 		t.Errorf("actions %s then %s, want passthrough then open", recs[0].Action, recs[1].Action)
 	}
 }
+
+// A wildcard registration opens every name of one label under it: each
+// name gets a certificate of its own, is sent to itself upstream with the
+// surrogate swapped, and is recorded by its own name (ADR-0025).
+func TestAWildcardRegistrationOpensEachNameUnderIt(t *testing.T) {
+	w := newWorld(t)
+	handler := func(name string) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("Authorization"); got != "Bearer "+realKey {
+				http.Error(rw, "Authorization = "+got, http.StatusUnauthorized)
+				return
+			}
+			_, _ = io.WriteString(rw, name+" "+r.Host)
+		})
+	}
+	w.start(`
+hosts:
+  - name: "*.apps.example.com"
+    upstream_ca: %UPCA%
+    credentials:
+      - place: bearer
+        surrogate: ` + surrogate + `
+        source: { file: %KEY% }
+`)
+	w.to("203.0.113.12:443")
+	w.route("a.apps.example.com:443", w.tlsUpstream("a.apps.example.com", handler("upstream-a")))
+	w.route("b.apps.example.com:443", w.tlsUpstream("b.apps.example.com", handler("upstream-b")))
+	c := w.client(w.ca)
+
+	for i, name := range []string{"a", "b"} {
+		host := name + ".apps.example.com"
+		resp, body := get(t, c, "https://"+host+"/x", http.Header{"Authorization": {"Bearer " + surrogate}})
+		if resp.StatusCode != 200 || body != "upstream-"+name+" "+host {
+			t.Fatalf("%s: got %d %q", host, resp.StatusCode, body)
+		}
+		if got := resp.TLS.PeerCertificates[0].DNSNames; len(got) != 1 || got[0] != host {
+			t.Errorf("%s: the Sentinel's certificate is for %v", host, got)
+		}
+		r := w.rec.wait(t, i+1)[i]
+		if r.Action != record.Open || r.Host != host || r.Status != 200 {
+			t.Errorf("record = %+v, want open of %s", r, host)
+		}
+	}
+}
+
+func TestAWildcardOpenedConnectionTakesOnlyItsOwnName(t *testing.T) {
+	w := newWorld(t)
+	var hits atomic.Int32
+	up := w.tlsUpstream("a.apps.example.com", http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
+	w.start(`
+hosts:
+  - name: "*.apps.example.com"
+    upstream_ca: %UPCA%
+    credentials:
+      - place: bearer
+        surrogate: ` + surrogate + `
+        source: { file: %KEY% }
+  - name: exact.apps.example.com
+    upstream_ca: %UPCA%
+    credentials:
+      - place: bearer
+        surrogate: ` + otherSurrogate + `
+        source: { file: %KEY% }
+`)
+	w.to("203.0.113.12:443")
+	w.route("a.apps.example.com:443", up)
+	w.route("exact.apps.example.com:443", up)
+	c := w.client(w.ca)
+
+	tests := []struct {
+		name, url, host, auth, reason string
+	}{
+		// Another name the wildcard answers for is still not the SNI.
+		{"a Host that is another name under it", "https://a.apps.example.com/", "b.apps.example.com", surrogate, "host-mismatch"},
+		// The full name's registration wins: the wildcard's surrogate is another host's there.
+		{"the wildcard's surrogate on the full name", "https://exact.apps.example.com/", "", surrogate, string(credentials.ReasonSurrogate)},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _ := http.NewRequest(http.MethodGet, tt.url, nil)
+			req.Header.Set("Authorization", "Bearer "+tt.auth)
+			if tt.host != "" {
+				req.Host = tt.host
+			}
+			resp, err := c.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != 403 {
+				t.Errorf("got %d, want 403", resp.StatusCode)
+			}
+			r := w.rec.wait(t, i+1)[i]
+			if r.Action != record.Deny || r.Reason != tt.reason {
+				t.Errorf("record = %+v, want deny for %s", r, tt.reason)
+			}
+		})
+	}
+	if n := hits.Load(); n != 0 {
+		t.Errorf("the upstream was asked %d times", n)
+	}
+}

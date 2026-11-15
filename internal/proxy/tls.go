@@ -74,7 +74,7 @@ func (p *Proxy) handshake(pc *peekConn, cn *conn) {
 		return
 	}
 	_ = pc.SetDeadline(time.Time{})
-	if err := p.openq.push(&taggedConn{Conn: tc, conn: cn, host: host}); err != nil {
+	if err := p.openq.push(&taggedConn{Conn: tc, conn: cn, host: host, name: sni}); err != nil {
 		_ = tc.Close()
 	}
 }

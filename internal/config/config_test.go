@@ -57,13 +57,18 @@ hosts:
       - place: bearer
         surrogate: surrogate-example-0002
         source: { file: /run/secrets/example/sa-token }
+  - name: "*.apps.example.com"
+    credentials:
+      - place: bearer
+        surrogate: surrogate-example-0004
+        source: { file: /run/secrets/example/apps-token }
 allow: []
 `)
 	if c.Default != config.Passthrough {
 		t.Errorf("Default = %q, want passthrough", c.Default)
 	}
-	if got := len(c.Hosts); got != 3 {
-		t.Fatalf("%d hosts, want 3", got)
+	if got := len(c.Hosts); got != 4 {
+		t.Fatalf("%d hosts, want 4", got)
 	}
 	api := c.Lookup("api.example.com", 443)
 	if api == nil {
@@ -80,8 +85,11 @@ allow: []
 	if k == nil || k.RootCAs == nil {
 		t.Error("the cluster's registration has no CA for its upstream")
 	}
-	if got := c.Surrogates(); len(got) != 3 {
-		t.Errorf("Surrogates = %d values, want 3", len(got))
+	if c.Lookup("a.apps.example.com", 443) == nil {
+		t.Error("the wildcard does not answer for a.apps.example.com")
+	}
+	if got := c.Surrogates(); len(got) != 4 {
+		t.Errorf("Surrogates = %d values, want 4", len(got))
 	}
 }
 
@@ -291,4 +299,71 @@ func cred(place, surrogate string) string {
 
 func creds(surrogate string) string {
 	return "    credentials:\n      - place: bearer\n        surrogate: " + surrogate + "\n        source: { file: /run/k }\n"
+}
+
+// A wildcard registration answers for one label in place of its '*', as a
+// wildcard of a TLS certificate does; a registration of the full name wins
+// over it (ADR-0025).
+func TestAWildcardAnswersForOneLeftMostLabel(t *testing.T) {
+	c := mustParse(t, `
+hosts:
+  - name: "*.Apps.Example.com."
+  - name: exact.apps.example.com
+  - name: "*.apps.example.com"
+    port: 8443
+`)
+	wild := c.Lookup("a.apps.example.com", 443)
+	if wild == nil || wild.Name != "*.apps.example.com" || wild.Port != 443 {
+		t.Fatalf("Lookup(a.apps.example.com) = %+v, want the wildcard of port 443", wild)
+	}
+	if c.Lookup("B.Apps.example.com.", 443) != wild {
+		t.Error("the wildcard is not compared without case and trailing dot")
+	}
+	if got := c.Lookup("exact.apps.example.com", 443); got == nil || got.Name != "exact.apps.example.com" {
+		t.Errorf("Lookup(exact.apps.example.com) = %+v, want the full name's registration", got)
+	}
+	if got := c.Lookup("a.apps.example.com", 8443); got == nil || got.Port != 8443 {
+		t.Errorf("Lookup(a.apps.example.com:8443) = %+v, want the wildcard of port 8443", got)
+	}
+	for _, name := range []string{"apps.example.com", "a.b.apps.example.com", "*.apps.example.com", "a.example.com", ""} {
+		if got := c.Lookup(name, 443); got != nil {
+			t.Errorf("Lookup(%q) = %+v, want nothing", name, got)
+		}
+	}
+	if u := wild.Upstream; u.Scheme != "https" || u.Address != "" {
+		t.Errorf("the wildcard's upstream = %+v, want https to the name asked for", u)
+	}
+	if !wild.Wildcard() || c.Lookup("exact.apps.example.com", 443).Wildcard() {
+		t.Error("Wildcard does not tell the wildcard registration from the full name's")
+	}
+}
+
+func TestAWildcardWithAnUpstreamSendsEveryNameThere(t *testing.T) {
+	c := mustParse(t, "hosts:\n  - name: \"*.apps.example.com\"\n    upstream: https://10.0.0.1:443\n")
+	if u := c.Lookup("a.apps.example.com", 443).Upstream; u.Scheme != "https" || u.Address != "10.0.0.1:443" {
+		t.Errorf("upstream = %+v", u)
+	}
+}
+
+func TestAWildcardOfAnotherShapeIsRefused(t *testing.T) {
+	tests := map[string]string{
+		"a part of a label":     "a*.example.com",
+		"a label not left-most": "a.*.example.com",
+		"two wildcards":         "*.*.example.com",
+		"one label under it":    "*.com",
+		"nothing under it":      "*",
+		"a bare dot under it":   "*.",
+		"the same one twice":    "", // below
+	}
+	for name, host := range tests {
+		t.Run(name, func(t *testing.T) {
+			rest := "hosts:\n  - name: \"" + host + "\"\n"
+			if name == "the same one twice" {
+				rest = "hosts:\n  - name: \"*.example.com\"\n  - name: \"*.EXAMPLE.com\"\n"
+			}
+			if _, err := parse(t, rest); err == nil {
+				t.Fatal("Parse returned no error")
+			}
+		})
+	}
 }

@@ -344,6 +344,9 @@ type taggedConn struct {
 	conn *conn
 	// host is the registration a connection was opened for.
 	host *config.Host
+	// name is the SNI it was opened for: the registration's name, or a
+	// name its wildcard answers for.
+	name string
 }
 
 type connKey struct{}
