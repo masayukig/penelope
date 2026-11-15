@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
@@ -93,6 +94,48 @@ describe("the backend that cannot listen", () => {
       assert.notEqual(code, 0);
     });
   }
+
+  // Guards against: a start that fails part way and leaves the ways in it had opened, still
+  // taking events, in a process that goes on (a test, or a caller that tries again).
+  function configIn(dir: string, env: Record<string, string> = {}) {
+    return loadConfig(
+      {
+        PENELOPE_DATABASE: path.join(dir, "backend.sqlite"),
+        PENELOPE_SOURCES_DIR: path.join(dir, "sources"),
+        PENELOPE_MEMORY_DIR: path.join(dir, "memory"),
+        PENELOPE_INTAKE_SOCKET: path.join(dir, "intake.sock"),
+        PENELOPE_SANDBOX_SOCKET: path.join(dir, "sandbox.sock"),
+        PENELOPE_LISTEN: "127.0.0.1:0",
+        ...env,
+      },
+      (file) => execFileSync("cat", [file], { encoding: "utf8" }),
+    );
+  }
+
+  async function refused(socketPath: string): Promise<boolean> {
+    return ask({ socketPath }, "/healthz").then(
+      () => false,
+      () => true,
+    );
+  }
+
+  it("closes the intake when the sandbox's socket cannot be listened on", async (t) => {
+    const dir = tempDir(t);
+    const config = configIn(dir, { PENELOPE_SANDBOX_SOCKET: path.join(dir, `${"s".repeat(120)}.sock`) });
+    await assert.rejects(startBackend(config, { log: () => {} }));
+    assert.ok(await refused(config.intakeSocket), "the intake still answers");
+  });
+
+  it("closes both sockets when the UI's port cannot be listened on", async (t) => {
+    const dir = tempDir(t);
+    const taken = net.createServer();
+    await new Promise<void>((resolve) => taken.listen(0, "127.0.0.1", resolve));
+    t.after(() => new Promise<void>((resolve) => taken.close(() => resolve())));
+    const config = configIn(dir, { PENELOPE_LISTEN: `127.0.0.1:${(taken.address() as net.AddressInfo).port}` });
+    await assert.rejects(startBackend(config, { log: () => {} }));
+    assert.ok(await refused(config.intakeSocket), "the intake still answers");
+    assert.ok(await refused(config.sandboxSocket), "the sandbox's API still answers");
+  });
 });
 
 describe("the command", () => {

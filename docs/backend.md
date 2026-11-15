@@ -87,7 +87,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - ターンの終わり（`POST /v1/turns/end`）ごとに、作業ツリーの変わったものをすべて（足したもの・変えたもの・消したもの）、検査せずにそのままコミットする。変わったものが無ければコミットしない。
 - 作者とコミッターは `PENELOPE_GIT_AUTHOR_NAME` と `PENELOPE_GIT_AUTHOR_EMAIL`。
 - メッセージは、1 行目が `Turn <turn_id>`、本文が `Agent: <agent>`。サブエージェントのターンの終わりでは `<agent>` はサブエージェントの名前で、本体のターンの途中の変更も一緒に入る（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)）。
-- `.git` が無ければ、最初のコミットの前に `main` を枝にして作る。
+- ターンの終わりに `.git/HEAD` が無ければ（`.git` が無い、または Pod が別に mount した空の `.git`）、変わったものを見る前に `git init` で `main` を枝にしてリポジトリを作る。変わったものが無くても作る。`HEAD` があれば、そのリポジトリと今の枝をそのまま使う。
 - git は backend の git の設定を読まない。hook も署名も使わない。作業ツリーの持ち主は sandbox のユーザーなので、その場所を `safe.directory` として渡す。
 - コミットは 1 つずつ順に行う。
 - コミットに失敗したら、ターンの終わりに `500` で答える。変わったものは作業ツリーに残り、次のターンの終わりにコミットされる。

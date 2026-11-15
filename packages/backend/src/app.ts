@@ -2,6 +2,7 @@
 // servers: the intake and the sandbox's API on Unix sockets, the UI's API on
 // TCP (docs/pod.md).
 import { mkdirSync } from "node:fs";
+import type http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 
@@ -56,31 +57,51 @@ export async function startBackend(
   const inbox = new Inbox(db, queue, { now, limits: config.a2a?.limits ?? { deadlineMs: 24 * 3_600_000, maxOpenTasks: 3 } });
   const login = new GitHubLogin({ settings: config.github, ...(githubEndpoints ? { endpoints: githubEndpoints } : {}), sessions, now, log });
 
-  const intake = await listenUnix(intakeHandler(queue, { log }), config.intakeSocket, log);
-  const sandbox = await listenUnix(
-    sandboxHandler({ token: config.sandboxToken, queue, conversation, agents, schedules, memory, inbox, now, log }),
-    config.sandboxSocket,
-    log,
-  );
-  const ui = await listenTcp(
-    uiHandler({
-      queue,
-      conversation,
-      agents,
-      feed,
-      login,
-      sessions,
-      ownerId: config.github?.ownerId,
-      publicUrl: config.publicUrl,
-      agent: config.agent,
-      web: webHandler({ dir: config.webDir, agent: config.agent }),
-      ...(config.a2a === undefined ? {} : { a2a: a2aOf(config.a2a, config.agent.name, inbox, now, log) }),
-      now,
-    }),
-    config.listen.host,
-    config.listen.port,
-    log,
-  );
+  // A start that fails part way closes what it had opened, and the database.
+  const opened: http.Server[] = [];
+  const opening = async (listening: Promise<http.Server>): Promise<http.Server> => {
+    const server = await listening;
+    opened.push(server);
+    return server;
+  };
+  let intake: http.Server;
+  let sandbox: http.Server;
+  let ui: http.Server;
+  try {
+    intake = await opening(listenUnix(intakeHandler(queue, { log }), config.intakeSocket, log));
+    sandbox = await opening(
+      listenUnix(
+        sandboxHandler({ token: config.sandboxToken, queue, conversation, agents, schedules, memory, inbox, now, log }),
+        config.sandboxSocket,
+        log,
+      ),
+    );
+    ui = await opening(
+      listenTcp(
+        uiHandler({
+          queue,
+          conversation,
+          agents,
+          feed,
+          login,
+          sessions,
+          ownerId: config.github?.ownerId,
+          publicUrl: config.publicUrl,
+          agent: config.agent,
+          web: webHandler({ dir: config.webDir, agent: config.agent }),
+          ...(config.a2a === undefined ? {} : { a2a: a2aOf(config.a2a, config.agent.name, inbox, now, log) }),
+          now,
+        }),
+        config.listen.host,
+        config.listen.port,
+        log,
+      ),
+    );
+  } catch (error) {
+    await Promise.all(opened.map((server) => close(server)));
+    db.close();
+    throw error;
+  }
   const stopScheduler = scheduler.start();
 
   if (config.sandboxToken === undefined) log("backend: no PENELOPE_SANDBOX_TOKEN_FILE; the sandbox's API refuses every request");

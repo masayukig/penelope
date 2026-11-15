@@ -1,0 +1,4 @@
+# Every change to main needs one of these to approve it. Renovate's pull
+# requests reach Penelope as requests for her review, and are merged once
+# one of these approves and CI passes.
+* @yuanying @penelope-the-operator

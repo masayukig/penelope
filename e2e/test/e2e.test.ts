@@ -75,12 +75,13 @@ function track(scenario: () => Promise<void>): () => Promise<void> {
 }
 
 async function send(text: string): Promise<void> {
-  const { status } = await browser.json("/api/messages", {
+  const { status, body } = await browser.json("/api/messages", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ text }),
   });
-  assert.equal(status, 202);
+  // A refusal says who refused it and why, with the cookie the browser sent.
+  assert.equal(status, 202, `${text}: ${JSON.stringify(body)}, cookie ${browser.cookie?.split("=")[0] ?? "none"}`);
 }
 
 const replied = (text: string, timeoutMs = 120_000) =>
