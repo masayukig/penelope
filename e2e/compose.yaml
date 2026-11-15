@@ -122,6 +122,8 @@ services:
       PENELOPE_TIME_ZONE: UTC
       PENELOPE_AWAKE_HOURS: "00:00-00:00"
       PENELOPE_NIGHTLY_CRON: ${PENELOPE_E2E_NIGHTLY_CRON:-0 4 1 1 *}
+      # The shortest wait for a batch, so that GitHub's batch events reach a turn of their own in the test.
+      PENELOPE_BATCH_QUIET_MINUTES: "1"
       PENELOPE_AVATAR: penelope
       PENELOPE_AGENT_NAME: E2E Agent
       NODE_EXTRA_CA_CERTS: /run/secrets/e2e/outside-ca.crt
@@ -173,8 +175,8 @@ services:
       - home:/home/agent
       - sources:/sources:ro
 
-  # The receivers with the Alertmanager plugin on, at /v1/webhooks/fraction
-  # (config/receivers.json). The test also runs its small sender
+  # The receivers with the Alertmanager plugin on, at /v1/webhooks/fraction,
+  # and the GitHub plugin, at /v1/webhooks/github (config/receivers.json). The test also runs its small sender
   # (sender/send.ts) in this container, to post envelopes of its own to the
   # intake socket.
   receivers:
@@ -188,5 +190,6 @@ services:
       - *resolv
       - ./config/receivers.json:/etc/penelope/receivers/config.json:ro
       - ./.run/alertmanager-token:/run/secrets/e2e/alertmanager-token:ro
+      - ./.run/github-webhook-secret:/run/secrets/e2e/github-webhook-secret:ro
       - ./sender:/e2e/sender:ro
       - intake:/run/penelope/intake
