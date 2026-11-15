@@ -89,6 +89,7 @@ export function script(messages: readonly ChatMessage[]): Answer {
     if (input.includes("E2E-A2A-ASK")) return [{ calls: [replyToAgent(input, "input-required", "E2E-A2A-QUESTION")] }, { text: "Asked." }];
     if (input.includes("E2E-A2A-ANSWER")) return [{ calls: [replyToAgent(input, "completed", "E2E-A2A-DONE")] }, { text: "Answered." }];
     if (input.includes("E2E-NOW")) return [{ calls: [reply("E2E-REPLY-EVENTS")] }, { text: "Seen." }];
+    if (input.includes("E2E-ALERT")) return [{ calls: [reply("E2E-REPLY-ALERT")] }, { text: "Looked." }];
     const turn = /E2E-TURN-(\d+)/.exec(input)?.[1];
     if (turn) return [{ calls: [reply(`E2E-REPLY-${turn}`)] }, { text: `E2E-TEXT-${turn}` }];
     return [{ text: "ok" }];

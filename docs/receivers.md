@@ -16,18 +16,20 @@ receivers の設定、HTTP の口、プラグインの内側の契約、Alertman
 - 鍵の値は設定のファイルに書かず、値を書いたファイルの場所を書く（`_file` で終わる欄）。
 - 設定が読めない、または使えない値があれば、起動せずに終わる（終了コード 2）。標準エラーに、どの欄がなぜ使えないかを 1 行書く。
 - 設定と鍵のファイルは起動のときに 1 度だけ読む。変えたら再起動する。
-- SIGTERM で、新しい要求を受けるのをやめ、処理中の要求（取り込み口へ送っているものを含む）を終えてから終わる。
+- 起動したら、標準エラーに待ち受けのアドレスと、有効化ごとの名前・プラグイン・`source` を 1 行書く。
+- SIGTERM で、新しい要求を受けるのをやめ、処理中の要求（取り込み口へ送っているものを含む）を終えてから終わる。終える要求の応答には `Connection: close` を付け、つなぎ置きの接続を残さない。
 
 ## 設定
 
 | 欄 | 既定 | 中身 |
 | --- | --- | --- |
-| `listen` | `0.0.0.0:8081` | HTTP の口の TCP の待ち受け（`host:port`、IPv6 は `[::]:8081`）。backend の `PENELOPE_LISTEN`（既定 `8080`）と同じ Pod で重ならないポートにする |
+| `listen` | `0.0.0.0:8081` | HTTP の口の TCP の待ち受け（`host:port`、IPv6 は `[::]:8081`）。backend の `PENELOPE_LISTEN`（既定 `8080`）と同じ Pod で重ならないポートにする。ポートが `0` なら空いているものを使う（テストのため） |
 | `intake` | `/run/penelope/intake/backend.sock` | 取り込み口の Unix socket。backend の `PENELOPE_INTAKE_SOCKET` と同じ場所 |
 | `intake_timeout_seconds` | `10` | 取り込み口への 1 件の要求を待つ秒数。0 より大きい整数 |
 | `plugins` | `[]` | プラグインの有効化の一覧（下の「プラグインの有効化」）。空なら、出来事を作らずに health だけを答える |
 
 - 知らない欄が書かれていれば、起動しない（書き損じを黙って無視しない）。プラグインの `settings` の中も同じである。
+- 起動しないときの 1 行は `receivers: <欄>: <理由>` の形である。欄は `plugins[0].settings.token_file` のように、どこにあるかを付けて書く。鍵のファイルが読めないときも、ファイルの場所と読めない理由だけを書き、中身は書かない。
 
 ### プラグインの有効化
 
@@ -67,12 +69,12 @@ receivers は、`listen` の TCP で HTTP のサーバーを 1 つだけ持つ�
 
 | 要求 | 中身 |
 | --- | --- |
-| `GET /healthz` | `200`、body は `ok`。プロセスが要求を受けられることだけを表す。取り込み口に届くかは確かめない |
+| `GET /healthz` | `200`、body は `ok`。プロセスが要求を受けられることだけを表す。取り込み口に届くかは確かめない。`HEAD` も受ける。ほかのメソッドは `405`（`Allow: GET, HEAD`） |
 | `POST /v1/webhooks/<name>` | webhook のプラグインの有効化 `<name>` が受ける。body の上限は 1 MiB |
 
 | 応答 | 意味 |
 | --- | --- |
-| `200` | 受けた。作った出来事はすべて取り込み口が `202` で受けた（作った出来事が 0 件のときも同じ）。body は無い |
+| `200` | 受けた。作った出来事はすべて取り込み口が `202` で受けた（作った出来事が 0 件のときも同じ） |
 | `400` | body が読めない、またはプラグインの形でない。送り直しても通らない |
 | `401` | 送り手の確かめを通らない。出来事は作らない |
 | `404` | `<name>` の webhook の有効化が無い。ほかの知らないパスも同じ |
@@ -80,10 +82,13 @@ receivers は、`listen` の TCP で HTTP のサーバーを 1 つだけ持つ�
 | `413` | body が上限より大きい |
 | `503` | 取り込み口が 1 件でも `202` を返さなかった（つながらない・待ちが切れた・`202` 以外の応答）。送り手は同じ知らせを送り直す |
 
+- webhook への応答は、どの番号も body を持たない。
+- body の上限（`413`）は本体が、プラグインに渡す前に見る。`Content-Length` が上限を超えていれば読まずに断り、超えていなくても読んだ量が上限を超えたところで断る。
 - 確かめ（`401`）は、body を読む（`400`）より先に行う。
 - 出来事は 1 件ずつ順に取り込み口へ送り、最初に `202` を受けられなかったところで止めて `503` を返す。それまでに入った出来事は、送り直しのときに backend が重複として落とす。
 - 取り込み口が `400`・`413` を返したときも `503` にする。receivers が作った封筒の誤りなので、標準エラーに出来事の `source`・`id` と応答を書く。
-- 要求ごとに標準エラーへ 1 行書く: 有効化の名前、応答の番号、作った出来事の数、捨てたアラートの数。body の中身と鍵は書かない。
+- 要求ごとに標準エラーへ 1 行書く: 有効化の名前、応答の番号、取り込み口が受けた出来事の数、捨てたアラートの数。形は `receivers: webhook=<name> status=<番号> events=<数> dropped=<数>` で、有効化に当たらない要求（`404`）の名前は `-` である。`400` のときは、どの欄がなぜ外れたか（`reason="alerts[0]: fingerprint must be a non-empty string"` のように）を後ろに足す。body の中身と鍵は書かない。`/healthz` は書かない。
+- 取り込み口に受けられなかったときは、その前にもう 1 行、出来事の `source/id` と理由（応答の番号と body の先頭、つながらない、待ちが切れた）を書く。
 
 ## プラグインの内側の契約
 
@@ -101,8 +106,9 @@ receivers の本体（以下、本体）とプラグインの境目。実装は�
 - 名前（設定の `plugin` に書くもの）と種類（いまは webhook だけ）。
 - `settings` の確かめ: 起動のときに本体から `settings` を受け、知らない欄・使えない値・読めない鍵のファイルがあれば、理由を付けて断る。本体はそれを受けて起動しない。鍵のファイルを読むのはここである。
 - webhook のプラグインは、1 回の要求（ヘッダーと body のバイト列）を受けて、次のどちらかを返す。
-  - 断る: 応答の番号（`400` か `401`）。出来事は作らない。
-  - 受ける: 出来事の一覧（0 件でもよい）と、捨てたものの数。出来事は封筒の `source` を除くすべての欄（`id`・`occurred_at`・`summary`・`stream`・`delivery`・`payload`）を持つ。
+  - 断る: 応答の番号（`400` か `401`）。出来事は作らない。`400` には、本体がログに書く理由を付ける。理由は欄の名前と外れ方だけで、body の中身を写さない。
+  - 受ける: 出来事の一覧（0 件でもよい）と、捨てたものの数と、本体がログに書く行（Alertmanager の `truncatedAlerts` など。0 行でもよい）。出来事は封筒の `source` を除くすべての欄（`id`・`occurred_at`・`summary`・`stream`・`delivery`・`payload`）を持つ。
+- 要求には、本体が受けた時刻を付けて渡す。プラグインは時計を読まない。
 - プラグインは取り込み口にも網にも触れない。要求から封筒を作るだけなので、HTTP のサーバーも socket も無しでテストできる。
 - 封筒の欄の型は `packages/contract` の `src/events.ts` の `Event` に従う。
 
@@ -126,12 +132,14 @@ Alertmanager の webhook（`webhook_configs`）の知らせを受ける。`plugi
 
 ### 確かめ
 
-- `Authorization` が `Bearer <token>` で、`<token>` が設定の token と一致するものだけを通す。比べるのに要る時間が、どこまで一致したかで変わらない比べ方をする。
+- `Authorization` が `Bearer <token>` で、`<token>` が設定の token と一致するものだけを通す。`Bearer` の大文字と小文字は問わない。
+- 比べるのに要る時間が、どこまで一致したかで変わらない比べ方をする。届いた token と設定の token の SHA-256 を、長さの決まったバイト列どうしで比べるので、token の長さの違いでも時間が変わらない。
 - ヘッダーが無い・形が違う・token が違う要求は、どれも同じ `401` で断る。
 
 ### body
 
-- JSON で、`alerts` が配列のもの。アラートはそれぞれ、`status`（`firing` か `resolved`）・`fingerprint`（空でない文字列）・`startsAt`（文字列）・`labels`（文字列から文字列への対応）を持つ。1 件でも外れれば、要求の全体を `400` で断る。
+- UTF-8 の JSON で、`alerts` が配列のもの。アラートはそれぞれ、`status`（`firing` か `resolved`）・`fingerprint`（空でない文字列）・`startsAt`（RFC 3339 の時刻）・`labels`（文字列から文字列への対応）を持つ。1 件でも外れれば、要求の全体を `400` で断る。
+- `startsAt` を RFC 3339 の時刻に限るのは、`firing` の出来事の `occurred_at` になるためである。取り込み口は RFC 3339 でない `occurred_at` を `400` で断るので、受けてしまうと送り直しのたびに `503` になる。
 - そのほかの欄（`version`・`groupKey`・`groupLabels` など）は確かめない。
 - `truncatedAlerts` が 0 より大きければ、送り手が `max_alerts` でアラートを落としている。標準エラーにその数を書く。届いたアラートだけを出来事にする。
 
@@ -142,9 +150,9 @@ Alertmanager の webhook（`webhook_configs`）の知らせを受ける。`plugi
 | 欄 | 作り方 |
 | --- | --- |
 | `id` | `<fingerprint>/<status>/<startsAt>`。`startsAt` は届いた文字列のまま |
-| `occurred_at` | `firing` なら `startsAt`、`resolved` なら `endsAt`。`endsAt` が無い・読めない・`0001-01-01T00:00:00Z` なら、受けた時刻 |
+| `occurred_at` | `firing` なら `startsAt`、`resolved` なら `endsAt`。`endsAt` が無い・RFC 3339 の時刻でない・`0001-01-01T00:00:00Z` なら、受けた時刻 |
 | `stream` | `labels.alertname` を下の「`stream` の写し方」で写したもの。`alertname` が無いか、写して空になれば省く |
-| `delivery` | `status` が `firing` で、`labels.severity` が `now_severities` にあれば `now`。ほかはすべて `batch`。いつも明示する |
+| `delivery` | `status` が `firing` で、`labels.severity` が `now_severities` にあれば `now`。ほかはすべて `batch`（`severity` のラベルが無いものも）。いつも明示する |
 | `summary` | 下の「`summary` の形」 |
 | `payload` | 届いたアラート 1 件の JSON をそのまま（欄を足しも削りもしない）に、要求の最上位の `externalURL` を `externalURL` の欄として足したもの。最上位に `externalURL` が無ければ足さない |
 
@@ -160,8 +168,8 @@ Alertmanager の webhook（`webhook_configs`）の知らせを受ける。`plugi
 #### `summary` の形
 
 - `[<状態> <severity>] <alertname>: <annotations.summary>`。`<状態>` は `FIRING` か `RESOLVED`。
-- `severity` のラベルが無ければ `[<状態>]`。`alertname` が無ければ `fingerprint` を置く。`annotations.summary` が無いか空なら、`: ` から後を省く。
-- 改行と制御文字は空白 1 つにする。200 文字（Unicode のコードポイント）までに切る。
+- `severity` のラベルが無いか空なら `[<状態>]`。`alertname` が無いか空なら `fingerprint` を置く。`annotations.summary` が無い・空・文字列でないなら、`: ` から後を省く。
+- 組み立てた 1 行の中の改行と制御文字（U+0000〜U+001F、U+007F〜U+009F）は、続くものをまとめて空白 1 つにする（`\r\n` も空白 1 つ）。そのうえで 200 文字（Unicode のコードポイント）までに切る。
 - 例: `[FIRING critical] KubePodCrashLooping: Pod default/web-0 is crash looping.`
 
 ### 置き場所の例

@@ -1,7 +1,7 @@
-// The small sender the test runs in the receivers container, in place of a
-// receivers plugin (there is none yet): it posts the envelope on its stdin to
-// the backend's intake socket (docs/events.md, "取り込み口") and prints the
-// status and the body of the answer.
+// The small sender the test runs in the receivers container, beside the
+// receivers themselves, to post envelopes of its own making: it posts the
+// envelope on its stdin to the backend's intake socket (docs/events.md,
+// "取り込み口") and prints the status and the body of the answer.
 import http from "node:http";
 import process from "node:process";
 

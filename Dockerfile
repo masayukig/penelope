@@ -96,6 +96,7 @@ COPY --from=ts-build /src/packages/receivers/package.json ./
 COPY --from=ts-build /src/packages/receivers/dist ./dist
 USER 1002:1002
 ENTRYPOINT ["node", "/app/dist/main.js"]
+CMD ["serve"]
 
 # The runner's runtime dependencies. None of them is built for a platform, so
 # they are installed here on the builder's own and copied as they are. The

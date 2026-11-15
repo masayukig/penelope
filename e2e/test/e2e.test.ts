@@ -293,7 +293,7 @@ describe("the Pod end to end", () => {
 
   it("has no real key in the sandbox, and only its surrogates", track(async () => {
     // Guards against: a real key, or the intake, becoming reachable from the sandbox.
-    const keys = ["model-key", "backend-token", "github-client-secret", "kube-token", "sender-token", "stranger-token", "sentinel-ca.key", "outside-ca.key", "outside.key"]
+    const keys = ["model-key", "backend-token", "github-client-secret", "kube-token", "sender-token", "stranger-token", "alertmanager-token", "sentinel-ca.key", "outside-ca.key", "outside.key"]
       .map((name) => readFileSync(join(RUN_DIR, name), "utf8").trim().split("\n").filter((line) => line && !line.startsWith("-----")))
       .flat();
     const found = exec(
@@ -349,6 +349,57 @@ describe("the Pod end to end", () => {
       ["e2e", "feed", 1, "E2E-BATCH one", [{ path: file, lines: [1, 1] }]],
     );
     assert.ok(batchLine.seqs[0]! < nowLine.seq, "the batch came before the now");
+  }));
+
+  it("takes Alertmanager's webhook in the receivers, and brings a critical alert into a turn", track(async () => {
+    // Guards against: an alert reaching the agent without the sender's token, a critical one not starting a turn,
+    // a resend written twice, or the agent's own alert coming back to her.
+    const token = readFileSync(join(RUN_DIR, "alertmanager-token"), "utf8").trim();
+    const url = new URL("/v1/webhooks/fraction", pod.url);
+    url.port = "8081";
+    const startsAt = new Date().toISOString();
+    const alert = (fingerprint: string, labels: Record<string, string>) => ({
+      status: "firing",
+      labels: { alertname: "KubePodCrashLooping", severity: "critical", namespace: "default", pod: "web-0", ...labels },
+      annotations: { summary: "E2E-ALERT Pod default/web-0 is crash looping." },
+      startsAt,
+      endsAt: "0001-01-01T00:00:00Z",
+      generatorURL: "https://prometheus.example.com/graph",
+      fingerprint,
+    });
+    const body = JSON.stringify({
+      version: "4",
+      groupKey: "{}:{alertname=\"KubePodCrashLooping\"}",
+      status: "firing",
+      receiver: "penelope",
+      externalURL: "https://alertmanager.example.com",
+      alerts: [alert("e2e0000000000001", {}), alert("e2e0000000000002", { sender: "penelope" })],
+    });
+    const webhook = (authorization: string) =>
+      fromOutside("POST", url.href, { authorization, "content-type": "application/json" }, body).status;
+
+    assert.equal(webhook("Bearer wrong"), 401);
+    assert.equal(fromOutside("GET", new URL("/healthz", url).href).text, "ok");
+    assert.equal(webhook(`Bearer ${token}`), 200);
+    await replied("E2E-REPLY-ALERT");
+    assert.equal(webhook(`Bearer ${token}`), 200, "Alertmanager's resend is taken as received");
+
+    const day = startsAt.slice(0, 10);
+    const file = `/sources/alertmanager/kubepodcrashlooping/${day}.jsonl`;
+    const lines = exec("sandbox", `cat ${file}`).stdout.trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(lines.length, 1, "one line: the resend is a duplicate and the agent's own alert is dropped");
+    assert.equal(lines[0].id, `e2e0000000000001/firing/${startsAt}`);
+    assert.equal(lines[0].payload.externalURL, "https://alertmanager.example.com");
+    assert.equal(lines[0].payload.labels.alertname, "KubePodCrashLooping");
+
+    const calls = await callsFor("E2E-ALERT", 0);
+    assert.equal(calls.length, 1, "one turn for the alert");
+    const [line] = eventLines(where(calls[0]!).input);
+    assert.ok(line && line.kind === undefined, JSON.stringify(line));
+    assert.deepEqual(
+      [line.source, line.stream, line.delivery, line.summary, line.appended],
+      ["alertmanager", "kubepodcrashlooping", "now", "[FIRING critical] KubePodCrashLooping: E2E-ALERT Pod default/web-0 is crash looping.", { path: file, lines: [1, 1] }],
+    );
   }));
 
   it("takes another agent's request over A2A, asks it back, and hands it her answer", track(async () => {
