@@ -1,8 +1,8 @@
 # sandbox 向けの口の仕様
 
 sandbox の中の runner と道具が backend を呼ぶ口を決める。方針は
-[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)・[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)・[ADR-0007](adr/0007-one-session-switched-nightly-with-a-one-turn-curator.md)・[ADR-0013](adr/0013-event-contents-in-sources-and-summaries-in-turns.md) にある。
-型は `packages/contract` の `src/sandbox.ts` が正である。出来事の封筒と `/sources` は [events.md](events.md) にある。
+[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)・[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)・[ADR-0007](adr/0007-one-session-switched-nightly-with-a-one-turn-curator.md)・[ADR-0013](adr/0013-event-contents-in-sources-and-summaries-in-turns.md)・[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md) にある。
+型は `packages/contract` の `src/sandbox.ts` が正である。サブエージェントのための形（「サブエージェントの状態」と、サブエージェントの知らせの `payload`）の型は、サブエージェントを実装する作業単位で入る。出来事の封筒と `/sources` は [events.md](events.md) にある。
 
 「未決」と書いた点は、実装の作業単位が決めて、この文書を直す。
 
@@ -15,10 +15,12 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 ### `agent` の欄
 
 - **すべての要求が、呼んでいるエージェントの ID を `agent` に持つ。** POST は body の欄、GET は query の `agent`。
-- 本体は `main`。サブエージェントは、親が付ける名前。最初の版は `main` だけである。
+- 本体は `main`。サブエージェントは、本体が `subagent_start` で付けた名前である。
+- サブエージェントの名前は、英小文字・数字・`-` からなり、英小文字か数字で始まる 63 文字までのもので、`main` ではない。`/sources/self/<名前>/` と、作業の場所の既定 `~/agents/<名前>/` にそのまま使うためである。runner は、形の違う名前と、閉じたサブエージェントも含めて前のサブエージェントと重なる名前を断る。
 - 同じ UID で動くエージェントを、backend と UI が見分けるための欄である。確かめはしない（sandbox の中の名乗り）。
 
-- サブエージェントが出来事を取るか（`agent` ごとに列を分けるか）は、サブエージェントを作るときの ADR で決める。それまで、`agent` が `main` でない `GET /v1/events` は `400` で断る。
+- サブエージェントは出来事を取らない。本体からサブエージェントへの頼みは runner の中で直接渡り、backend はサブエージェントの列を持たない（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)）。`agent` が `main` でない `GET /v1/events` は `400` で断る。
+- サブエージェントには返事・A2A の返事・予約の道具が無い。`agent` が `main` でない `POST /v1/replies`・`POST /v1/a2a/replies`・予約の口は `400` で断る。取り違えを防ぐためで、守りではない。
 
 ## 口の一覧
 
@@ -31,6 +33,7 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 | `POST /v1/a2a/replies` | A2A の Task に返す |
 | `POST /v1/activity` | 途中経過 |
 | `POST /v1/turns/end` | ターンの終わり |
+| `POST /v1/agents` | サブエージェントの状態（起こした・閉じた） |
 | `GET /v1/schedules?agent=`・`POST /v1/schedules`・`DELETE /v1/schedules/<id>` | 予約 |
 | `POST /v1/sessions/rotated` | セッションの切り替えの知らせ |
 
@@ -59,7 +62,26 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 - body は `{agent, id, summary, payload}`。backend は `source` が `self` の出来事として列に入れる（取り込み口と同じ処理）。`delivery` は backend の設定（既定 `now`）。
 - サブエージェントが終わったことの知らせや、自分の作業の区切りに使う。取り込み口は Unix socket で sandbox から見えないため、この口を置く。
 - `id` は呼び手が付ける。同じ `id` は重複として落ちる。
+- `agent` が `main` でなければ、backend はその名前を出来事の `stream` にする。中身は `/sources/self/<名前>/<日付>.jsonl` に入る。`main` なら `stream` は無い。
 - 応答は `202` で、body は無い（取り込み口と同じ）。
+
+### サブエージェントの知らせ
+
+サブエージェントが止まるたびに、runner が `agent` をサブエージェントの名前にして送る（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md) の「サブエージェントから本体へは、自分宛ての出来事」）。
+
+- `id` は `<サブエージェントの名前>/<番号>`。番号は、そのサブエージェントが止まった回を 1 から数えたもので、runner がサブエージェントの記録に残す。送り直すときは同じ `id` を使う。
+- `payload` は `{reason, purpose, text}`。
+  - `reason`: `stopped`（最後の地の文を返して止まった。結果か問いかは `text` が言う）、`failed`（実行が失敗した。`text` は失敗の中身）、`interrupted`（runner が止まって、走っていた実行が切れた。`text` は空）。
+  - `purpose`: 起こしたときの目的。
+  - `text`: 最後の地の文の全文。地の文が無ければ空。
+- `summary` は `text` の 1 行目（200 文字まで）。`text` が空なら `reason`。
+- どの理由でも、知らせの後のサブエージェントは止まって待っている状態で、`subagent_send` で続きを送れる。
+
+## サブエージェントの状態
+
+- body は `{agent, purpose, closed}`。runner が、サブエージェントを起こしたとき（`closed: false`）、閉じたとき（`closed: true`）、runner が立ち上がったときに閉じていないサブエージェントのすべてについて送る。
+- backend は、サブエージェントごとに最後に受けたものを残す（永続）。UI に閉じていないサブエージェントを出すためである（[ui-api.md](ui-api.md) の「サブエージェント」）。走っているか待っているかは、サブエージェントの途中経過とターンの終わりから決める。
+- `agent` が `main` なら `400`。応答は `204`。
 
 ## 返事
 
@@ -96,6 +118,7 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 | `turn_end` | なし |
 
 - backend は 1 件ずつ記録に残し、UI の流れへ送る。`turn_start` でエージェントを `thinking`、`turn_end` で `waiting` にする。
+- サブエージェントの途中経過は、`agent` をサブエージェントの名前にして同じ形で送る。サブエージェントのターンは、サブエージェントの 1 回の実行（頼みか続きを受けてから止まるまで）である。runner が立ち上がり直して中断したサブエージェントを戻すときは、切れたターンの `turn_end` を送る。
 - 1 件でも形が違えば、要求の全体を `400` で断り、何も残さない。
 
 ## ターンの終わり
@@ -103,6 +126,7 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 - body は `{agent, turn_id}`。backend が `/memory` の作業ツリーの変わったものをコミットする合図である（[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)）。コミットの形は [backend.md](backend.md) の「`/memory` のコミット」にある。
 - backend はコミットを終えてから `204` で答える。コミットに失敗したら `500` で答える。
 - UI の流れでは、エージェントを `waiting` にする。
+- サブエージェントのターンの終わりにも、runner は `agent` をサブエージェントの名前にして送り、backend は同じくコミットする。サブエージェントが `/memory` に書いたものを、本体の次のターンを待たずに残すためである。本体のターンの途中の変更も一緒にコミットされる（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md) の「サブエージェントの途中経過とターンの終わり」）。
 - 途中経過の `turn_end` は UI と記録のため、この口はコミットのために、別に置く。
 
 ## 予約
@@ -126,4 +150,4 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 
 ## 状態コード
 
-成功で body の無いもの（ack・途中経過・ターンの終わり・切り替えの知らせ）は `204`、形が違えば `400`、認証が通らなければ `401`、口の無い道は `404`、道はあるが method が違えば `405`、body が上限（16 MiB）より大きければ `413`。backend が本物の token を設定されていなければ、すべての要求を `401` で断る。
+成功で body の無いもの（ack・途中経過・ターンの終わり・サブエージェントの状態・切り替えの知らせ）は `204`、形が違えば `400`、認証が通らなければ `401`、口の無い道は `404`、道はあるが method が違えば `405`、body が上限（16 MiB）より大きければ `413`。backend が本物の token を設定されていなければ、すべての要求を `401` で断る。

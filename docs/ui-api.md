@@ -34,6 +34,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 | `GET /api/history?before=` | 会話の履歴 |
 | `GET /api/stream` | 返事・途中経過・状態の流れ（SSE） |
 | `GET /api/agent`・`GET /api/agent/icons/<表情>` | エージェントの名前と表情のアイコン（認証なし） |
+| `GET /api/agents` | 閉じていないサブエージェントの一覧 |
 | `GET /api/approvals`・`POST /api/approvals/<id>` | 承認（後の波） |
 
 ## メッセージを送る
@@ -63,6 +64,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 | `reply` | 返事（履歴の `agent` の 1 件と同じ形） |
 | `activity` | `{agent, activity}`。`activity` は sandbox 向けの口の途中経過の 1 件の写し（[sandbox-api.md](sandbox-api.md) の「途中経過」） |
 | `state` | `{agent, state}`。`state` は `thinking`（ターンの最中）か `waiting`（出来事を待っている） |
+| `agent` | `{agent, purpose, closed}`。サブエージェントを起こした・閉じた（「サブエージェント」） |
 
 - 細かさは、sandbox 向けの口と同じくブロックが閉じるごと。トークンごとの流れが UI に要るなら、後で足す。
 
@@ -73,6 +75,16 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 未決:
 
 - オーナー自身のメッセージを流れにも送るか（複数のタブで見ているとき）。今は送らない（`StreamEvent` にオーナーのメッセージの形が無い）。
+
+## サブエージェント
+
+サブエージェントは、本体が起こし、runner が回す別のセッションである（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)）。Web UI は見るだけで、サブエージェントを操作する口は無い。サブエージェントのための形の型は、サブエージェントを実装する作業単位で `src/ui.ts` に入る。
+
+- 流れの `activity` と `state` は、`agent` で本体（`main`）とサブエージェント（サブエージェントの名前）を見分ける。サブエージェントのものは右のパネルのそのサブエージェントの欄に出し、会話の時系列には出さない。
+- 返事は本体だけが送るので、履歴と流れの `reply` の `agent` はいつも `main` である。
+- `GET /api/agents` は `{agents: [...]}`。1 件は `agent`（サブエージェントの名前）・`purpose`（起こしたときの目的）・`state`（`thinking` か `waiting`）を持つ。閉じたサブエージェントは載せない。サブエージェントは夜をまたいで残り、流れの覚えている 1000 件からは今のサブエージェントを組み立てられないため、この口を置く。
+- 流れの `agent` は、サブエージェントを起こしたとき（`closed: false`）と閉じたとき（`closed: true`）に送る。UI は、閉じたサブエージェントの欄を消す。閉じたサブエージェントの途中経過は backend の記録に残るが、UI には出さない。
+- UI は、最初につなぐときとつなぎ直すときに `GET /api/agents` を読み、その後は流れで直す。
 
 ## エージェント
 
