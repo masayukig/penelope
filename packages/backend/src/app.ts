@@ -10,6 +10,7 @@ import { GatedAssertion } from "./a2a/gated.ts";
 import { Inbox } from "./a2a/inbox.ts";
 import { type SenderCheck, Senders } from "./a2a/senders.ts";
 import { TokenReview } from "./a2a/tokenreview.ts";
+import { SubAgents } from "./agents.ts";
 import type { Config } from "./config.ts";
 import { Conversation } from "./conversation.ts";
 import { openDatabase } from "./db.ts";
@@ -47,6 +48,7 @@ export async function startBackend(
   });
   const feed = new Feed();
   const conversation = new Conversation(db, feed, { now });
+  const agents = new SubAgents(db, feed, conversation, { now });
   const schedules = new Schedules(db, { now, timeZone: config.timeZone });
   const scheduler = new Scheduler(schedules, queue, { now, timeZone: config.timeZone, nightly: config.nightly, log });
   const memory = new Memory(config.memoryDir, config.gitAuthor);
@@ -56,7 +58,7 @@ export async function startBackend(
 
   const intake = await listenUnix(intakeHandler(queue, { log }), config.intakeSocket, log);
   const sandbox = await listenUnix(
-    sandboxHandler({ token: config.sandboxToken, queue, conversation, schedules, memory, inbox, now, log }),
+    sandboxHandler({ token: config.sandboxToken, queue, conversation, agents, schedules, memory, inbox, now, log }),
     config.sandboxSocket,
     log,
   );
@@ -64,6 +66,7 @@ export async function startBackend(
     uiHandler({
       queue,
       conversation,
+      agents,
       feed,
       login,
       sessions,

@@ -108,6 +108,20 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX a2a_messages_task ON a2a_messages (task_id, row);
   `,
+  `
+  -- The sub-agents (ADR-0022): the last of POST /v1/agents for each name.
+  CREATE TABLE sub_agents (
+    agent      TEXT PRIMARY KEY,
+    purpose    TEXT NOT NULL,
+    closed     INTEGER NOT NULL CHECK (closed IN (0, 1)),
+    -- When the runner first said it was started (closed false).
+    started_at TEXT,
+    updated_at TEXT NOT NULL
+  );
+
+  -- An agent's state is its last turn_start or turn_end: found by this.
+  CREATE INDEX activities_turns ON activities (agent, row) WHERE kind IN ('turn_start', 'turn_end');
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

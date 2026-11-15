@@ -64,7 +64,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 | `reply` | 返事（履歴の `agent` の 1 件と同じ形） |
 | `activity` | `{agent, activity}`。`activity` は sandbox 向けの口の途中経過の 1 件の写し（[sandbox-api.md](sandbox-api.md) の「途中経過」） |
 | `state` | `{agent, state}`。`state` は `thinking`（ターンの最中）か `waiting`（出来事を待っている） |
-| `agent` | `{agent, purpose, closed}`。サブエージェントを起こした・閉じた（「サブエージェント」） |
+| `agent` | `{agent, purpose, closed}`（型は `SubAgentStatus`）。サブエージェントを起こした・閉じた（「サブエージェント」） |
 
 - 細かさは、sandbox 向けの口と同じくブロックが閉じるごと。トークンごとの流れが UI に要るなら、後で足す。
 
@@ -78,11 +78,14 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 
 ## サブエージェント
 
-サブエージェントは、本体が起こし、runner が回す別のセッションである（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)）。Web UI は見るだけで、サブエージェントを操作する口は無い。サブエージェントのための形の型は、サブエージェントを実装する作業単位で `src/ui.ts` に入る。
+サブエージェントは、本体が起こし、runner が回す別のセッションである（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)）。Web UI は見るだけで、サブエージェントを操作する口は無い。
 
 - 流れの `activity` と `state` は、`agent` で本体（`main`）とサブエージェント（サブエージェントの名前）を見分ける。サブエージェントのものは右のパネルのそのサブエージェントの欄に出し、会話の時系列には出さない。
 - 返事は本体だけが送るので、履歴と流れの `reply` の `agent` はいつも `main` である。
-- `GET /api/agents` は `{agents: [...]}`。1 件は `agent`（サブエージェントの名前）・`purpose`（起こしたときの目的）・`state`（`thinking` か `waiting`）を持つ。閉じたサブエージェントは載せない。サブエージェントは夜をまたいで残り、流れの覚えている 1000 件からは今のサブエージェントを組み立てられないため、この口を置く。
+- `GET /api/agents` は `{agents: [...]}`（型は `SubAgentsResponse`、1 件は `SubAgent`）。1 件は `agent`（サブエージェントの名前）・`purpose`（起こしたときの目的）・`state`（`thinking` か `waiting`）・`started_at`（起こした時刻。backend が最初に `closed: false` を受けた時刻）・`state_since`（今の `state` になった時刻。まだターンの無いサブエージェントは `started_at` と同じ）を持つ。時刻は RFC 3339。並びは、backend がその名前を初めて受けた順。閉じたサブエージェントは載せない。サブエージェントは夜をまたいで残り、流れの覚えている 1000 件からは今のサブエージェントを組み立てられないため、この口を置く。
+- 載るのは、runner がサブエージェントを起こしたと知らせた（sandbox 向けの口の `POST /v1/agents`）名前だけである。まだ知らせの無い名前の途中経過は流れには出るが、一覧には載らない。
+- `state` と `state_since` は、そのサブエージェントの途中経過の記録の最後の `turn_start` か `turn_end` から引く。時刻はその途中経過の `at` で、backend が立ち上がり直しても変わらない（[sandbox-api.md](sandbox-api.md) の「途中経過」）。
+- 流れの `state` は時刻を持たない。UI は受けた時刻を、その `state` になった時刻とする。
 - 流れの `agent` は、サブエージェントを起こしたとき（`closed: false`）と閉じたとき（`closed: true`）に送る。UI は、閉じたサブエージェントの欄を消す。閉じたサブエージェントの途中経過は backend の記録に残るが、UI には出さない。
 - UI は、最初につなぐときとつなぎ直すときに `GET /api/agents` を読み、その後は流れで直す。
 

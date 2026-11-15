@@ -6,6 +6,7 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 
+import { SubAgents } from "../src/agents.ts";
 import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
 import { Feed } from "../src/feed.ts";
@@ -83,6 +84,7 @@ async function setup(
   });
   const feed = new Feed();
   const conversation = new Conversation(db, feed, { now });
+  const agents = new SubAgents(db, feed, conversation, { now });
   const github = await fakeGitHub(t);
   const sessions = new LoginSessions(db, { now });
   const settings: GitHubSettings | undefined = configured
@@ -90,7 +92,7 @@ async function setup(
     : undefined;
   const login = new GitHubLogin({ settings, endpoints: github.endpoints, sessions, now, log: () => {} });
   const server = await listenTcp(
-    uiHandler({ queue, conversation, feed, login, sessions, ownerId: settings?.ownerId, publicUrl, agent, now, ...(a2a ? { a2a } : {}), ...(web ? { web } : {}) }),
+    uiHandler({ queue, conversation, agents, feed, login, sessions, ownerId: settings?.ownerId, publicUrl, agent, now, ...(a2a ? { a2a } : {}), ...(web ? { web } : {}) }),
     "127.0.0.1",
     0,
   );
@@ -104,7 +106,7 @@ async function setup(
   const signIn = () => cookieOf(sessions.create(OWNER).token);
   const call = (pathname: string, cookie: string | undefined, options: Ask = {}) =>
     ask(target, pathname, { ...options, headers: { ...(cookie ? { cookie } : {}), ...options.headers } });
-  return { queue, conversation, feed, sessions, github, target, signIn, call, sourcesDir, clock };
+  return { queue, conversation, agents, feed, sessions, github, target, signIn, call, sourcesDir, clock };
 }
 
 /** A Set-Cookie line as its value and its attributes, in whatever order they came. */
@@ -283,6 +285,7 @@ describe("the UI's API", () => {
       ["/api/history", {}],
       ["/api/stream", {}],
       ["/api/messages", { json: { text: "hi" } }],
+      ["/api/agents", {}],
     ] as const) {
       const answer = await env.call(pathname, undefined, options);
       assert.equal(answer.status, 401, pathname);
@@ -423,6 +426,42 @@ describe("the UI's API", () => {
       const env = await setup(t);
       assert.equal((await env.call("/api/agent/other", undefined)).status, 401);
       assert.equal((await env.call("/api/agent/icons/../../history", undefined)).status, 401);
+    });
+  });
+
+  describe("the sub-agents", () => {
+    it("are listed while they are not closed, with their purpose and state", async (t) => {
+      const env = await setup(t);
+      const at = "2026-11-14T09:00:00Z";
+      assert.deepEqual((await env.call("/api/agents", env.signIn())).json(), { agents: [] });
+      env.agents.record({ agent: "review-pr-22", purpose: "review PR 22", closed: false });
+      env.clock.advance(1);
+      env.agents.record({ agent: "dig-logs", purpose: "dig the logs", closed: false });
+      env.agents.record({ agent: "old-one", purpose: "done long ago", closed: false });
+      env.agents.record({ agent: "old-one", purpose: "done long ago", closed: true });
+      env.clock.advance(1);
+      env.conversation.activities("dig-logs", [{ kind: "turn_start", at, turn_id: "t-1" }]);
+      env.conversation.activities("main", [{ kind: "turn_start", at, turn_id: "t-2" }]);
+      const answer = await env.call("/api/agents", env.signIn());
+      assert.equal(answer.status, 200);
+      assert.deepEqual(answer.json(), {
+        agents: [
+          {
+            agent: "review-pr-22",
+            purpose: "review PR 22",
+            state: "waiting",
+            started_at: "2026-11-14T09:00:00.000Z",
+            state_since: "2026-11-14T09:00:00.000Z",
+          },
+          {
+            agent: "dig-logs",
+            purpose: "dig the logs",
+            state: "thinking",
+            started_at: "2026-11-14T09:01:00.000Z",
+            state_since: at,
+          },
+        ],
+      });
     });
   });
 

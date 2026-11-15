@@ -15,6 +15,20 @@ describe("the database", () => {
     db.close();
   });
 
+  it("is brought up from the version before the sub-agents, keeping what it had", (t) => {
+    const file = path.join(tempDir(t), "a.sqlite");
+    const raw = new DatabaseSync(file);
+    for (const migration of MIGRATIONS.slice(0, 2)) raw.exec(migration);
+    raw.exec("PRAGMA user_version = 2");
+    raw.prepare("INSERT INTO session_rotations (agent, at) VALUES ('main', 't')").run();
+    raw.close();
+    const db = openDatabase(file);
+    assert.equal(version(db), 3);
+    assert.deepEqual(db.prepare("SELECT agent FROM session_rotations").all().map((row) => ({ ...row })), [{ agent: "main" }]);
+    assert.deepEqual(db.prepare("SELECT * FROM sub_agents").all(), []);
+    db.close();
+  });
+
   it("is opened again without migrating twice", (t) => {
     const file = path.join(tempDir(t), "a.sqlite");
     openDatabase(file).close();
