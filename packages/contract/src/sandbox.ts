@@ -6,6 +6,31 @@ import type { Delivery, Source } from "./events.ts";
 /** Which agent is calling. The main agent is `main`; a sub-agent's is the name its parent gives it. */
 export type AgentId = "main" | (string & {});
 
+/**
+ * `POST /v1/agents`: a sub-agent was started (`closed: false`) or closed
+ * (`closed: true`); the runner sends it again for each open one when it
+ * starts. `agent` is the sub-agent's name, never `main`.
+ */
+export type SubAgentStatus = FromAgent & {
+  /** The one line the main agent gave when it started the sub-agent. */
+  purpose: string;
+  closed: boolean;
+};
+
+/** Why a sub-agent stopped: its last words, a failed run, or a run cut by the runner stopping. */
+export type SubAgentStopReason = "stopped" | "failed" | "interrupted";
+
+/**
+ * The `payload` of the event to the main agent each time a sub-agent stops
+ * (`POST /v1/self-events` with the sub-agent as `agent`, `id` `<name>/<n>`).
+ */
+export type SubAgentNotice = {
+  reason: SubAgentStopReason;
+  purpose: string;
+  /** The whole of its last words; the failure for `failed`; empty when there are none. */
+  text: string;
+};
+
 /** Every request carries the agent: in the body, or as the `agent` query parameter of a GET. */
 export type FromAgent = { agent: AgentId };
 
@@ -59,7 +84,7 @@ export type SelfEventRequest = FromAgent & { id: string; summary: string; payloa
 /** `POST /v1/replies`: a reply to the owner. */
 export type ReplyRequest = FromAgent & {
   text: string;
-  /** The face to show. Only the field for now; the avatar comes later. */
+  /** The face to show: the Web UI puts the latest one beside the avatar (ADR-0016). */
   expression?: string;
   /** The `seq` of the event it answers. */
   in_reply_to?: number;
@@ -95,3 +120,18 @@ export type ScheduleListResponse = { schedules: Schedule[] };
 
 /** `POST /v1/sessions/rotated`: the nightly switch is done and a new session runs. */
 export type SessionRotatedRequest = FromAgent;
+
+/** Where a task an agent sent over A2A is (docs/a2a.md). `working` and `input-required` are open. */
+export type A2ATaskState = "working" | "input-required" | "completed" | "failed" | "rejected";
+
+/**
+ * `POST /v1/a2a/replies`: her answer in the task of the `a2a` event `in_reply_to`.
+ * `completed` closes the task, `text` optional; `input-required` asks the sender
+ * `text` and keeps the task open for its answer.
+ */
+export type A2AReplyRequest = FromAgent & {
+  in_reply_to: number;
+  state: "completed" | "input-required";
+  text?: string;
+};
+export type A2AReplyResponse = { task_id: string; state: A2ATaskState };

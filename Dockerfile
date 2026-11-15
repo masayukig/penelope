@@ -11,7 +11,8 @@
 # copied into the image of the target platform: Go cross-compiles, and what tsc
 # writes is the same on every platform. The exceptions are the final stages
 # of the backend, which installs git, and of the sandbox, which installs
-# Debian's packages; building those for another platform needs QEMU.
+# Debian's packages, and the stage that builds porkadot's gem with its native
+# extensions; building those for another platform needs QEMU.
 # VERSION is the release's tag.
 #
 # The Node here and the Node of setup-node in the workflows are the same
@@ -40,7 +41,8 @@ RUN npm ci
 RUN npm run build
 
 # The backend's runtime dependencies, without the dev tools. The links npm
-# makes to the workspaces are dropped: only the backend's dist is copied.
+# makes to the workspaces are dropped: the final stage copies the backend's
+# dist, and the contract's package.json and dist in place of its link.
 FROM --platform=$BUILDPLATFORM node:24.22.3-trixie-slim AS backend-deps
 WORKDIR /src
 COPY package.json package-lock.json ./
@@ -65,7 +67,9 @@ ENTRYPOINT ["/sentinel"]
 # The backend runs git to commit /memory (ADR-0006). This RUN is the only one
 # in a final stage, so the release builds it for arm64 under QEMU. The
 # warning that node:sqlite is experimental is turned off: there is nothing to
-# act on in it.
+# act on in it. The built Web UI is served from /app/web and the avatars
+# from /app/avatars, the defaults of PENELOPE_WEB_DIR and
+# PENELOPE_AVATARS_DIR (docs/backend.md).
 FROM node:24.22.3-trixie-slim AS backend
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends git \
@@ -75,7 +79,11 @@ ENV NODE_ENV=production PENELOPE_VERSION=${VERSION}
 WORKDIR /app
 COPY --from=ts-build /src/packages/backend/package.json ./
 COPY --from=backend-deps /src/node_modules ./node_modules
+COPY --from=ts-build /src/packages/contract/package.json ./node_modules/@penelope/contract/
+COPY --from=ts-build /src/packages/contract/dist ./node_modules/@penelope/contract/dist
 COPY --from=ts-build /src/packages/backend/dist ./dist
+COPY --from=ts-build /src/packages/web/dist ./web
+COPY assets/avatars ./avatars
 USER 1001:1001
 ENTRYPOINT ["node", "--disable-warning=ExperimentalWarning", "/app/dist/main.js"]
 CMD ["serve"]
@@ -88,9 +96,11 @@ COPY --from=ts-build /src/packages/receivers/package.json ./
 COPY --from=ts-build /src/packages/receivers/dist ./dist
 USER 1002:1002
 ENTRYPOINT ["node", "/app/dist/main.js"]
+CMD ["serve"]
 
 # The runner's runtime dependencies. None of them is built for a platform, so
-# they are installed here on the builder's own and copied as they are.
+# they are installed here on the builder's own and copied as they are. The
+# link to the contract is dropped, as for the backend.
 FROM --platform=$BUILDPLATFORM node:24.22.3-trixie-slim AS runner-deps
 WORKDIR /src
 COPY package.json package-lock.json ./
@@ -99,17 +109,17 @@ RUN npm ci --omit=dev --ignore-scripts --workspace=@penelope/runner \
     && rm -rf node_modules/@penelope
 
 # The single-binary tools of the sandbox, fetched for the target's
-# architecture and checked against their releases' checksums. Renovate does
-# not read these versions yet; they are raised by hand.
+# architecture and checked against their releases' checksums. Renovate reads
+# these ARGs from GitHub releases, preserving the fetch script's tag/asset format.
 FROM --platform=$BUILDPLATFORM golang:1.27.4-trixie AS sandbox-tools
 ARG TARGETARCH
 ARG KUBECTL_VERSION=v1.36.6
-ARG HELM_VERSION=v4.3.1
+ARG HELM_VERSION=v4.3.2
 ARG KUSTOMIZE_VERSION=v5.8.3
 ARG SOPS_VERSION=v3.13.3
 ARG GH_VERSION=2.103.3
 ARG VMCTL_VERSION=v0.2.0
-ARG A2A_VERSION=0.2.0
+ARG A2A_VERSION=0.4.0
 COPY packages/runner/image/fetch-tools.sh /fetch-tools.sh
 RUN KUBECTL_VERSION=$KUBECTL_VERSION HELM_VERSION=$HELM_VERSION KUSTOMIZE_VERSION=$KUSTOMIZE_VERSION \
     SOPS_VERSION=$SOPS_VERSION GH_VERSION=$GH_VERSION VMCTL_VERSION=$VMCTL_VERSION A2A_VERSION=$A2A_VERSION \
@@ -118,10 +128,32 @@ RUN KUBECTL_VERSION=$KUBECTL_VERSION HELM_VERSION=$HELM_VERSION KUSTOMIZE_VERSIO
 # The Go toolchain of the target platform, copied whole.
 FROM golang:1.27.4-trixie AS sandbox-go
 
+# porkadot, the CLI that builds and runs the cluster, is not on RubyGems: its
+# gem is built from the tag of its repository, whose gemspec lists the files
+# with git. Two of its dependencies have native extensions, so this stage
+# runs on the target platform, from the same Debian and Ruby as the sandbox,
+# and the release builds it for arm64 under QEMU. What `gem install` writes,
+# the gems under /var/lib/gems and the command in /usr/local/bin, is copied
+# into the sandbox at the same paths. Renovate raises PORKADOT_VERSION from
+# the repository's tags.
+FROM node:24.22.3-trixie-slim AS sandbox-porkadot
+ARG PORKADOT_VERSION=v0.37.7
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates git ruby ruby-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --quiet --depth 1 --branch "$PORKADOT_VERSION" https://github.com/yuanying/porkadot /src/porkadot \
+    && cd /src/porkadot \
+    && gem build porkadot.gemspec \
+    && gem install --no-document --bindir /usr/local/bin ./porkadot-*.gem \
+    && porkadot help >/dev/null
+
 # The sandbox (ADR-0011): Debian, Node, the development tools and the runner.
 # The user is `agent`, UID 1000, with HOME /home/agent; it takes the place of
 # the node image's user of the same UID. /home/agent, /memory and Pi's
 # directory under HOME are mounted from the Pod's persistent volumes.
+#
+# /memory/.git belongs to the backend, which commits it (ADR-0006); git is
+# told the directory is safe, so that `agent` can read the history.
 #
 # The Sentinel's CA is added at start by the entrypoint, from a volume, to the
 # system bundle (docs/pod.md, "CA"). The bundle is kept writable by `agent`
@@ -138,15 +170,20 @@ RUN apt-get update \
     && useradd --uid 1000 --user-group --create-home --home-dir /home/agent --shell /bin/bash agent \
     && mkdir -p /usr/share/penelope /etc/penelope/ca \
     && cp /etc/ssl/certs/ca-certificates.crt /usr/share/penelope/ca-certificates.crt \
-    && chown agent:agent /etc/ssl/certs/ca-certificates.crt
+    && chown agent:agent /etc/ssl/certs/ca-certificates.crt \
+    && git config --system --add safe.directory /memory
 COPY --from=sandbox-go /usr/local/go /usr/local/go
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /usr/local/bin/
 COPY --from=sandbox-tools /out/ /usr/local/bin/
+COPY --from=sandbox-porkadot /var/lib/gems/ /var/lib/gems/
+COPY --from=sandbox-porkadot /usr/local/bin/porkadot /usr/local/bin/porkadot
 COPY packages/runner/image/entrypoint.sh /usr/local/bin/penelope-sandbox
 WORKDIR /opt/penelope/runner
 COPY --from=ts-build /src/packages/runner/package.json ./
 COPY --from=ts-build /src/packages/runner/dist ./dist
 COPY --from=runner-deps /src/node_modules ./node_modules
+COPY --from=ts-build /src/packages/contract/package.json ./node_modules/@penelope/contract/
+COPY --from=ts-build /src/packages/contract/dist ./node_modules/@penelope/contract/dist
 ENV NODE_ENV=production PENELOPE_VERSION=${VERSION} \
     HOME=/home/agent USER=agent \
     PATH=/home/agent/.local/bin:/home/agent/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \

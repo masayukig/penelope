@@ -1,7 +1,11 @@
-// The receivers take events from outside (Slack, webhooks, schedules, A2A)
-// through plugins and post them to the backend's intake (ADR-0002).
-// For now it only reports its version.
+// The receivers take events from outside the Pod through plugins and post
+// them to the backend's intake (ADR-0002, ADR-0023). `receivers serve` runs
+// them with the settings of docs/receivers.md.
+import { readFileSync } from "node:fs";
 import process from "node:process";
+
+import { ConfigError, loadConfig } from "./config.ts";
+import { startReceivers } from "./server.ts";
 
 export interface Result {
   code: number;
@@ -9,17 +13,49 @@ export interface Result {
   stderr: string;
 }
 
+const USAGE = "usage: receivers serve|version\n";
+
 // The version is given by the image (the Dockerfile's VERSION build argument).
 export function run(args: readonly string[], env: Readonly<Record<string, string | undefined>>): Result {
   if (args.length === 1 && args[0] === "version") {
     return { code: 0, stdout: `${env.PENELOPE_VERSION ?? "dev"}\n`, stderr: "" };
   }
-  return { code: 2, stdout: "", stderr: "usage: receivers version\n" };
+  return { code: 2, stdout: "", stderr: USAGE };
+}
+
+/** Runs until SIGTERM or SIGINT, then finishes the requests in hand and exits. */
+async function serve(): Promise<void> {
+  let config;
+  try {
+    config = loadConfig(process.env, (file) => readFileSync(file, "utf8"));
+  } catch (error) {
+    if (!(error instanceof ConfigError)) throw error;
+    process.stderr.write(`receivers: ${error.message}\n`);
+    process.exitCode = 2;
+    return;
+  }
+  const receivers = await startReceivers(config);
+  const host = config.listen.host.includes(":") ? `[${config.listen.host}]` : config.listen.host;
+  const names = config.activations.map((activation) => `${activation.name} (${activation.plugin}, source ${activation.source})`);
+  process.stderr.write(`receivers: listening on ${host}:${receivers.port}; webhooks: ${names.join(", ") || "none"}\n`);
+  const stop = () => {
+    receivers.close().then(
+      () => process.exit(0),
+      () => process.exit(1),
+    );
+  };
+  process.once("SIGTERM", stop);
+  process.once("SIGINT", stop);
 }
 
 if (import.meta.main) {
-  const result = run(process.argv.slice(2), process.env);
-  process.stdout.write(result.stdout);
-  process.stderr.write(result.stderr);
-  process.exitCode = result.code;
+  const args = process.argv.slice(2);
+  if (args.length === 1 && args[0] === "serve") {
+    await serve();
+  } else {
+    const result = run(args, process.env);
+    process.stdout.write(result.stdout);
+    process.stderr.write(result.stderr);
+    process.exitCode = result.code;
+  }
 }

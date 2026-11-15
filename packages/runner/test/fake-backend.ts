@@ -7,7 +7,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import type { DeliveredEvent, Schedule } from "@penelope/contract";
+import type { DeliveredEvent, Schedule, SelfEventRequest } from "@penelope/contract";
 
 export const TOKEN = "real-token-example";
 
@@ -17,6 +17,8 @@ export interface Received {
   query: Record<string, string>;
   body: unknown;
   authorization: string | undefined;
+  /** For a poll, the seqs it answered with, once it has answered. */
+  answered?: number[];
 }
 
 export class FakeBackend {
@@ -29,6 +31,10 @@ export class FakeBackend {
   /** When each event was last handed over. */
   private readonly handed = new Map<number, number>();
   redeliverMs = 300;
+  /** How many of the next self-events are refused with a 503, as if the backend were away. */
+  failSelfEvents = 0;
+  /** The self-events the backend took, in order. */
+  readonly selfEvents: SelfEventRequest[] = [];
   private readonly schedules: Schedule[] = [];
   private waiters: (() => void)[] = [];
   private replies = 0;
@@ -53,6 +59,18 @@ export class FakeBackend {
   /** What was sent to one path, in order. */
   sent(method: string, path: string): unknown[] {
     return this.received.filter((r) => r.method === method && r.path === path).map((r) => r.body);
+  }
+
+  /**
+   * Whether the runner has polled again since `seq` was handed over for the
+   * `times`th time. The runner takes a poll's events in before it polls
+   * again, so this is the moment it has them, with no waiting on the clock.
+   */
+  polledAfter(seq: number, times = 1): boolean {
+    const polls = this.received.filter((r) => r.method === "GET" && r.path === "/v1/events");
+    const handed = polls.filter((r) => r.answered?.includes(seq));
+    if (handed.length < times) return false;
+    return polls.indexOf(handed[times - 1]!) < polls.length - 1;
   }
 
   /** The order of the requests that change something, as `METHOD path`. */
@@ -117,13 +135,18 @@ export class FakeBackend {
       }
       const events = this.available(after);
       for (const event of events) this.handed.set(event.seq, Date.now());
+      received.answered = events.map((event) => event.seq);
       return answer(200, { events });
     }
     if (key === "POST /v1/events/ack") {
       for (const seq of (body as { seqs: number[] }).seqs) if (!this.dropAcks.has(seq)) this.acked.add(seq);
       return answer(204);
     }
-    if (key === "POST /v1/replies") return answer(200, { id: `r-${++this.replies}` });
+    if (key === "POST /v1/replies") return answer(201, { id: `r-${++this.replies}` });
+    if (key === "POST /v1/a2a/replies") {
+      const { in_reply_to, state } = body as { in_reply_to: number; state: string };
+      return in_reply_to === 404 ? answer(404, { error: "the event 404 is not a message of an A2A task" }) : answer(200, { task_id: "t-1", state });
+    }
     if (key === "POST /v1/schedules") {
       const { agent, reason, cron, at } = body as Schedule;
       const schedule = { id: `s-${this.schedules.length + 1}`, agent, reason, ...(cron ? { cron } : { at }) } as Schedule;
@@ -138,7 +161,13 @@ export class FakeBackend {
       this.schedules.splice(index, 1);
       return answer(204);
     }
+    if (key === "POST /v1/self-events" && this.failSelfEvents > 0) {
+      this.failSelfEvents--;
+      return answer(503, { error: "unavailable" });
+    }
+    if (key === "POST /v1/self-events") this.selfEvents.push(body as SelfEventRequest);
     if (
+      key === "POST /v1/agents" ||
       key === "POST /v1/activity" ||
       key === "POST /v1/turns/end" ||
       key === "POST /v1/self-events" ||

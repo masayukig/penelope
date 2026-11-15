@@ -2,7 +2,7 @@
 
 backend の設定、オーナーのログインのセッション、`/memory` のコミット、夜の切り替えでの backend の役目を決める。
 ADR が「backend の仕様書」「backend の設定」に委ねた点はここに書く。
-口の形は [events.md](events.md)（取り込み口）・[sandbox-api.md](sandbox-api.md)（sandbox 向けの口）・[ui-api.md](ui-api.md)（UI 向けの API）にある。
+口の形は [events.md](events.md)（取り込み口）・[sandbox-api.md](sandbox-api.md)（sandbox 向けの口）・[ui-api.md](ui-api.md)（UI 向けの API）・[a2a.md](a2a.md)（A2A の受け口）にある。
 
 ## 動かし方
 
@@ -36,16 +36,36 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_INLINE_SOURCES` | `ui` | inline の受信元（`,` で区切る）。`control` は書かなくても常に inline |
 | `PENELOPE_GIT_AUTHOR_NAME` | `penelope-backend` | `/memory` のコミットの作者の名前 |
 | `PENELOPE_GIT_AUTHOR_EMAIL` | `backend@penelope.invalid` | 同じくメールアドレス |
+| `PENELOPE_AVATAR` | なし | UI に出すアバターの名前。`PENELOPE_AVATARS_DIR` の下の、この名前のディレクトリを読む（[ui-api.md](ui-api.md) の「エージェント」） |
+| `PENELOPE_AVATARS_DIR` | `/app/avatars` | アバターの置き場所。image にはリポジトリの `assets/avatars/` が入っている |
+| `PENELOPE_AGENT_NAME` | アバターの名前、それも無ければ `Agent` | UI に出すエージェントの名前。アバターの `avatar.json` の名前より優先する |
+| `PENELOPE_WEB_DIR` | `/app/web` | Web UI の build の場所。image ではここに入っている |
+| `PENELOPE_A2A_SENDERS` | なし | A2A の送り手の allow-list。ServiceAccount を `<名前空間>/<名前>` で `,` で区切る。無ければ A2A の受け口は閉じる |
+| `PENELOPE_A2A_AUTH` | なし | 送り手の確かめ方。`gated-assertion`・`tokenreview` のどちらか、または両方を `,` で区切る |
+| `PENELOPE_A2A_DESCRIPTION` | 空 | Agent Card の説明 |
+| `PENELOPE_A2A_DEADLINE_HOURS` | `24` | 開いている Task が、送り手の最後のメッセージから `failed` になるまでの時間 |
+| `PENELOPE_A2A_MAX_OPEN_TASKS` | `3` | 送り手ごとの開いている Task の上限 |
+| `PENELOPE_A2A_GATED_ISSUER` | なし | `gated-assertion`: gated の発行元（`iss`） |
+| `PENELOPE_A2A_GATED_JWKS_URL` | なし | `gated-assertion`: gated の鍵の JWKS の URL |
+| `PENELOPE_A2A_AUDIENCES` | なし | `tokenreview`: 送り手の token に求める audience（`,` で区切る） |
+| `PENELOPE_KUBERNETES_URL` | `https://<KUBERNETES_SERVICE_HOST>:<KUBERNETES_SERVICE_PORT>` | `tokenreview`: API server の URL |
+| `PENELOPE_KUBERNETES_TOKEN_FILE` | `/var/run/secrets/kubernetes.io/serviceaccount/token` | `tokenreview`: backend 自身の ServiceAccount の token。尋ねるたびに読み直す |
+| `PENELOPE_KUBERNETES_CA_FILE` | `/var/run/secrets/kubernetes.io/serviceaccount/ca.crt` | `tokenreview`: API server の証明書を確かめる CA |
 
 - GitHub のログインは、`PENELOPE_GITHUB_CLIENT_ID`・`PENELOPE_GITHUB_CLIENT_SECRET_FILE`・`PENELOPE_OWNER_GITHUB_ID` の 3 つと `PENELOPE_PUBLIC_URL` が揃ったときだけ動く。3 つのどれも無ければ、ログインは無く、誰も入れない（[ADR-0010](adr/0010-github-oauth-for-people-tokenreview-for-a2a.md)）。一部だけあるときは、設定の誤りとして起動しない。
 - 数は分の整数で、0 より大きいもの。
+- A2A の受け口は、`PENELOPE_A2A_SENDERS` があるときだけ開く（[ADR-0018](adr/0018-a2a-tasks-in-the-backend-and-replaceable-sender-checks.md)）。そのときは `PENELOPE_PUBLIC_URL`（Agent Card の URL と、`gated-assertion` の `aud` に使う）と `PENELOPE_A2A_AUTH` が要り、選んだ確かめ方に要るものがすべて要る。`gated-assertion` には発行元と JWKS の URL、`tokenreview` には audience と API server と、読める token のファイルと CA のファイル。欠けていれば起動しない。
+- `tokenreview` に audience を必ず求めるのは、API server 自身の audience では、その ServiceAccount で動くどの Pod にも mount されている token が通ってしまうためである。
+- `PENELOPE_A2A_SENDERS` が無ければ、ほかの `PENELOPE_A2A_*` は読まない。
+- アバターのディレクトリは `avatar.json` を持つ。`avatar.json` は、名前（`name`）と、表情ごとのアイコンの画像の場所（`icons`、ディレクトリからの相対の場所）を持つ。画像の拡張子は `.png`・`.jpg`・`.jpeg`・`.gif`・`.webp`・`.svg` のどれかで、ディレクトリの外は指せない。読めないとき、形が違うときは起動しない。
 - `batch` の待ちは、N・M のほか、`now` の出来事を初めて渡すときにも終わる。そのとき待っている `batch` の出来事は、起きている時間の外でも、`now` の出来事と一緒に渡す（[events.md](events.md) の「いつ渡すか」）。
 
 ## 状態
 
-- 状態は `PENELOPE_DATABASE` の SQLite の 1 つのファイルに置く（[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)）。待ち行列、会話の履歴、途中経過の記録、予約、セッションの切り替えの記録、ログインのセッションである。
-- schema は migration の列で進める。版は `PRAGMA user_version` で、その数の migration が当たっている。migration は足すだけで、書き換えない。backend より新しい版のファイルは開かずに止まる。
-- 出来事・会話の履歴・途中経過は消さない。いつまで残すかは、量が問題になったときに決める。
+- 状態は `PENELOPE_DATABASE` の SQLite の 1 つのファイルに置く（[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)）。待ち行列、会話の履歴、途中経過の記録、予約、セッションの切り替えの記録、ログインのセッション、A2A の Task、サブエージェントごとに runner が最後に知らせたもの（目的と閉じたか）である。
+- エージェントごとの今の状態（`thinking` か `waiting`）とその状態になった時刻は別に残さず、途中経過の記録の最後の `turn_start` か `turn_end` から引く（[sandbox-api.md](sandbox-api.md) の「途中経過」）。
+- schema は migration の列で進める。版は `PRAGMA user_version` で、その数の migration が当たっている。migration は足すだけで、書き換えない。backend より新しい版のファイルは開かずに止まる。版 2 は A2A の Task、版 3 はサブエージェント（`sub_agents`）と、途中経過の記録から最後の `turn_start`・`turn_end` を引く索引である。
+- 出来事・会話の履歴・途中経過・A2A の Task は消さない。いつまで残すかは、量が問題になったときに決める。
 - `/sources` の保存期間による削除はまだ無い。
 
 ## オーナーのログイン
@@ -66,7 +86,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 
 - ターンの終わり（`POST /v1/turns/end`）ごとに、作業ツリーの変わったものをすべて（足したもの・変えたもの・消したもの）、検査せずにそのままコミットする。変わったものが無ければコミットしない。
 - 作者とコミッターは `PENELOPE_GIT_AUTHOR_NAME` と `PENELOPE_GIT_AUTHOR_EMAIL`。
-- メッセージは、1 行目が `Turn <turn_id>`、本文が `Agent: <agent>`。
+- メッセージは、1 行目が `Turn <turn_id>`、本文が `Agent: <agent>`。サブエージェントのターンの終わりでは `<agent>` はサブエージェントの名前で、本体のターンの途中の変更も一緒に入る（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)）。
 - `.git` が無ければ、最初のコミットの前に `main` を枝にして作る。
 - git は backend の git の設定を読まない。hook も署名も使わない。作業ツリーの持ち主は sandbox のユーザーなので、その場所を `safe.directory` として渡す。
 - コミットは 1 つずつ順に行う。

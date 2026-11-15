@@ -3,6 +3,9 @@
 // `@ts-expect-error` is one it must reject (tsc fails if the error goes away).
 
 import type {
+  A2APayload,
+  A2AReplyRequest,
+  A2AReplyResponse,
   AckRequest,
   Activity,
   ActivityRequest,
@@ -25,7 +28,14 @@ import type {
   SessionRotatedRequest,
   SourcesLine,
   StreamEvent,
+  SubAgent,
+  SubAgentNotice,
+  SubAgentsResponse,
+  SubAgentStatus,
+  TurnBatch,
   TurnEndRequest,
+  TurnEvent,
+  TurnLine,
 } from "../src/index.ts";
 
 // --- The envelope (docs/events.md) ---
@@ -164,7 +174,73 @@ export const schedules = { schedules: [schedule] } satisfies ScheduleListRespons
 
 export const rotated = { agent: "main" } satisfies SessionRotatedRequest;
 
+export const started = { agent: "review-pr-22", purpose: "review PR 22", closed: false } satisfies SubAgentStatus;
+export const closed = { ...started, closed: true } satisfies SubAgentStatus;
+// @ts-expect-error a sub-agent's status names its purpose
+export const noPurpose = { agent: "review-pr-22", closed: false } satisfies SubAgentStatus;
+// @ts-expect-error a sub-agent is closed or not
+export const notSaid = { agent: "review-pr-22", purpose: "x" } satisfies SubAgentStatus;
+
+export const stopped = { reason: "stopped", purpose: "review PR 22", text: "Two comments.\nFirst, ..." } satisfies SubAgentNotice;
+export const failed = { reason: "failed", purpose: "review PR 22", text: "the model's API did not answer" } satisfies SubAgentNotice;
+export const interrupted = { reason: "interrupted", purpose: "review PR 22", text: "" } satisfies SubAgentNotice;
+// @ts-expect-error the reasons are stopped, failed and interrupted
+export const done = { reason: "done", purpose: "x", text: "" } satisfies SubAgentNotice;
+// @ts-expect-error the notice carries the text, empty when there is none
+export const noText = { reason: "interrupted", purpose: "x" } satisfies SubAgentNotice;
+
+export const subAgentStopped = {
+  agent: "review-pr-22",
+  id: "review-pr-22/1",
+  summary: "Two comments.",
+  payload: stopped,
+} satisfies SelfEventRequest;
+
 export const error = { error: "seqs must be a list of integers" } satisfies ErrorBody;
+
+// --- The input of a turn (docs/events.md, "ターンに入る形") ---
+
+export const turnNotice = {
+  seq: 12,
+  source: "slack",
+  stream: "ops",
+  delivery: "now",
+  occurred_at: "2026-11-14T09:00:00Z",
+  summary: "#ops: a mention",
+  appended: { path: "/sources/slack/ops/2026-11-14.jsonl", lines: [3, 3] },
+} satisfies TurnEvent;
+
+export const turnInline = {
+  seq: 13,
+  source: "ui",
+  delivery: "now",
+  occurred_at: "2026-11-14T09:01:00Z",
+  summary: "hello",
+  text: "hello",
+  attachments: [{ path: "/sources/ui/files/13-screenshot.png", mime_type: "image/png", size: 48213 }],
+} satisfies TurnEvent;
+
+export const turnBatch = {
+  kind: "batch",
+  source: "slack",
+  stream: "ops",
+  count: 2,
+  seqs: [20, 22],
+  summary: "message 20\nmessage 22",
+  appended: [{ path: "/sources/slack/ops/2026-11-14.jsonl", lines: [4, 5] }],
+} satisfies TurnBatch;
+
+export const turnLines = [turnNotice, turnInline, turnBatch, { ...turnNotice, agent: "main" }] satisfies TurnLine[];
+
+// @ts-expect-error an event carries its text or where it was appended, not both
+export const turnBoth = { ...turnNotice, text: "hello" } satisfies TurnEvent;
+const { appended: _appended, ...appendedLeftOut } = turnNotice;
+// @ts-expect-error an event carries one of them
+export const turnNeither = appendedLeftOut satisfies TurnEvent;
+// @ts-expect-error a batch names the seq of each event in it
+export const batchWithoutSeqs = { ...turnBatch, seqs: undefined } satisfies TurnBatch;
+// @ts-expect-error a single event is not a batch
+export const eventAsBatch = { ...turnNotice, kind: "batch" } satisfies TurnLine;
 
 // --- The UI's API (docs/ui-api.md) ---
 
@@ -193,5 +269,52 @@ export const streamed = [
   { event: "state", data: { agent: "main", state: "waiting" } },
 ] satisfies StreamEvent[];
 
+export const subAgents = {
+  agents: [
+    {
+      agent: "review-pr-22",
+      purpose: "review PR 22",
+      state: "thinking",
+      started_at: "2026-11-14T09:00:00Z",
+      state_since: "2026-11-14T09:05:00Z",
+    },
+  ],
+} satisfies SubAgentsResponse;
+export const noSubAgents = { agents: [] } satisfies SubAgentsResponse;
+// @ts-expect-error a listed sub-agent is in a turn or waiting
+export const runningSubAgent = { agent: "a", purpose: "x", state: "running", started_at: at, state_since: at } satisfies SubAgent;
+// @ts-expect-error a listed sub-agent names its purpose
+export const subAgentWithoutPurpose = { agent: "a", state: "waiting", started_at: at, state_since: at } satisfies SubAgent;
+// @ts-expect-error a listed sub-agent says when it was started and since when it is in its state
+export const subAgentWithoutTimes = { agent: "a", purpose: "x", state: "waiting" } satisfies SubAgent;
+
+export const streamedSubAgents = [
+  { event: "agent", data: started },
+  { event: "agent", data: closed },
+  { event: "state", data: { agent: "review-pr-22", state: "thinking" } },
+] satisfies StreamEvent[];
+// @ts-expect-error the agent event says whether it is closed
+export const agentWithoutClosed = { event: "agent", data: { agent: "a", purpose: "x" } } satisfies StreamEvent;
+
 // @ts-expect-error the states are thinking and waiting
 export const sleeping = { event: "state", data: { agent: "main", state: "sleeping" } } satisfies StreamEvent;
+
+// --- A2A (docs/a2a.md) ---
+
+export const a2aRequest = {
+  kind: "request",
+  task_id: "t-1",
+  context_id: "c-1",
+  message_id: "m-1",
+  text: "Look at the cluster's alerts.",
+} satisfies A2APayload;
+
+export const a2aClose = { agent: "main", in_reply_to: 12, state: "completed", text: "Done." } satisfies A2AReplyRequest;
+export const a2aCloseQuietly = { agent: "main", in_reply_to: 12, state: "completed" } satisfies A2AReplyRequest;
+export const a2aAsk = { agent: "main", in_reply_to: 12, state: "input-required", text: "Which namespace?" } satisfies A2AReplyRequest;
+// @ts-expect-error her reply closes or asks; the backend fails and rejects tasks
+export const a2aFail = { agent: "main", in_reply_to: 12, state: "failed" } satisfies A2AReplyRequest;
+// @ts-expect-error the reply names the event it answers
+export const a2aNoEvent = { agent: "main", state: "completed" } satisfies A2AReplyRequest;
+
+export const a2aReplied = { task_id: "t-1", state: "completed" } satisfies A2AReplyResponse;

@@ -4,8 +4,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type http from "node:http";
 
-import type { Activity, AgentId, DeliveredEvent, ScheduleWhen } from "@penelope/contract";
+import { type Activity, type AgentId, type DeliveredEvent, isSubAgentName, type ScheduleWhen } from "@penelope/contract";
 
+import { type Inbox, InboxRefusal } from "./a2a/inbox.ts";
+import type { SubAgents } from "./agents.ts";
 import type { Conversation } from "./conversation.ts";
 import { isTime } from "./envelope.ts";
 import { type Handler, HttpError, readJson, sendEmpty, sendJson } from "./http.ts";
@@ -24,15 +26,19 @@ export type SandboxOptions = {
   token: string | undefined;
   queue: Queue;
   conversation: Conversation;
+  /** What the runner said of each sub-agent. */
+  agents: SubAgents;
   schedules: Schedules;
   memory: Memory;
+  /** The tasks other agents sent over A2A, which her replies close or ask in. */
+  inbox: Inbox;
   now: () => number;
   maxBytes?: number;
   log?: (line: string) => void;
 };
 
 export function sandboxHandler(options: SandboxOptions): Handler {
-  const { queue, conversation, schedules, memory, now } = options;
+  const { queue, conversation, agents, schedules, memory, inbox, now } = options;
   const log = options.log ?? console.error;
   const maxBytes = options.maxBytes ?? DEFAULT_SANDBOX_BYTES;
   const expected = options.token === undefined || options.token === "" ? undefined : digest(options.token);
@@ -45,8 +51,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
 
     if (url.pathname === "/v1/events") {
       if (request.method !== "GET") throw new HttpError(405, "only GET");
-      const agent = agentOf(url.searchParams.get("agent"));
-      if (agent !== "main") throw new HttpError(400, "only main takes events for now");
+      mainOnly(agentOf(url.searchParams.get("agent")), "takes events");
       const after = integer(url.searchParams.get("after") ?? "0", "after");
       const wait = Math.min(integer(url.searchParams.get("wait") ?? "0", "wait"), MAX_WAIT_SECONDS);
       const events = await poll(queue, after, wait * 1000, response, now);
@@ -70,12 +75,15 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         if (typeof id !== "string" || id === "") throw new HttpError(400, "id must be a non-empty string");
         if (typeof summary !== "string") throw new HttpError(400, "summary must be a string");
         if (!("payload" in request)) throw new HttpError(400, "payload is required");
-        queue.accept({ source: "self", id, occurred_at: iso(now()), summary, payload }, { builtin: true });
+        // A sub-agent's events go under its own stream, /sources/self/<name>/.
+        const stream = request.agent === "main" ? {} : { stream: request.agent };
+        queue.accept({ source: "self", id, ...stream, occurred_at: iso(now()), summary, payload }, { builtin: true });
         sendEmpty(response, 202);
         return;
       }
       case "POST /v1/replies": {
         const { agent, text, expression, in_reply_to } = withAgent(await body());
+        mainOnly(agent, "replies to the owner");
         if (typeof text !== "string") throw new HttpError(400, "text must be a string");
         if (expression !== undefined && typeof expression !== "string") throw new HttpError(400, "expression must be a string");
         if (in_reply_to !== undefined && !Number.isSafeInteger(in_reply_to)) throw new HttpError(400, "in_reply_to must be a seq");
@@ -86,6 +94,20 @@ export function sandboxHandler(options: SandboxOptions): Handler {
           ...(in_reply_to === undefined ? {} : { in_reply_to: in_reply_to as number }),
         });
         sendJson(response, 201, reply);
+        return;
+      }
+      case "POST /v1/a2a/replies": {
+        const { agent, in_reply_to, state, text } = withAgent(await body());
+        mainOnly(agent, "answers A2A tasks");
+        if (!Number.isSafeInteger(in_reply_to)) throw new HttpError(400, "in_reply_to must be the seq of an a2a event");
+        if (state !== "completed" && state !== "input-required") throw new HttpError(400, "state must be completed or input-required");
+        if (text !== undefined && typeof text !== "string") throw new HttpError(400, "text must be a string");
+        try {
+          sendJson(response, 200, inbox.reply({ in_reply_to: in_reply_to as number, state, ...(text === undefined ? {} : { text }) }));
+        } catch (error) {
+          if (!(error instanceof InboxRefusal)) throw error;
+          throw new HttpError(error.kind === "no-such-event" ? 404 : error.kind === "closed" ? 409 : 400, error.message);
+        }
         return;
       }
       case "POST /v1/activity": {
@@ -108,13 +130,23 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         sendEmpty(response, 204);
         return;
       }
+      case "POST /v1/agents": {
+        const { agent, purpose, closed } = withAgent(await body());
+        if (agent === "main") throw new HttpError(400, "agent must be a sub-agent's name, not main");
+        if (typeof purpose !== "string") throw new HttpError(400, "purpose must be a string");
+        if (typeof closed !== "boolean") throw new HttpError(400, "closed must be a boolean");
+        agents.record({ agent, purpose, closed });
+        sendEmpty(response, 204);
+        return;
+      }
       case "GET /v1/schedules": {
-        const agent = agentOf(url.searchParams.get("agent"));
+        const agent = mainOnly(agentOf(url.searchParams.get("agent")), "has schedules");
         sendJson(response, 200, { schedules: schedules.list(agent) });
         return;
       }
       case "POST /v1/schedules": {
         const { agent, reason, cron, at } = withAgent(await body());
+        mainOnly(agent, "has schedules");
         if (typeof reason !== "string") throw new HttpError(400, "reason must be a string");
         let when: ScheduleWhen;
         if (typeof cron === "string" && at === undefined) when = { cron };
@@ -140,11 +172,12 @@ export function sandboxHandler(options: SandboxOptions): Handler {
     const scheduleId = /^\/v1\/schedules\/([^/]+)$/.exec(url.pathname)?.[1];
     if (scheduleId !== undefined) {
       if (request.method !== "DELETE") throw new HttpError(405, "only DELETE");
+      mainOnly(agentOf(url.searchParams.get("agent")), "has schedules");
       if (!schedules.remove(decodeURIComponent(scheduleId))) throw new HttpError(404, "no such schedule");
       sendEmpty(response, 204);
       return;
     }
-    const known = ["/v1/events/ack", "/v1/self-events", "/v1/replies", "/v1/activity", "/v1/turns/end", "/v1/schedules", "/v1/sessions/rotated"];
+    const known = ["/v1/events/ack", "/v1/self-events", "/v1/agents", "/v1/replies", "/v1/a2a/replies", "/v1/activity", "/v1/turns/end", "/v1/schedules", "/v1/sessions/rotated"];
     if (known.includes(url.pathname)) throw new HttpError(405, "not this method");
     throw new HttpError(404, "no such path");
   };
@@ -200,9 +233,18 @@ function object(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+/** `main`, or a sub-agent's name of the shape of the contract: it may become a directory under /sources. */
 function agentOf(value: unknown): AgentId {
-  if (typeof value !== "string" || value === "") throw new HttpError(400, "agent must be a non-empty string");
+  if (value !== "main" && !isSubAgentName(value)) {
+    throw new HttpError(400, "agent must be main or a sub-agent's name: lower-case letters, digits and '-', up to 63");
+  }
   return value;
+}
+
+/** Sub-agents talk only to the main agent: what it alone does is refused to them (ADR-0022). */
+function mainOnly(agent: AgentId, what: string): AgentId {
+  if (agent !== "main") throw new HttpError(400, `only main ${what}, not the sub-agent ${agent}`);
+  return agent;
 }
 
 function withAgent(body: Record<string, unknown>): Record<string, unknown> & { agent: AgentId } {

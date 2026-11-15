@@ -2,8 +2,9 @@
 
 エージェントに届く出来事の封筒、取り込み口、`/sources` の置き方、出来事がターンに入る形を決める。
 方針は [ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md) と
-[ADR-0013](adr/0013-event-contents-in-sources-and-summaries-in-turns.md) にある。ここにはその形を書く。
-型は `packages/contract` の `src/events.ts` と `src/sandbox.ts` が正である。
+[ADR-0013](adr/0013-event-contents-in-sources-and-summaries-in-turns.md)・[ADR-0017](adr/0017-turn-input-as-json-lines-in-events.md) にある。ここにはその形を書く。
+型は `packages/contract` の `src/events.ts`・`src/sandbox.ts`・`src/turn.ts` が正である。
+receivers のプラグインが封筒を作る形は [receivers.md](receivers.md) にある。
 
 「未決」と書いた点は、実装の作業単位が決めて、この文書を直す。
 
@@ -23,7 +24,7 @@
 
 backend は受けたときに、単調増加の整数 `seq` と、受けた時刻 `received_at` を付ける。順番は `seq` の順である。
 
-`source` と `stream` は `/sources` のパスの一部になる。使えるのは英小文字・数字・`.`・`_`・`-` で、`.` で始まらないものだけである。外れた出来事は `400` で断る。`/` や `..` で `/sources` の外や別の受信元の場所を指せないようにするためである。
+`source` と `stream` は `/sources` のパスの一部になる。使えるのは英小文字・数字・`.`・`_`・`-` で、`.` で始まらないものだけである。外れた出来事は `400` で断る。`/` や `..` で `/sources` の外や別の受信元の場所を指せないようにするためである。受信元の名前が制限に外れうるもの（Alertmanager の `alertname` など）から `stream` を作るときは、受信元の側で使える文字に写してから送る（[receivers.md](receivers.md) の「`stream` の写し方」）。
 
 ### 配送の約束
 
@@ -52,6 +53,13 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 
 - エージェントの予約（[sandbox-api.md](sandbox-api.md) の「予約」）の時刻が来ると、backend が `source` が `cron` の出来事を列に入れる。
 - `payload` は予約の ID（`schedule_id`）と理由（`reason`）。`summary` は理由。
+
+### A2A の出来事
+
+- ほかのエージェントが A2A で送ったメッセージ（新しい依頼と、聞き返しへの答え）は、1 つずつ `source` が `a2a` の出来事になる（[a2a.md](a2a.md)）。
+- `stream` は送り手の名前（ServiceAccount の名前）、`id` は `<Task の ID>/<Task の中のメッセージの番号>`、`summary` は文の 1 行目（200 文字まで）。
+- `payload` は `kind`（新しい依頼なら `request`、聞き返しへの答えなら `answer`）・`task_id`・`context_id`・`message_id`・`text`（型は `A2APayload`）。
+- エージェントは、この出来事の `seq` を名指して Task に返す（[sandbox-api.md](sandbox-api.md) の「A2A の Task に返す」）。
 
 ## 取り込み口
 
@@ -108,13 +116,47 @@ Slack のプラグインは、起きたことを 1 件ずつ出来事にする�
 
 ## ターンに入る形
 
-runner は sandbox 向けの口で出来事を受け取り（[sandbox-api.md](sandbox-api.md)）、次の形でターンに入れる。
+runner は sandbox 向けの口で出来事を受け取り（[sandbox-api.md](sandbox-api.md)）、一度に渡された分を 1 つの入力にする。入力は `<events>` の行と `</events>` の行で囲み、その間に 1 行 1 件の JSON を置いたものである（natsumi の ADR 0008 と同じ形）。1 行の型は `packages/contract` の `src/turn.ts` の `TurnLine` が正である。
 
-- inline の出来事: 中身そのもの（オーナーのメッセージなら本文と添付の場所）。
-  - inline の出来事に付いた画像（sandbox 向けの口の添付の `mime_type` が `image/png`・`image/jpeg`・`image/gif`・`image/webp` のもの）は、場所に加えて、画像としてもターンに載せる。runner が `/sources` から読み、Pi の画像の入力として渡す。1 つの入力に 4 枚まで、添付の `size` が runner の設定の大きさ（既定 5 MiB）を超えるものと読めないものは載せず、場所だけにする。
-  - inline でない出来事の画像は場所だけである。エージェントが Pi の `read` で開く。
-- inline でない出来事: `source`・`stream`・`summary` と、足された場所（ファイルと行の範囲、1 始まり・両端を含む）。中身は、エージェントが必要なときに sandbox の shell でそのファイルを読む。
-- `batch` のまとめ: 受信元と `stream` ごとに、件数と足された場所を並べた 1 つの入力。
+- 行の順は、ひとつずつの出来事を `seq` の順に並べ、その後に `batch` のまとめを置く。
+- 中身の文字（本文の改行など）は JSON の文字列の中で escape されるので、1 件が 2 行にまたがることはない。
+
+### ひとつの出来事
+
+| 欄 | 中身 |
+| --- | --- |
+| `agent` | その出来事を受けるエージェント。省けば `main`。今は `main` だけなので、いつも省く（サブエージェントのための余地） |
+| `seq` | backend の順番。`reply` の `in_reply_to` はこれを取る |
+| `source`・`stream` | 封筒のもの。`stream` が無ければ省く |
+| `delivery` | `now` か `batch` |
+| `occurred_at`・`summary` | 封筒のもの |
+| `text` | inline の出来事だけ。`payload` の `text`（文字列）。無ければ `payload` を JSON にした文字列 |
+| `appended` | inline でない出来事だけ。中身を足した場所。`path` と `lines`（`[from, to]`、1 始まり・両端を含む） |
+| `attachments` | 添付があるときだけ。1 件は `path`・`mime_type`・`size`（sandbox 向けの口の添付と同じ） |
+
+- inline の出来事は中身（`text`）を持ち、`appended` を持たない。inline でない出来事は `appended` を持ち、`text` を持たない。中身は、エージェントが必要なときに sandbox の shell でそのファイルを読む。
+- inline の出来事に付いた画像（`mime_type` が `image/png`・`image/jpeg`・`image/gif`・`image/webp` のもの）は、`attachments` に加えて、画像としてもターンに載せる。runner が `/sources` から読み、Pi の画像の入力として渡す。1 つの入力に 4 枚まで、添付の `size` が runner の設定の大きさ（既定 5 MiB）を超えるものと読めないものは載せず、`attachments` だけにする。
+- inline でない出来事の画像は `attachments` だけである。エージェントが Pi の `read` で開く。
+
+### `batch` のまとめ
+
+一度に渡された `batch` の出来事（inline でないもの）は、受信元と `stream` ごとに 1 行にまとめる。
+
+| 欄 | 中身 |
+| --- | --- |
+| `agent` | ひとつの出来事と同じ |
+| `kind` | `batch`。ひとつの出来事の行は `kind` を持たない |
+| `source`・`stream` | まとめた出来事のもの。`stream` が無ければ省く |
+| `count` | まとめた件数 |
+| `seqs` | まとめた出来事の `seq` の一覧（順に） |
+| `summary` | まとめた出来事の `summary` を `seq` の順に改行でつないだもの |
+| `appended` | 足された場所の一覧。ファイルごとに、接する行の範囲を 1 つにつないで並べる。1 件はひとつの出来事の `appended` と同じ形 |
+
+- まとめた出来事の添付は、行には載せない。`/sources` の行の `attachments` にある。
+
+### 畳んだ後
+
+- 終わったターンを畳むとき（[ADR-0015](adr/0015-fold-ended-turns-before-they-are-sent.md)）も、出来事の入力はそのまま残る。畳んだ後のターンにも、同じ `<events>` の形で出来事がある。
 
 ### いつ渡すか
 

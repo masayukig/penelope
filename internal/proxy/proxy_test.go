@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -285,12 +287,22 @@ hosts:
 		r.Path != "/v1/x" || r.Status != 200 || r.Addr != "203.0.113.11" || r.Port != 443 || r.BytesIn == 0 {
 		t.Errorf("record = %+v", r)
 	}
+	// Neither the key nor its surrogate, nor the query, reaches the record (ADR-0004, docs/sentinel-config.md).
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{realKey, surrogate, "a=b"} {
+		if strings.Contains(string(b), s) {
+			t.Errorf("the record holds %q: %s", s, b)
+		}
+	}
 }
 
 func TestOpenedRequestsThatCannotBeSentAreRefused(t *testing.T) {
 	w := newWorld(t)
-	hits := 0
-	up := w.tlsUpstream("api.example.com", http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) { hits++ }))
+	var hits atomic.Int32
+	up := w.tlsUpstream("api.example.com", http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) { hits.Add(1) }))
 	missing := filepath.Join(t.TempDir(), "missing")
 	w.start(`
 hosts:
@@ -351,16 +363,16 @@ hosts:
 			}
 		})
 	}
-	if hits != 0 {
-		t.Errorf("the upstream was asked %d times", hits)
+	if n := hits.Load(); n != 0 {
+		t.Errorf("the upstream was asked %d times", n)
 	}
 }
 
 func TestPlainHTTPIsReadPassedThroughAndItsSurrogatesRefused(t *testing.T) {
 	w := newWorld(t)
-	hits := 0
+	var hits atomic.Int32
 	up := w.plainUpstream("tcp4", http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		hits++
+		hits.Add(1)
 		_, _ = io.WriteString(rw, "plain "+r.Host)
 	}))
 	w.start(`
@@ -392,8 +404,8 @@ hosts:
 	if r.Action != record.Deny || r.Reason != string(credentials.ReasonSurrogate) {
 		t.Errorf("record = %+v", r)
 	}
-	if hits != 1 {
-		t.Errorf("the upstream was asked %d times, want 1", hits)
+	if n := hits.Load(); n != 1 {
+		t.Errorf("the upstream was asked %d times, want 1", n)
 	}
 }
 

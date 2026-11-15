@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { after, before, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
@@ -10,12 +10,13 @@ import { FakeBackend, TOKEN } from "./fake-backend.ts";
 let fake: FakeBackend;
 let tools: Map<string, ToolDefinition>;
 
-before(async () => {
+// Each test has a backend of its own, so that what one sent is not seen by the next.
+beforeEach(async () => {
   fake = new FakeBackend();
   const backend = new Backend({ url: await fake.url, token: TOKEN, agent: "main" });
   tools = new Map(backendTools(backend).map((tool) => [tool.name, tool]));
 });
-after(() => fake.close());
+afterEach(() => fake.close());
 
 async function call(name: string, params: Record<string, unknown>): Promise<string> {
   const tool = tools.get(name);
@@ -25,13 +26,24 @@ async function call(name: string, params: Record<string, unknown>): Promise<stri
 }
 
 test("the tools", () => {
-  assert.deepEqual([...tools.keys()].sort(), ["reply", "schedule_add", "schedule_list", "schedule_remove", "self_event"]);
+  assert.deepEqual([...tools.keys()].sort(), ["reply", "reply_to_agent", "schedule_add", "schedule_list", "schedule_remove", "self_event"]);
   for (const tool of tools.values()) assert.ok(tool.description.length > 0);
 });
 
 test("reply sends the text, the expression and the event it answers", async () => {
   assert.match(await call("reply", { text: "done", expression: "smile", in_reply_to: 13 }), /r-1/);
   assert.deepEqual(fake.sent("POST", "/v1/replies"), [{ agent: "main", text: "done", expression: "smile", in_reply_to: 13 }]);
+});
+
+test("reply_to_agent answers in the task of the a2a event it names", async () => {
+  // Guards against: her answer to another agent not reaching the backend's reply path, or a refusal taken as sent.
+  assert.match(await call("reply_to_agent", { in_reply_to: 7, state: "input-required", text: "Which one?" }), /input-required/);
+  assert.match(await call("reply_to_agent", { in_reply_to: 7, state: "completed" }), /completed/);
+  assert.deepEqual(fake.sent("POST", "/v1/a2a/replies"), [
+    { agent: "main", in_reply_to: 7, state: "input-required", text: "Which one?" },
+    { agent: "main", in_reply_to: 7, state: "completed" },
+  ]);
+  await assert.rejects(call("reply_to_agent", { in_reply_to: 404, state: "completed" }), /404/);
 });
 
 test("schedules are added, listed and removed", async () => {

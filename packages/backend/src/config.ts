@@ -1,11 +1,16 @@
 // The backend's settings, from environment variables (docs/backend.md).
 // Secrets are read from files, named by the variables, so that their values
 // never sit in the environment.
+import path from "node:path";
+
 import type { Delivery } from "@penelope/contract";
 
 import { cronOf } from "./schedules.ts";
 import { AwakeHours } from "./time.ts";
 import { CALLBACK_PATH, type GitHubSettings } from "./login/github.ts";
+import { audienceOf } from "./a2a/gated.ts";
+import { Senders } from "./a2a/senders.ts";
+import type { KubernetesSettings } from "./a2a/tokenreview.ts";
 
 /** A setting that cannot be used. The backend does not start. */
 export class ConfigError extends Error {}
@@ -28,6 +33,45 @@ export type Config = {
   builtinDelivery: Record<"ui" | "cron" | "a2a" | "self", Delivery>;
   inline: Set<string>;
   gitAuthor: { name: string; email: string };
+  agent: AgentSettings;
+  /** Where the built Web UI is. */
+  webDir: string;
+  /** The A2A way in (docs/a2a.md); none when no sender is allowed. */
+  a2a: A2ASettings | undefined;
+};
+
+/** The A2A way in: who may send, how they are checked (one way or both), and the limits. */
+export type A2ASettings = {
+  /** The allow-list: ServiceAccounts as `<namespace>/<name>`. */
+  senders: string[];
+  gated: { issuer: string; jwksUrl: string; audience: string } | undefined;
+  tokenReview: { kubernetes: KubernetesSettings; audiences: string[] } | undefined;
+  /** The Agent Card's description. Its name is the agent's. */
+  description: string;
+  /** Where the senders call: the public URL's /a2a/. */
+  url: string;
+  limits: { deadlineMs: number; maxOpenTasks: number };
+};
+
+/** The ways a sender may be checked, by their names in PENELOPE_A2A_AUTH. */
+export const A2A_CHECKS = ["gated-assertion", "tokenreview"] as const;
+const SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount";
+
+/**
+ * What the UI shows of the agent: the deployment's, never the code's
+ * (ADR-0001). `icons` holds the file of each face of her avatar, by
+ * expression; none when no avatar is chosen.
+ */
+export type AgentSettings = { name: string; icons: Readonly<Record<string, string>> };
+
+/** The image types an icon may be, by its extension. */
+export const ICON_TYPES: Readonly<Record<string, string>> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
 };
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -114,6 +158,8 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
     };
   }
 
+  const avatar = avatarOf(get("PENELOPE_AVATARS_DIR") ?? "/app/avatars", get("PENELOPE_AVATAR"), readFile);
+
   return {
     databasePath: get("PENELOPE_DATABASE") ?? "/var/lib/penelope/backend.sqlite",
     sourcesDir: get("PENELOPE_SOURCES_DIR") ?? "/sources",
@@ -146,7 +192,120 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
       name: get("PENELOPE_GIT_AUTHOR_NAME") ?? "penelope-backend",
       email: get("PENELOPE_GIT_AUTHOR_EMAIL") ?? "backend@penelope.invalid",
     },
+    agent: { name: get("PENELOPE_AGENT_NAME") ?? avatar?.name ?? "Agent", icons: avatar?.icons ?? {} },
+    webDir: get("PENELOPE_WEB_DIR") ?? "/app/web",
+    a2a: a2aOf(get, readFile, publicUrl),
   };
+}
+
+/**
+ * The A2A way in, open only with senders: then it needs the public URL and at
+ * least one way to check them, each with all it needs. Anything less is a
+ * mistake, so that the backend never starts with a way in that lets nobody in
+ * without saying so.
+ */
+function a2aOf(get: (name: string) => string | undefined, readFile: (file: string) => string, publicUrl: string | undefined): A2ASettings | undefined {
+  const list = (name: string) =>
+    (get(name) ?? "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item !== "");
+  const senders = list("PENELOPE_A2A_SENDERS");
+  if (senders.length === 0) return undefined;
+  try {
+    new Senders(senders);
+  } catch (error) {
+    throw new ConfigError(`PENELOPE_A2A_SENDERS: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (publicUrl === undefined) throw new ConfigError("the A2A way in needs PENELOPE_PUBLIC_URL, for its Agent Card");
+  const checks = list("PENELOPE_A2A_AUTH");
+  if (checks.length === 0) throw new ConfigError(`PENELOPE_A2A_SENDERS needs PENELOPE_A2A_AUTH: ${A2A_CHECKS.join(", ")}, or both`);
+  for (const check of checks) {
+    if (!(A2A_CHECKS as readonly string[]).includes(check)) throw new ConfigError(`PENELOPE_A2A_AUTH: ${check} is not one of ${A2A_CHECKS.join(", ")}`);
+  }
+  const required = (name: string) => {
+    const value = get(name);
+    if (value === undefined) throw new ConfigError(`${name} is needed for ${checks.join(", ")}`);
+    return value;
+  };
+  const url = (name: string) => {
+    const value = required(name);
+    if (!URL.canParse(value)) throw new ConfigError(`${name} must be a URL`);
+    return value;
+  };
+  const readable = (name: string, file: string) => {
+    try {
+      return readFile(file);
+    } catch (error) {
+      throw new ConfigError(`${name}: ${file} cannot be read: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  const whole = (name: string, fallback: number) => {
+    const value = get(name);
+    if (value === undefined) return fallback;
+    if (!/^\d+$/.test(value) || Number(value) <= 0) throw new ConfigError(`${name} must be a whole number above 0`);
+    return Number(value);
+  };
+
+  let gated: A2ASettings["gated"];
+  if (checks.includes("gated-assertion")) {
+    gated = { issuer: required("PENELOPE_A2A_GATED_ISSUER"), jwksUrl: url("PENELOPE_A2A_GATED_JWKS_URL"), audience: audienceOf(publicUrl) };
+  }
+  let tokenReview: A2ASettings["tokenReview"];
+  if (checks.includes("tokenreview")) {
+    let apiServer = get("PENELOPE_KUBERNETES_URL");
+    if (apiServer === undefined) {
+      const host = get("KUBERNETES_SERVICE_HOST");
+      if (host === undefined) throw new ConfigError("tokenreview needs the API server: PENELOPE_KUBERNETES_URL, or KUBERNETES_SERVICE_HOST in the cluster");
+      apiServer = `https://${host.includes(":") ? `[${host}]` : host}:${get("KUBERNETES_SERVICE_PORT") ?? "443"}`;
+    }
+    if (!URL.canParse(apiServer)) throw new ConfigError("PENELOPE_KUBERNETES_URL must be a URL");
+    const tokenFile = get("PENELOPE_KUBERNETES_TOKEN_FILE") ?? `${SA_DIR}/token`;
+    // Read now only to stop at the start when it is not there; it is read again for every review.
+    readable("PENELOPE_KUBERNETES_TOKEN_FILE", tokenFile);
+    const caFile = get("PENELOPE_KUBERNETES_CA_FILE") ?? `${SA_DIR}/ca.crt`;
+    // The API server's own audience would take the token every Pod of the ServiceAccount has mounted.
+    const audiences = list("PENELOPE_A2A_AUDIENCES");
+    if (audiences.length === 0) throw new ConfigError("tokenreview needs PENELOPE_A2A_AUDIENCES: the audiences the senders' tokens are made for");
+    tokenReview = {
+      kubernetes: { url: apiServer, tokenFile, ca: readable("PENELOPE_KUBERNETES_CA_FILE", caFile) },
+      audiences,
+    };
+  }
+  return {
+    senders,
+    gated,
+    tokenReview,
+    description: get("PENELOPE_A2A_DESCRIPTION") ?? "",
+    url: `${publicUrl}/a2a/`,
+    limits: { deadlineMs: whole("PENELOPE_A2A_DEADLINE_HOURS", 24) * 3_600_000, maxOpenTasks: whole("PENELOPE_A2A_MAX_OPEN_TASKS", 3) },
+  };
+}
+
+/**
+ * The avatar named `id` under `dir`: its avatar.json gives her name and the
+ * image of each face, relative to its own directory.
+ */
+function avatarOf(dir: string, id: string | undefined, readFile: (file: string) => string): { name: string | undefined; icons: Record<string, string> } | undefined {
+  if (id === undefined) return undefined;
+  if (!/^[a-z0-9][a-z0-9._-]*$/.test(id)) throw new ConfigError("PENELOPE_AVATAR must be the name of a directory: lower-case letters, digits, ., _ and -");
+  const root = path.resolve(dir, id);
+  const file = path.join(root, "avatar.json");
+  let avatar: { name?: unknown; icons?: unknown };
+  try {
+    avatar = JSON.parse(readFile(file)) as typeof avatar;
+  } catch (error) {
+    throw new ConfigError(`PENELOPE_AVATAR: ${file} cannot be read: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const icons: Record<string, string> = {};
+  for (const [expression, relative] of Object.entries((avatar.icons ?? {}) as Record<string, unknown>)) {
+    const icon = typeof relative === "string" ? path.resolve(root, relative) : "";
+    if (!icon.startsWith(`${root}${path.sep}`) || ICON_TYPES[path.extname(icon).toLowerCase()] === undefined) {
+      throw new ConfigError(`PENELOPE_AVATAR: the icon of ${expression} in ${file} must be an image inside ${root}`);
+    }
+    icons[expression] = icon;
+  }
+  return { name: typeof avatar.name === "string" && avatar.name.trim() !== "" ? avatar.name.trim() : undefined, icons };
 }
 
 /** `host:port`, the host in brackets when it is IPv6. */

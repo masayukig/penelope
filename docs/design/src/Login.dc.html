@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ログイン</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="color-scheme: {{scheme}}; --color-background-body: light-dark(#f1f1f1, #1b1b1b); --color-text-primary: light-dark(#000000, #ffffff); --color-text-secondary: light-dark(#474747, #9e9e9e); --color-accent: light-dark(#1b1b1b, #f1f1f1); --color-on-accent: light-dark(#ffffff, #111111); min-height: {{h}}; box-sizing: border-box; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; background: var(--color-background-body); color: var(--color-text-primary); font-family: Figtree, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif; font-size: 16px; line-height: 1.6">
+<dc-import name="Avatar" d="88px" label="{{ false }}" hint-size="88px,88px"></dc-import>
+<h1 style="margin: 0; font-size: 28px; font-weight: 600">ペネロペ</h1>
+<a href="#github" style="margin-top: 16px; min-height: 48px; padding: 0 28px; display: flex; align-items: center; border-radius: 0.625rem; background: var(--color-accent); color: var(--color-on-accent); font-weight: 600; text-decoration: none">GitHub でログイン</a>
+<p style="margin: 0; font-size: 14px; color: var(--color-text-secondary)">オーナーだけが入れます。</p>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"h":{"editor":"text","default":"100vh"},"$preview":{"width":1360,"height":820}}'>
+class Component extends DCLogic {
+renderVals() {
+return { scheme: this.props.dark ? 'dark' : 'light', h: this.props.h ?? '100vh' };
+}
+}
+</script>
+</body>
+</html>

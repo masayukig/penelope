@@ -8,11 +8,14 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { Identity } from "./config.ts";
+import type { Connector } from "./connectors.ts";
 
 export interface Places {
   memory: string;
   sources: string;
   home: string;
+  /** The owner's skills, read-only; left out when there are none. */
+  ownerSkills?: string;
 }
 
 /** The memory files the system prompt carries, in this order. */
@@ -44,13 +47,19 @@ export async function readPromptFiles(memoryDir: string, maxBytes: number): Prom
   return files;
 }
 
-const MEMORY_SHAPE = (memory: string) => `- personality.md: the personality and the way of talking.
+/** `owner` is how the prompt names the owner: "your owner" for her, the name for the curator. */
+const MEMORY_SHAPE = ({ memory, ownerSkills }: Places, owner: string) => `- personality.md: the personality and the way of talking.
 - always.md: what is kept in mind at all times.
 - handoff.md: what one session leaves for the next.
 - INDEX.md: the index of the memory.
 - diary/YYYY-MM-DD.md: what happened on each day.
 - archive/: older facts, in summaries.
-- skills/<name>/SKILL.md: skills. Those in ${memory}/skills/ are listed at the end of the system prompt of each new session.
+- skills/<name>/SKILL.md: skills. Those in ${memory}/skills/ are listed at the end of the system prompt of each new session.${
+  ownerSkills
+    ? ` So are ${owner}'s skills, in ${ownerSkills}/, which is read-only; where a name is in both, the one listed is ${owner}'s.`
+    : ""
+}
+- agents/<role>.md: the roles of sub-agents, one file each, with \`name\` and \`description\` in its front matter. When a sub-agent is started with a role, the body of its file follows the sub-agent's system prompt; without one, the body of agents/default.md does.
 - Any other file: one topic each.`;
 
 function appended(files: PromptFile[]): string {
@@ -67,8 +76,36 @@ function appended(files: PromptFile[]): string {
 export const FOLDING =
   "Once a turn has ended, it is sent to the model folded: the events, your own text and your replies stay, your thinking and the output of the tools are left out, and each other tool call is cut down to one line. The record of the session keeps all of it.";
 
+const escapeXml = (text: string) =>
+  text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+
+/** The connectors, in the shape Pi lists skills in; nothing when there are none (ADR-0020). */
+function connectorsSection(connectors: { dir: string; list: Connector[] } | undefined): string {
+  if (!connectors || connectors.list.length === 0) return "";
+  const entries = connectors.list.map(
+    (c) =>
+      `  <connector>\n    <name>${escapeXml(c.name)}</name>\n    <description>${escapeXml(c.description)}</description>\n    <hosts>${c.hosts.map(escapeXml).join(" ")}</hosts>\n    <location>${escapeXml(c.path)}</location>\n  </connector>`,
+  );
+  return `\n\n# Connectors
+
+A connector is a set of hosts for which the Sentinel puts the real credential in place of the stand-in, with a document on its use: the environment variables that hold the stand-ins, the tools, and what to mind. The documents are in ${connectors.dir}, one file each, as the deployment put them; this list is as it was when this session started.
+
+<connectors>
+${entries.join("\n")}
+</connectors>`;
+}
+
+/** The Sentinel, as both her and her sub-agents are told of it. */
+const SENTINEL = (owner: string) =>
+  `Every connection out of the sandbox goes through the Sentinel, a relay outside it. The Sentinel records the traffic and can hold a request until ${owner} approves it. For some hosts it opens the TLS connection and puts the real credential in place of the stand-in the sandbox holds; the sandbox is given no real keys. The certificates it presents are issued by an internal CA, which is in the system trust store. A tool that carries its own CA bundle trusts it once pointed at the system bundle, /etc/ssl/certs/ca-certificates.crt.`;
+
 /** Her system prompt, made once for each session. */
-export function systemPrompt(identity: Identity, places: Places, files: PromptFile[], options: { folding?: boolean } = {}): string {
+export function systemPrompt(
+  identity: Identity,
+  places: Places,
+  files: PromptFile[],
+  options: { folding?: boolean; connectors?: { dir: string; list: Connector[] } } = {},
+): string {
   const { memory, sources, home } = places;
   const prompt = `You are ${identity.name}, ${identity.role}. Your owner is ${identity.owner}.
 
@@ -76,19 +113,19 @@ export function systemPrompt(identity: Identity, places: Places, files: PromptFi
 
 You run in a sandbox: a Linux container where you are the user \`agent\`, with your home at ${home}, which is also your working directory. Your home, ${memory} and the record of this session persist. The rest of the filesystem comes from the image and is reset when the container is made again. The usual development tools are installed, and you can add more.
 
-Every connection out of the sandbox goes through the Sentinel, a relay outside it. The Sentinel records the traffic and can hold a request until your owner approves it. For some hosts it opens the TLS connection and puts the real credential in place of the stand-in the sandbox holds; there are no real keys in the sandbox. The certificates it presents are issued by an internal CA, which is in the system trust store. A tool that carries its own CA bundle trusts it once pointed at the system bundle, /etc/ssl/certs/ca-certificates.crt.
+${SENTINEL("your owner")}${connectorsSection(options.connectors)}
 
 # Events and answers
 
-Each turn starts from events: your owner's messages, your schedules, your events to yourself, and whatever the other sources deliver. The content of every event is appended, one JSON line each, to ${sources}/<source>/<stream>/<YYYY-MM-DD>.jsonl (or ${sources}/<source>/<YYYY-MM-DD>.jsonl when it has no stream), and the files that came with it are in ${sources}/<source>/files/. In the turn, your owner's messages come in full. Any other event comes as its summary and the lines it was appended at, and batched events as a count per source and stream. More events can arrive while a turn is running.
+Each turn starts from events: your owner's messages, your schedules, your events to yourself, the requests other agents send you over A2A (source \`a2a\`, the agent's name as the stream), and whatever the other sources deliver. The content of every event is appended, one JSON line each, to ${sources}/<source>/<stream>/<YYYY-MM-DD>.jsonl (or ${sources}/<source>/<YYYY-MM-DD>.jsonl when it has no stream), and the files that came with it are in ${sources}/<source>/files/. In the turn, the events come inside <events>, one JSON object a line: each event in the order of \`seq\`, then the batched ones. Each event has its \`seq\` (what \`reply\` takes as \`in_reply_to\`), \`source\`, \`stream\` (left out when it has none), \`delivery\` (\`now\`, or \`batch\` when it was held to come with others), \`occurred_at\` and \`summary\`, and \`attachments\` when files came with it. Your owner's messages carry their \`text\` in full. Any other event carries \`appended\`: the file and the lines, 1-based and both ends included, its content was appended at. The batched events of one source and stream come as one line with \`kind\` set to \`batch\`, their \`count\`, their \`seqs\`, their summaries one a line in \`summary\`, and where they were appended in \`appended\`. More events can arrive while a turn is running.
 
-The text of your turn reaches no one. Your owner hears from you through the \`reply\` tool. Everything else outside the sandbox you reach with the shell and the tools.${options.folding ? `\n\n${FOLDING}` : ""}
+The text of your turn reaches no one. Your owner hears from you through the \`reply\` tool, and an agent that asked you over A2A through \`reply_to_agent\`. Everything else outside the sandbox you reach with the shell and the tools.${options.folding ? `\n\n${FOLDING}` : ""}
 
 # Memory
 
 ${memory} is your long-term memory: Markdown files in a git repository.
 
-${MEMORY_SHAPE(memory)}
+${MEMORY_SHAPE(places, "your owner")}
 
 What you change in ${memory} is committed by the backend at the end of each turn. You can read its history; ${memory}/.git is read-only for you. Each night the session ends: in a last turn you write handoff.md, then a curator reorganises the memory, and a new session starts from it.
 
@@ -119,7 +156,7 @@ You run in the same sandbox as ${identity.name}, as the user \`agent\`, with the
 
 ${memory} is ${identity.name}'s long-term memory: Markdown files in a git repository.
 
-${MEMORY_SHAPE(memory)}
+${MEMORY_SHAPE(places, identity.owner)}
 
 ${identity.name} reads personality.md, always.md and handoff.md in full at the start of every session, and the rest when it is needed, usually starting from INDEX.md. The memory serves ${identity.name} when what they know can be found when it is needed, and what is found is current.
 
@@ -130,4 +167,42 @@ The contents of the events ${identity.name} received are in ${sources}, one JSON
 /** The curator's one input. `today` is the date of the night, YYYY-MM-DD. */
 export function curatorInput(places: Places, today: string): string {
   return `It is the night of ${today}. The day's session has ended, and what it left for the next one is in ${join(places.memory, "handoff.md")}. The memory is yours until this turn ends; the next session starts from it.`;
+}
+
+/** What a sub-agent is started with (ADR-0022). */
+export interface SubAgentPlace {
+  name: string;
+  purpose: string;
+  cwd: string;
+  /** The role file whose body follows: the chosen role's, or default.md; left out when there is none. */
+  role?: { path: string; body: string };
+}
+
+/**
+ * A sub-agent's system prompt: that it is one, what for and where, where its
+ * words go, the sandbox, the connectors and the skills. Her personality and
+ * the shape of her memory are not in it. The role's body follows as it is.
+ */
+export function subAgentSystemPrompt(
+  identity: Identity,
+  places: Places,
+  agent: SubAgentPlace,
+  options: { connectors?: { dir: string; list: Connector[] } } = {},
+): string {
+  const { name } = identity;
+  const skills = places.ownerSkills ? `${places.memory}/skills/ and ${places.ownerSkills}/` : `${places.memory}/skills/`;
+  const prompt = `You are a sub-agent of ${name}, ${identity.role}, whose owner is ${identity.owner}. ${name} started you, named \`${agent.name}\`, for this purpose: ${agent.purpose}
+
+Your requests come from ${name} alone: the first one when you were started, and more words when ${name} sends them after you have stopped. You stop when you answer without calling a tool. Then the text of that last answer reaches ${name} in full, as an event; nothing else of your run reaches ${name}, and nothing of it reaches ${identity.owner}. You can stop with a question; ${name}'s answer comes as more words, and you go on in this session.
+
+# Where you are
+
+You run in a sandbox: a Linux container where you are the user \`agent\`, with your home at ${places.home}. Your working directory is ${agent.cwd}. Your home and the record of this session persist. The rest of the filesystem comes from the image and is reset when the container is made again. The usual development tools are installed, and you can add more.
+
+${SENTINEL(identity.owner)}${connectorsSection(options.connectors)}
+
+# Skills
+
+The skills in ${skills} are listed at the end of this system prompt.${agent.role ? `\n\n${agent.role.path} follows as it was when this session started.` : ""}`;
+  return agent.role ? `${prompt}\n\n# ${agent.role.path}\n\n${agent.role.body.trim()}\n` : `${prompt}\n`;
 }

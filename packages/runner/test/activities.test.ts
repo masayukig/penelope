@@ -15,6 +15,8 @@ function recorder() {
 }
 
 // Only the fields the recorder reads; the rest of Pi's events are not needed.
+// These are the shapes of Pi's session events: when a version of Pi changes
+// them, these tests are meant to fail, since the runner reads the same shapes.
 function update(assistantMessageEvent: unknown): AgentSessionEvent {
   return { type: "message_update", message: {}, assistantMessageEvent } as unknown as AgentSessionEvent;
 }
@@ -58,6 +60,11 @@ test("empty thinking and empty text are not sent", () => {
   turn.handle(update({ type: "thinking_end", content: "" }));
   turn.handle(update({ type: "text_end", content: "  " }));
   assert.deepEqual(sent, []);
+});
+
+test("the limit of a tool's output is the spec's", () => {
+  // Guards against: the 16,000 characters of docs/sandbox-api.md changed in the code alone.
+  assert.equal(OUTPUT_LIMIT, 16_000);
 });
 
 test("a tool's output is its text, with images named and long output cut", () => {

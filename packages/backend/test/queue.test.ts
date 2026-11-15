@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, chmodSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -9,7 +9,7 @@ import { openDatabase } from "../src/db.ts";
 import { Queue } from "../src/queue.ts";
 import { Sources } from "../src/sources.ts";
 import { AwakeHours } from "../src/time.ts";
-import { FakeClock, tempDir } from "./support.ts";
+import { FakeClock, tempDir, unwritable } from "./support.ts";
 
 const MINUTE = 60_000;
 
@@ -88,11 +88,10 @@ describe("the queue", () => {
     it("does not take an event it cannot write to /sources", (t) => {
       const { queue, sourcesDir } = setup(t);
       queue.accept(event({ delivery: "now" }));
-      const file = path.join(sourcesDir, "slack/2026-11-14.jsonl");
-      chmodSync(file, 0o400);
+      const restore = unwritable(path.join(sourcesDir, "slack/2026-11-14.jsonl"));
       const lost = event({ delivery: "now" });
       assert.throws(() => queue.accept(lost));
-      chmodSync(file, 0o600);
+      restore();
       // Nothing of it was kept: the same id is taken as new once /sources can be written.
       assert.deepEqual(queue.accept(lost), { seq: 2, duplicate: false });
       assert.deepEqual(seqs(queue.take({ after: 0 })), [1, 2]);

@@ -1,101 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, test } from "node:test";
+import { test } from "node:test";
 
-import { SettingsManager } from "@earendil-works/pi-coding-agent";
-import type { Activity, ActivityRequest, DeliveredEvent } from "@penelope/contract";
+import type { DeliveredEvent, TurnLine } from "@penelope/contract";
 
-import { Backend } from "../src/backend.ts";
 import type { Config } from "../src/config.ts";
-import { Runner } from "../src/runner.ts";
-import { FakeBackend, TOKEN, until } from "./fake-backend.ts";
-import { type Call, fakeRuntime, MODEL, PROVIDER, type Script } from "./fake-model.ts";
-
-const closers: (() => Promise<void>)[] = [];
-afterEach(async () => {
-  for (const close of closers.splice(0).reverse()) await close();
-});
-
-interface World {
-  fake: FakeBackend;
-  config: Config;
-  calls: Call[];
-  /** The runner's log lines. */
-  logs: string[];
-  /** Start a runner over the same places; stop it with the function it returns. */
-  start(script: Script): Promise<() => Promise<void>>;
-}
-
-async function world(options: { turnFold?: boolean } = {}): Promise<World> {
-  const root = await mkdtemp(join(tmpdir(), "runner-"));
-  const home = join(root, "home");
-  const memoryDir = join(root, "memory");
-  await mkdir(home, { recursive: true });
-  await mkdir(memoryDir, { recursive: true });
-  const fake = new FakeBackend();
-  closers.push(() => fake.close());
-  const config: Config = {
-    agent: "main",
-    backend: { url: await fake.url, token: TOKEN },
-    identity: { name: "Example", role: "an operator", owner: "Owner" },
-    model: { provider: PROVIDER, id: MODEL },
-    home,
-    memoryDir,
-    sourcesDir: join(root, "sources"),
-    agentDir: join(home, ".pi", "agent"),
-    sessionDir: join(home, ".pi", "agent", "sessions", "main"),
-    promptFileMaxBytes: 65536,
-    imageMaxBytes: 1_000_000,
-    pollWaitSeconds: 1,
-    turnFold: options.turnFold ?? true,
-  };
-  const calls: Call[] = [];
-  const logs: string[] = [];
-  return {
-    fake,
-    config,
-    calls,
-    logs,
-    async start(script) {
-      const modelRuntime = await fakeRuntime(root, (call) => {
-        calls.push(call);
-        return script(call);
-      });
-      const controller = new AbortController();
-      const runner = new Runner({
-        config,
-        backend: new Backend({ url: config.backend.url, token: TOKEN, agent: "main" }),
-        modelRuntime,
-        settings: () => SettingsManager.inMemory({ retry: { enabled: false } }),
-        log: (line) => logs.push(line),
-      });
-      const running = runner.run(controller.signal);
-      const stop = async () => {
-        controller.abort();
-        await running;
-      };
-      closers.push(stop);
-      return stop;
-    },
-  };
-}
-
-function ui(seq: number, text: string, delivery: "now" | "batch" = "now"): DeliveredEvent {
-  return {
-    seq,
-    source: "ui",
-    id: `m-${seq}`,
-    occurred_at: "2026-11-14T09:00:00Z",
-    received_at: "2026-11-14T09:00:00Z",
-    summary: text,
-    delivery,
-    inline: true,
-    payload: { text },
-    appended: { path: "/sources/ui/2026-11-14.jsonl", lines: [seq, seq] },
-  };
-}
+import { curatorSystemPrompt, FOLDING, foldAskInput, type Places, reflectionInput } from "../src/prompts.ts";
+import { until } from "./fake-backend.ts";
+import type { Call, Script } from "./fake-model.ts";
+import { acked, activities, closers, ui, world } from "./world.ts";
 
 function slack(seq: number, delivery: "now" | "batch"): DeliveredEvent {
   return {
@@ -127,11 +41,11 @@ function nightly(seq: number): DeliveredEvent {
   };
 }
 
-function activities(fake: FakeBackend): Activity[] {
-  return (fake.sent("POST", "/v1/activity") as ActivityRequest[]).flatMap((request) => request.activities);
+/** The lines of an input's `<events>`, read back as JSON; none when the input is not one. */
+function events(input: string): (TurnLine & Record<string, unknown>)[] {
+  const block = /^<events>\n([\s\S]*)\n<\/events>$/.exec(input)?.[1];
+  return block === undefined ? [] : block.split("\n").map((line) => JSON.parse(line) as TurnLine & Record<string, unknown>);
 }
-
-const acked = (fake: FakeBackend) => (fake.sent("POST", "/v1/events/ack") as { seqs: number[] }[]).flatMap((a) => a.seqs);
 
 /** Answers the owner with a reply, then stops. */
 const replying: Script = (call) =>
@@ -143,7 +57,11 @@ test("an event becomes a turn; the reply, the activities, the turn's end and the
   fake.push(ui(1, "hello"));
   await until(() => acked(fake).includes(1));
 
-  assert.match(calls[0]!.userTexts.at(-1)!, /\[seq 1\] ui[^\n]*\nhello/);
+  // Guards against: the owner's message not reaching the turn as the event it was.
+  assert.deepEqual(
+    events(calls[0]!.userTexts.at(-1)!).map((line) => [line.seq, line.source, line.text]),
+    [[1, "ui", "hello"]],
+  );
   assert.deepEqual(fake.sent("POST", "/v1/replies"), [{ agent: "main", text: "hi", in_reply_to: 1 }]);
 
   const sent = activities(fake);
@@ -165,8 +83,91 @@ test("the system prompt is hers, with her memory after it", async () => {
   await start(replying);
   fake.push(ui(1, "hello"));
   await until(() => acked(fake).includes(1));
-  assert.match(calls[0]!.systemPrompt, /You are Example, an operator\./);
+  // Guards against: a session started without who she is or without her memory.
+  assert.ok(calls[0]!.systemPrompt.includes(config.identity.name));
+  assert.ok(calls[0]!.systemPrompt.includes(config.identity.role));
   assert.ok(calls[0]!.systemPrompt.includes("毎朝 CI を見る。"));
+});
+
+/** Writes skills/<name>/SKILL.md under `dir`, one for each name. */
+async function skills(dir: string, described: Record<string, string>): Promise<void> {
+  for (const [name, description] of Object.entries(described)) {
+    await mkdir(join(dir, name), { recursive: true });
+    await writeFile(join(dir, name, "SKILL.md"), `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`);
+  }
+}
+
+test("the owner's skills are listed beside the memory's, and the owner's wins a name in both", async () => {
+  const { fake, start, calls, config } = await world({ ownerSkills: true });
+  await skills(config.ownerSkillsDir!, { porkadot: "Porkadot of the owner." });
+  await skills(join(config.memoryDir, "skills"), { porkadot: "Her own porkadot.", diary: "Her own diary." });
+  await start(replying);
+  fake.push(ui(1, "hello"));
+  await until(() => acked(fake).includes(1));
+  const prompt = calls[0]!.systemPrompt;
+  // Guards against: the owner's skills not reaching her, or her own copy of one taking its place.
+  assert.ok(prompt.includes(join(config.ownerSkillsDir!, "porkadot", "SKILL.md")));
+  assert.ok(prompt.includes("Porkadot of the owner."));
+  assert.ok(!prompt.includes("Her own porkadot."));
+  assert.ok(prompt.includes("Her own diary."), "the memory's skills are still listed");
+});
+
+test("a read-only directory of the owner's skills is read and left as it was", async () => {
+  const { fake, start, calls, config } = await world({ ownerSkills: true });
+  const dir = config.ownerSkillsDir!;
+  await skills(dir, { vmapi: "Vmapi of the owner." });
+  const file = join(dir, "vmapi", "SKILL.md");
+  const before = { content: await readFile(file, "utf8"), mtime: (await stat(file)).mtimeMs };
+  await chmod(file, 0o444);
+  await chmod(join(dir, "vmapi"), 0o555);
+  await chmod(dir, 0o555);
+  closers.push(async () => {
+    await chmod(dir, 0o755);
+    await chmod(join(dir, "vmapi"), 0o755);
+  });
+  await start(replying);
+  fake.push(ui(1, "hello"));
+  await until(() => acked(fake).includes(1));
+  // Guards against: a runner that needs to write where the owner's skills are mounted read-only.
+  assert.ok(calls[0]!.systemPrompt.includes("Vmapi of the owner."));
+  assert.deepEqual(await readdir(dir), ["vmapi"]);
+  assert.deepEqual(await readdir(join(dir, "vmapi")), ["SKILL.md"]);
+  assert.deepEqual({ content: await readFile(file, "utf8"), mtime: (await stat(file)).mtimeMs }, before);
+});
+
+test("a directory of the owner's skills that is not there is passed over", async () => {
+  const { fake, start, calls } = await world({ ownerSkills: true });
+  await start(replying);
+  fake.push(ui(1, "hello"));
+  // Guards against: a session that cannot start before the owner's skills are put in place.
+  await until(() => acked(fake).includes(1));
+  assert.ok(calls.length > 0, "a turn ran");
+});
+
+test("the connectors' documents are listed in her system prompt, and a broken one is logged", async () => {
+  const { fake, start, calls, logs, config } = await world({ connectors: true });
+  const dir = config.connectorsDir!;
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "github.md"), "---\nname: github\ndescription: GitHub through gh.\nhosts: [api.github.com]\n---\n\nGH_TOKEN\n");
+  await writeFile(join(dir, "broken.md"), "# no front matter\n");
+  await start(replying);
+  fake.push(ui(1, "hello"));
+  await until(() => acked(fake).includes(1));
+  const prompt = calls[0]!.systemPrompt;
+  // Guards against: documents the deployment put in place that never reach her, or one left out without a word.
+  assert.ok(prompt.includes("GitHub through gh."));
+  assert.ok(prompt.includes(join(dir, "github.md")));
+  assert.ok(!prompt.includes(join(dir, "broken.md")));
+  assert.ok(logs.some((line) => line.includes(join(dir, "broken.md"))), "the broken one is logged");
+});
+
+test("a directory of connectors that is not there is passed over", async () => {
+  const { fake, start, calls } = await world({ connectors: true });
+  await start(replying);
+  fake.push(ui(1, "hello"));
+  // Guards against: a session that cannot start before the documents are put in place.
+  await until(() => acked(fake).includes(1));
+  assert.ok(!calls[0]!.systemPrompt.includes("<connectors>"));
 });
 
 test("after a restart the session goes on, and unacked events come again", async () => {
@@ -189,7 +190,6 @@ test("after a restart the session goes on, and unacked events come again", async
   fake.dropAcks.clear();
   await start(replying);
   await until(() => acked(fake).filter((seq) => seq === 2).length === 2);
-  await new Promise((resolve) => setTimeout(resolve, 200));
   assert.equal(turnsOfSecond(), 2);
 });
 
@@ -210,7 +210,7 @@ test("an event that comes during a turn steers it; the turn acks both", async ()
   fake.push(ui(1, "start"));
   await until(() => calls.length >= 2);
   fake.push(ui(2, "and this"));
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  await until(() => fake.polledAfter(2));
   release();
   await until(() => acked(fake).includes(2));
 
@@ -234,52 +234,57 @@ test("a batch that comes during a turn follows it", async () => {
   await until(() => calls.length >= 1);
   fake.push(slack(2, "batch"));
   fake.push(slack(3, "batch"));
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  await until(() => fake.polledAfter(3));
   release();
   await until(() => acked(fake).includes(3));
 
   const followed = calls.find((c) => c.userTexts.length === 2)!;
-  assert.match(followed.userTexts[1]!, /\[batch\] slack\/ops: 2 events/);
+  // Guards against: a batch steered into the running turn, or split into one input per event.
+  assert.deepEqual(
+    events(followed.userTexts[1]!).map((line) => [line.kind, line.source, line.stream, line.seqs]),
+    [["batch", "slack", "ops", [2, 3]]],
+  );
   assert.deepEqual(acked(fake).sort(), [1, 2, 3]);
 });
 
-const curatorWrites: Script = (call) => {
-  if (call.lastRole !== "user") return { text: "ok" };
-  if (call.systemPrompt.includes("You are the curator")) {
-    return { calls: [{ tool: "write", args: { path: "INDEX_PATH", content: "# index\n" } }] };
-  }
-  const last = call.userTexts.at(-1)!;
-  if (last.includes("handoff.md")) {
-    return { calls: [{ tool: "write", args: { path: "HANDOFF_PATH", content: "明日は版上げ。\n" } }] };
-  }
-  return { text: "answered" };
-};
+const placesOf = (config: Config): Places => ({ memory: config.memoryDir, sources: config.sourcesDir, home: config.home });
 
-function withPaths(script: Script, memoryDir: string): Script {
-  return async (call) => {
-    const answer = await script(call);
-    for (const c of answer.calls ?? []) {
-      if (c.args.path === "INDEX_PATH") c.args.path = join(memoryDir, "INDEX.md");
-      if (c.args.path === "HANDOFF_PATH") c.args.path = join(memoryDir, "handoff.md");
+// The calls of the night are told apart by the prompts the runner gives, so that
+// a change of their wording does not change which call is which.
+const isCurator = (config: Config, call: Call) =>
+  call.systemPrompt.includes(curatorSystemPrompt(config.identity, placesOf(config)).trimEnd());
+const isReflection = (config: Config, call: Call) =>
+  !isCurator(config, call) && call.userTexts.at(-1)!.includes(reflectionInput(placesOf(config)));
+
+/** The curator writes INDEX.md, the reflection writes handoff.md, and any other turn answers. */
+const nightWrites =
+  (config: Config): Script =>
+  (call) => {
+    if (call.lastRole !== "user") return { text: "ok" };
+    if (isCurator(config, call)) {
+      return { calls: [{ tool: "write", args: { path: join(config.memoryDir, "INDEX.md"), content: "# index\n" } }] };
     }
-    return answer;
+    if (isReflection(config, call)) {
+      return { calls: [{ tool: "write", args: { path: join(config.memoryDir, "handoff.md"), content: "明日は版上げ。\n" } }] };
+    }
+    return { text: "answered" };
   };
-}
 
 test("the nightly event runs the reflection, the curator and a new session", async () => {
   const { fake, start, calls, config } = await world();
-  await start(withPaths(curatorWrites, config.memoryDir));
+  await start(nightWrites(config));
   fake.push(ui(1, "a day's talk"));
   await until(() => acked(fake).includes(1));
+  const sessionsBefore = await readdir(config.sessionDir);
   fake.push(nightly(2));
   await until(() => acked(fake).includes(2));
 
   assert.equal(await readFile(join(config.memoryDir, "handoff.md"), "utf8"), "明日は版上げ。\n");
   assert.equal(await readFile(join(config.memoryDir, "INDEX.md"), "utf8"), "# index\n");
 
-  const reflection = calls.find((c) => c.userTexts.at(-1)!.includes("handoff.md"))!;
+  const reflection = calls.find((c) => isReflection(config, c))!;
   assert.ok(reflection.userTexts.some((text) => text.includes("a day's talk")), "the reflection is in the day's session");
-  const curator = calls.find((c) => c.systemPrompt.includes("You are the curator"))!;
+  const curator = calls.find((c) => isCurator(config, c))!;
   assert.equal(curator.userTexts.length, 1, "the curator starts from an empty context");
 
   // Three turns were committed: the day's, the reflection and the curator's.
@@ -294,20 +299,23 @@ test("the nightly event runs the reflection, the curator and a new session", asy
   const morning = calls.at(-1)!;
   assert.equal(morning.userTexts.length, 1);
   assert.ok(morning.systemPrompt.includes("明日は版上げ。"));
-  assert.equal((await readdir(config.sessionDir)).filter((name) => name.endsWith(".jsonl")).length, 2);
+  // Guards against: the day's record written over by the new session. Pi names the files; only their number is ours.
+  const sessionsAfter = await readdir(config.sessionDir);
+  assert.ok(sessionsBefore.every((name) => sessionsAfter.includes(name)), "the day's record is kept");
+  assert.equal(sessionsAfter.filter((name) => !sessionsBefore.includes(name) && name !== "curator").length, 1, "one new record");
 });
 
 test("a nightly event that comes again after the switch only tells and acks", async () => {
   const { fake, start, calls, config } = await world();
   fake.dropAcks.add(1);
-  const stop = await start(withPaths(curatorWrites, config.memoryDir));
+  const stop = await start(nightWrites(config));
   fake.push(nightly(1));
   await until(() => fake.sent("POST", "/v1/sessions/rotated").length === 1 && acked(fake).includes(1));
   await stop();
   const made = calls.length;
 
   fake.dropAcks.clear();
-  await start(withPaths(curatorWrites, config.memoryDir));
+  await start(nightWrites(config));
   await until(() => fake.sent("POST", "/v1/sessions/rotated").length === 2);
   await until(() => acked(fake).filter((seq) => seq === 1).length === 2);
   assert.equal(calls.length, made);
@@ -317,20 +325,18 @@ test("an event that comes during the switch waits for the new session", async ()
   const { fake, start, calls, config } = await world();
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
-  await start(
-    withPaths(async (call) => {
-      if (call.lastRole === "user" && call.systemPrompt.includes("You are the curator")) await held;
-      return curatorWrites(call);
-    }, config.memoryDir),
-  );
+  await start(async (call) => {
+    if (call.lastRole === "user" && isCurator(config, call)) await held;
+    return nightWrites(config)(call);
+  });
   fake.push(nightly(1));
-  await until(() => calls.some((c) => c.systemPrompt.includes("You are the curator")));
+  await until(() => calls.some((c) => isCurator(config, c)));
   fake.push(ui(2, "late message"));
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await until(() => fake.polledAfter(2));
   release();
   await until(() => acked(fake).includes(2));
   const late = calls.find((c) => c.userTexts.at(-1)!.includes("late message"))!;
-  assert.ok(!late.systemPrompt.includes("You are the curator"));
+  assert.ok(!isCurator(config, late));
   assert.equal(late.userTexts.length, 1);
 });
 
@@ -354,7 +360,7 @@ test("an event handled already is dropped when it comes again", async () => {
   fake.push(ui(1, "once"));
   await until(() => acked(fake).includes(1));
   // The backend hands it over again, as it does when an ack is lost.
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+  await until(() => fake.polledAfter(1, 2));
   assert.equal(calls.filter((c) => c.lastRole === "user" && c.lastText.includes("once")).length, 1);
 });
 
@@ -377,25 +383,32 @@ test("a now that comes with batched events steers the turn together with them", 
   // One poll hands over the stream and the mention after it, as the backend does.
   fake.push(slack(2, "batch"));
   fake.push(slack(3, "now"));
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  await until(() => fake.polledAfter(3));
   release();
   await until(() => acked(fake).includes(3) && acked(fake).includes(2));
 
   const steered = calls.find((c) => c.userTexts.length === 2)!;
-  assert.match(steered.userTexts[1]!, /\[seq 3\] slack\/ops/);
-  assert.match(steered.userTexts[1]!, /\[batch\] slack\/ops: 1 event \(seq 2\)/);
+  // Guards against: the batch left behind the now, which then reaches her without the stream before it.
+  assert.deepEqual(
+    events(steered.userTexts[1]!).map((line) => [line.kind ?? "event", line.seq ?? line.seqs]),
+    [
+      ["event", 3],
+      ["batch", [2]],
+    ],
+  );
   assert.equal(fake.sent("POST", "/v1/turns/end").length, 1);
 });
 
 // ── Folding ended turns ──
 
-const ASKED = /This turn is about to be folded\./;
-const asks = (calls: Call[]) => calls.filter((c) => c.lastRole === "user" && ASKED.test(c.lastText));
+// The request is told apart by the text the runner sends, not by its wording.
+const isAsk = (text: string) => text.includes(foldAskInput());
+const asks = (calls: Call[]) => calls.filter((c) => c.lastRole === "user" && isAsk(c.lastText));
 const firstCallOf = (calls: Call[], text: string) => calls.find((c) => c.lastRole === "user" && c.lastText.includes(text))!;
 
 /** Works with the shell and stops without a word; answers the request before folding. */
 const silent: Script = (call) => {
-  if (call.lastRole === "user" && ASKED.test(call.lastText)) return { text: "The pods were all up." };
+  if (call.lastRole === "user" && isAsk(call.lastText)) return { text: "The pods were all up." };
   if (call.lastRole === "user") return { thinking: "check", calls: [{ tool: "bash", args: { command: "echo pods-output" } }] };
   return {};
 };
@@ -414,21 +427,31 @@ test("a turn that ends without her own text is asked once; then it is folded", a
   const next = firstCallOf(calls, "thanks");
   const sent = JSON.stringify(next.messages);
   assert.ok(sent.includes("pods?"), "the event stays");
+  // Guards against: folding rewriting the events, which stay as the <events> she was given.
+  assert.deepEqual(
+    events(next.userTexts[0]!).map((line) => [line.seq, line.text]),
+    [[1, "pods?"]],
+  );
   assert.ok(sent.includes("The pods were all up."), "her answer stays");
-  assert.ok(sent.includes("(folded) bash: echo pods-output"), "the call stays as a line");
+  assert.ok(sent.includes("echo pods-output"), "the call stays as a line");
   assert.ok(!sent.includes("pods-output\\n"), "the output goes");
-  assert.ok(!ASKED.test(next.userTexts.join("\n")), "the request goes");
+  assert.ok(!isAsk(next.userTexts.join("\n")), "the request goes");
   assert.ok(!sent.includes('"check"'), "the thinking goes");
 
-  assert.ok(logs.some((line) => /folded 0, asked yes, compactions 0/.test(line)));
-  assert.ok(logs.some((line) => /folded 1, asked yes, compactions 0/.test(line)));
+  // Guards against: the numbers of ADR-0015 missing from the runner's log, or the log carrying what the turns said.
+  // The words of the line are the runner's; only the three numbers of each turn are looked at.
+  const counts = logs.filter((line) => /folded/.test(line) && /compaction/.test(line));
+  assert.equal(counts.length, 2, "one line a turn");
+  assert.match(counts[0]!, /folded\D*0\b.*asked\D*yes.*compactions?\D*0\b/);
+  assert.match(counts[1]!, /folded\D*1\b.*asked\D*yes.*compactions?\D*0\b/);
+  assert.ok(counts.every((line) => !line.includes("pods?") && !line.includes("pods-output")), "no text of the turns");
 });
 
 test("no tool runs in the answer to the request before folding", async () => {
   const { fake, start, calls, config } = await world();
   const touched = join(config.home, "touched");
   await start((call) => {
-    if (call.lastRole === "user" && ASKED.test(call.lastText)) {
+    if (call.lastRole === "user" && isAsk(call.lastText)) {
       return { text: "noted", calls: [{ tool: "bash", args: { command: `touch ${touched}` } }] };
     }
     return silent(call);
@@ -450,15 +473,14 @@ test("a turn with her own text is not asked", async () => {
 
 test("the reflection of the night is not asked", async () => {
   const { fake, start, calls, config } = await world();
-  await start(
-    withPaths((call) => {
-      if (call.userTexts.at(-1)!.includes("This session ends now") && !call.systemPrompt.includes("You are the curator")) {
-        if (call.lastRole === "user") return { calls: [{ tool: "write", args: { path: "HANDOFF_PATH", content: "明日。\n" } }] };
-        return {};
-      }
-      return curatorWrites(call);
-    }, config.memoryDir),
-  );
+  await start((call) => {
+    // The reflection writes and then stops without a word of its own.
+    if (isReflection(config, call)) {
+      if (call.lastRole === "user") return { calls: [{ tool: "write", args: { path: join(config.memoryDir, "handoff.md"), content: "明日。\n" } }] };
+      return {};
+    }
+    return nightWrites(config)(call);
+  });
   fake.push(nightly(1));
   await until(() => acked(fake).includes(1));
   assert.equal(asks(calls).length, 0);
@@ -474,8 +496,8 @@ test("with folding off, nothing is asked or folded", async () => {
   assert.equal(asks(calls).length, 0);
   const sent = JSON.stringify(firstCallOf(calls, "thanks").messages);
   assert.ok(sent.includes("pods-output\\n"), "the output is still there");
-  assert.ok(!sent.includes("(folded)"));
-  assert.ok(!calls[0]!.systemPrompt.includes("folded"));
+  assert.ok(sent.includes('"check"'), "the thinking is still there");
+  assert.ok(!calls[0]!.systemPrompt.includes(FOLDING), "the system prompt says nothing of folding");
 });
 
 test("what came before the turn just ended is sent as it was", async () => {
@@ -505,6 +527,6 @@ test("folding goes on after a restart", async () => {
   fake.push(ui(2, "second"));
   await until(() => acked(fake).includes(2));
   const sent = JSON.stringify(firstCallOf(calls, "second").messages);
-  assert.ok(sent.includes("(folded) bash: echo pods-output"));
-  assert.ok(!sent.includes("pods-output\\n"));
+  assert.ok(sent.includes("echo pods-output"), "the call of the first turn stays as a line");
+  assert.ok(!sent.includes("pods-output\\n"), "its output goes");
 });

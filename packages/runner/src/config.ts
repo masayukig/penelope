@@ -27,11 +27,17 @@ export interface Config {
   /** HOME: the working directory of the session (ADR-0011). */
   home: string;
   memoryDir: string;
+  /** The owner's skills, mounted read-only; left out, there are none. */
+  ownerSkillsDir?: string;
+  /** The connectors' documents, one <name>.md each (ADR-0020); left out, there are none. */
+  connectorsDir?: string;
   sourcesDir: string;
   /** Pi's directory: its settings, credentials, models and skills. */
   agentDir: string;
   /** Where the session records are kept; persistent. */
   sessionDir: string;
+  /** Where each sub-agent's record and session are kept, one directory a name; persistent (ADR-0022). */
+  subAgentDir: string;
   /** A memory file larger than this is not put into the system prompt. */
   promptFileMaxBytes: number;
   /** An image of the owner's message larger than this is left as a path. */
@@ -104,9 +110,12 @@ export function readConfig(env: Env): Config {
     ...(thinkingLevel ? { thinkingLevel } : {}),
     home,
     memoryDir: env.PENELOPE_MEMORY || "/memory",
+    ...(env.PENELOPE_OWNER_SKILLS_DIR ? { ownerSkillsDir: env.PENELOPE_OWNER_SKILLS_DIR } : {}),
+    ...(env.PENELOPE_CONNECTORS_DIR ? { connectorsDir: env.PENELOPE_CONNECTORS_DIR } : {}),
     sourcesDir: env.PENELOPE_SOURCES || "/sources",
     agentDir,
     sessionDir: env.PENELOPE_SESSIONS || join(agentDir, "sessions", "main"),
+    subAgentDir: env.PENELOPE_SUB_AGENTS || join(agentDir, "sessions", "agents"),
     promptFileMaxBytes,
     imageMaxBytes,
     pollWaitSeconds,

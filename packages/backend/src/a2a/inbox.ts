@@ -1,0 +1,214 @@
+// What other agents ask her over A2A (ADR-0018, docs/a2a.md): each task in
+// SQLite, and each message of a sender an `a2a` event, appended to
+// /sources/a2a/<sender>/ like any other. Her reply names the event it answers.
+import { randomUUID } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
+
+import type { A2APayload, A2AReplyRequest, A2AReplyResponse, A2ATaskState } from "@penelope/contract";
+
+import { transaction } from "../db.ts";
+import type { Queue } from "../queue.ts";
+import { iso } from "../time.ts";
+
+/** One message's text at most, in UTF-8. */
+export const MAX_TEXT_BYTES = 1024 * 1024;
+const SUMMARY_LENGTH = 200;
+const OPEN = "state IN ('working', 'input-required')";
+
+export type InboxLimits = {
+  /** An open task fails when its sender has not written for this long. */
+  deadlineMs: number;
+  /** A sender's open tasks at most; a request past them is rejected. */
+  maxOpenTasks: number;
+};
+
+export type TaskMessage = { role: "sender" | "agent"; messageId: string; text: string; atMs: number };
+
+/** A task as the sender is shown it. */
+export type TaskView = {
+  taskId: string;
+  sender: string;
+  contextId: string;
+  state: A2ATaskState;
+  /** Why it failed or was rejected. */
+  reason?: string;
+  messages: TaskMessage[];
+  updatedMs: number;
+};
+
+/**
+ * Why a message or a reply was not taken:
+ * - `empty`, `too-large`: the sender's text is empty, or over 1 MiB.
+ * - `unknown-context`: a context not given to this sender, or not the task's.
+ * - `not-found`: the task is not the sender's, or not there.
+ * - `not-waiting`: the task is open and not asking; anything more is a new task.
+ * - `closed`: the task is closed.
+ * - `no-such-event`: her reply names no event of a task.
+ * - `needs-text`: her question has no text.
+ */
+export class InboxRefusal extends Error {
+  readonly kind: "empty" | "too-large" | "unknown-context" | "not-found" | "not-waiting" | "closed" | "no-such-event" | "needs-text";
+  constructor(kind: InboxRefusal["kind"], message: string) {
+    super(message);
+    this.name = "InboxRefusal";
+    this.kind = kind;
+  }
+}
+
+type TaskRow = {
+  task_id: string;
+  sender: string;
+  context_id: string;
+  state: A2ATaskState;
+  reason: string | null;
+  updated_ms: number;
+};
+type MessageRow = { role: "sender" | "agent"; message_id: string; text: string; at_ms: number };
+
+export class Inbox {
+  private readonly db: DatabaseSync;
+  private readonly queue: Queue;
+  private readonly now: () => number;
+  private readonly limits: InboxLimits;
+
+  constructor(db: DatabaseSync, queue: Queue, options: { now: () => number; limits: InboxLimits }) {
+    this.db = db;
+    this.queue = queue;
+    this.now = options.now;
+    this.limits = options.limits;
+  }
+
+  /**
+   * Takes a sender's message: a new task, or the answer to her question in
+   * the task it names. The task and its event are kept together or not at
+   * all: when the event cannot be written to /sources, this throws and the
+   * sender sends again.
+   */
+  receive(sender: string, message: { text: string; messageId: string; contextId?: string; taskId?: string }): TaskView {
+    if (message.text.trim() === "") throw new InboxRefusal("empty", "the message has no text");
+    if (Buffer.byteLength(message.text) > MAX_TEXT_BYTES) throw new InboxRefusal("too-large", `the text is over ${MAX_TEXT_BYTES} bytes`);
+    return transaction(this.db, () => {
+      const now = this.now();
+      this.expire(now);
+      return message.taskId ? this.answer(sender, message.taskId, message, now) : this.open(sender, message, now);
+    });
+  }
+
+  /** A sender's task, or undefined when it is not theirs or not there. */
+  task(sender: string, taskId: string): TaskView | undefined {
+    this.expire(this.now());
+    const row = this.row(taskId);
+    return row && row.sender === sender ? this.view(row) : undefined;
+  }
+
+  /** How many open tasks a sender has. */
+  openCount(sender: string): number {
+    this.expire(this.now());
+    return (this.db.prepare(`SELECT COUNT(*) AS n FROM a2a_tasks WHERE sender = ? AND ${OPEN}`).get(sender) as { n: number }).n;
+  }
+
+  /**
+   * Her reply in the task of the event `in_reply_to`: `completed` closes it,
+   * the text optional; `input-required` asks the sender the text.
+   */
+  reply(reply: Omit<A2AReplyRequest, "agent">): A2AReplyResponse {
+    const text = reply.text?.trim() ? reply.text : undefined;
+    if (reply.state === "input-required" && text === undefined) throw new InboxRefusal("needs-text", "a question needs its text");
+    return transaction(this.db, () => {
+      const now = this.now();
+      this.expire(now);
+      const found = this.db
+        .prepare("SELECT t.task_id, t.sender, t.context_id, t.state, t.reason, t.updated_ms FROM a2a_messages m JOIN a2a_tasks t USING (task_id) WHERE m.seq = ?")
+        .get(reply.in_reply_to) as TaskRow | undefined;
+      if (!found) throw new InboxRefusal("no-such-event", `the event ${reply.in_reply_to} is not a message of an A2A task`);
+      if (found.state !== "working" && found.state !== "input-required") {
+        throw new InboxRefusal("closed", `the task is ${found.state}${found.reason ? `: ${found.reason}` : ""}`);
+      }
+      if (text !== undefined) this.insertMessage(found.task_id, { role: "agent", message_id: randomUUID(), text, at_ms: now }, null);
+      this.db.prepare("UPDATE a2a_tasks SET state = ?, updated_ms = ? WHERE task_id = ?").run(reply.state, now, found.task_id);
+      return { task_id: found.task_id, state: reply.state };
+    });
+  }
+
+  private open(sender: string, message: { text: string; messageId: string; contextId?: string }, now: number): TaskView {
+    let contextId: string = randomUUID();
+    if (message.contextId) {
+      const known = this.db.prepare("SELECT 1 FROM a2a_tasks WHERE sender = ? AND context_id = ? LIMIT 1").get(sender, message.contextId);
+      if (!known) throw new InboxRefusal("unknown-context", "the context is not one given to this sender");
+      contextId = message.contextId;
+    }
+    const taskId = randomUUID();
+    const open = (this.db.prepare(`SELECT COUNT(*) AS n FROM a2a_tasks WHERE sender = ? AND ${OPEN}`).get(sender) as { n: number }).n;
+    const rejected = open >= this.limits.maxOpenTasks;
+    const reason = rejected ? `${open} tasks of this sender are open, the most it may have; send again once one is closed` : null;
+    this.db
+      .prepare("INSERT INTO a2a_tasks (task_id, sender, context_id, state, reason, created_ms, received_ms, updated_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(taskId, sender, contextId, rejected ? "rejected" : "working", reason, now, now, now);
+    const row = { role: "sender" as const, message_id: message.messageId, text: message.text, at_ms: now };
+    // A rejected request is kept for the sender to read, and never reaches her.
+    if (rejected) this.insertMessage(taskId, row, null);
+    else this.insertMessage(taskId, row, this.event(sender, { kind: "request", task_id: taskId, context_id: contextId, message_id: message.messageId, text: message.text }, now));
+    return this.view(this.row(taskId)!);
+  }
+
+  private answer(sender: string, taskId: string, message: { text: string; messageId: string; contextId?: string }, now: number): TaskView {
+    const row = this.row(taskId);
+    if (!row || row.sender !== sender) throw new InboxRefusal("not-found", "no such task");
+    if (message.contextId && message.contextId !== row.context_id) throw new InboxRefusal("unknown-context", "the context is not the task's");
+    if (row.state === "working") throw new InboxRefusal("not-waiting", "the task is not waiting for an answer; send anything more as a new task");
+    if (row.state !== "input-required") throw new InboxRefusal("closed", `the task is ${row.state}`);
+    this.db.prepare("UPDATE a2a_tasks SET state = 'working', received_ms = ?, updated_ms = ? WHERE task_id = ?").run(now, now, taskId);
+    const seq = this.event(sender, { kind: "answer", task_id: taskId, context_id: row.context_id, message_id: message.messageId, text: message.text }, now);
+    this.insertMessage(taskId, { role: "sender", message_id: message.messageId, text: message.text, at_ms: now }, seq);
+    return this.view(this.row(taskId)!);
+  }
+
+  /** The `a2a` event of a sender's message, written to /sources; its seq. Throws when it cannot be written. */
+  private event(sender: string, payload: A2APayload, now: number): number {
+    const messages = (this.db.prepare("SELECT COUNT(*) AS n FROM a2a_messages WHERE task_id = ?").get(payload.task_id) as { n: number }).n;
+    const first = payload.text.split("\n", 1)[0]!.trim();
+    const { seq } = this.queue.accept(
+      {
+        source: "a2a",
+        stream: sender,
+        id: `${payload.task_id}/${messages + 1}`,
+        occurred_at: iso(now),
+        summary: first.length > SUMMARY_LENGTH ? `${first.slice(0, SUMMARY_LENGTH)}…` : first,
+        payload,
+      },
+      { builtin: true },
+    );
+    return seq;
+  }
+
+  /** Fails the open tasks whose sender has not written within the deadline. */
+  private expire(now: number): void {
+    const hours = Math.round(this.limits.deadlineMs / 3_600_000);
+    this.db
+      .prepare(`UPDATE a2a_tasks SET state = 'failed', reason = ?, updated_ms = ? WHERE ${OPEN} AND received_ms <= ?`)
+      .run(`no answer within ${hours} hours of the sender's last message`, now, now - this.limits.deadlineMs);
+  }
+
+  private insertMessage(taskId: string, message: MessageRow, seq: number | null): void {
+    this.db
+      .prepare("INSERT INTO a2a_messages (task_id, role, message_id, text, at_ms, seq) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(taskId, message.role, message.message_id, message.text, message.at_ms, seq);
+  }
+
+  private row(taskId: string): TaskRow | undefined {
+    return this.db.prepare("SELECT task_id, sender, context_id, state, reason, updated_ms FROM a2a_tasks WHERE task_id = ?").get(taskId) as TaskRow | undefined;
+  }
+
+  private view(row: TaskRow): TaskView {
+    const messages = this.db.prepare("SELECT role, message_id, text, at_ms FROM a2a_messages WHERE task_id = ? ORDER BY row").all(row.task_id) as MessageRow[];
+    return {
+      taskId: row.task_id,
+      sender: row.sender,
+      contextId: row.context_id,
+      state: row.state,
+      ...(row.reason === null ? {} : { reason: row.reason }),
+      messages: messages.map((m) => ({ role: m.role, messageId: m.message_id, text: m.text, atMs: m.at_ms })),
+      updatedMs: row.updated_ms,
+    };
+  }
+}

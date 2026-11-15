@@ -18,7 +18,7 @@ sandbox で永続する場所は、`/memory`、作業の場所、Pi のセッシ
 - sandbox の image は、次の一式で始める。
   - 土台: Debian、Node 24、bash、git、curl、jq、ripgrep、fd、make、ssh の client
   - 言語: Node、Go、Python 3（uv）、Ruby
-  - 運用: kubectl、helm、kustomize、sops、VM の API の CLI、クラスタの運用の手引きで使う道具
+  - 運用: kubectl、helm、kustomize、sops、VM の API の CLI、クラスタを組み立てて運用する CLI（porkadot）、クラスタの運用の手引きで使う道具
   - GitHub: gh
   - 頼みごと: A2A の CLI（Sentinel を通して呼ぶ）
 - image に入れるのは、毎回要るものと、後から入れにくいものだけにする。ほかの道具は、エージェントが sandbox の中で自由に足す。
@@ -60,4 +60,5 @@ sandbox で永続する場所は、`/memory`、作業の場所、Pi のセッシ
 
 ## References
 
+- porkadot（https://github.com/yuanying/porkadot 、2026-11-14 確認）: Kubernetes のクラスタを組み立てて運用する CLI
 - natsumi ADR 0099（https://github.com/yuanying/natsumi/blob/main/docs/adr/0099-gh-in-the-workspace.md 、2026-11-14 確認）

@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 
 import type { StreamEvent } from "@penelope/contract";
 
+import { Inbox } from "../src/a2a/inbox.ts";
+import { SubAgents } from "../src/agents.ts";
 import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
 import { Feed } from "../src/feed.ts";
@@ -16,12 +18,13 @@ import { sandboxHandler } from "../src/sandbox-api.ts";
 import { Schedules } from "../src/schedules.ts";
 import { Sources } from "../src/sources.ts";
 import { AwakeHours } from "../src/time.ts";
-import { ask, type Ask, tempDir } from "./support.ts";
+import { ask, type Ask, FakeClock, tempDir } from "./support.ts";
 
 const TOKEN = "the-real-token";
 
 async function setup(t: { after: (fn: () => void | Promise<void>) => void }, token: string | undefined = TOKEN) {
   const dir = tempDir(t);
+  const clock = new FakeClock("2026-11-14T09:00:00Z");
   const db = openDatabase(path.join(dir, "backend.sqlite"));
   const queue = new Queue(db, new Sources(path.join(dir, "sources"), "UTC"), {
     now: Date.now,
@@ -34,14 +37,16 @@ async function setup(t: { after: (fn: () => void | Promise<void>) => void }, tok
   const feed = new Feed();
   const streamed: StreamEvent[] = [];
   feed.subscribe(undefined, (_id, event) => streamed.push(event));
-  const conversation = new Conversation(db, feed, { now: Date.now });
+  const conversation = new Conversation(db, feed, { now: clock.now });
+  const agents = new SubAgents(db, feed, conversation, { now: clock.now });
   const memoryDir = path.join(dir, "memory");
   mkdirSync(memoryDir);
   const memory = new Memory(memoryDir, { name: "penelope-backend", email: "backend@penelope.invalid" });
   const schedules = new Schedules(db, { now: Date.now, timeZone: "UTC" });
+  const inbox = new Inbox(db, queue, { now: Date.now, limits: { deadlineMs: 86_400_000, maxOpenTasks: 3 } });
   const socketPath = path.join(dir, "sandbox.sock");
   const server = await listenUnix(
-    sandboxHandler({ token, queue, conversation, schedules, memory, now: Date.now, log: () => {} }),
+    sandboxHandler({ token, queue, conversation, agents, schedules, memory, inbox, now: Date.now, log: () => {} }),
     socketPath,
   );
   t.after(async () => {
@@ -50,7 +55,7 @@ async function setup(t: { after: (fn: () => void | Promise<void>) => void }, tok
   });
   const call = (pathname: string, options: Ask = {}) =>
     ask({ socketPath }, pathname, { ...options, headers: { authorization: `Bearer ${TOKEN}`, ...options.headers } });
-  return { queue, conversation, streamed, memoryDir, call, socketPath };
+  return { queue, conversation, agents, streamed, memoryDir, sourcesDir: path.join(dir, "sources"), call, socketPath, inbox, db, feed, clock };
 }
 
 const self = (id: string) => ({ agent: "main", id, summary: `note ${id}`, payload: { id } });
@@ -131,7 +136,7 @@ describe("the sandbox's API", () => {
       const { call } = await setup(t);
       const answer = await call("/v1/events?agent=child&wait=0");
       assert.equal(answer.status, 400);
-      assert.match(answer.json().error, /main/);
+      assert.equal(typeof answer.json().error, "string");
     });
 
     it("refuses an ack whose seqs are not integers", async (t) => {
@@ -206,6 +211,17 @@ describe("the sandbox's API", () => {
         assert.equal(answer.status, 400, JSON.stringify(activity));
       }
     });
+
+    it("keeps none of a request with one block of the wrong shape", async (t) => {
+      // Guards against: part of a refused request in the record and the stream (docs/sandbox-api.md).
+      const { call, streamed } = await setup(t);
+      const activities = [
+        { kind: "turn_start", at, turn_id: "t-1" },
+        { kind: "thinking", at, turn_id: "t-1" },
+      ];
+      assert.equal((await call("/v1/activity", { json: { agent: "main", activities } })).status, 400);
+      assert.deepEqual(streamed, []);
+    });
   });
 
   describe("the end of a turn", () => {
@@ -216,6 +232,18 @@ describe("the sandbox's API", () => {
       assert.equal(answer.status, 204);
       const log = execFileSync("git", ["-c", `safe.directory=${memoryDir}`, "log", "--format=%s"], { cwd: memoryDir, encoding: "utf8" });
       assert.equal(log, "Turn t-9\n");
+    });
+
+    it("answers 500 when the commit fails, and commits what is left at the next end", async (t) => {
+      // Guards against: a turn's end taken as committed when /memory was not (docs/backend.md).
+      const { call, memoryDir } = await setup(t);
+      writeFileSync(path.join(memoryDir, "always.md"), "# always\n");
+      writeFileSync(path.join(memoryDir, ".git"), "not a repository\n");
+      assert.equal((await call("/v1/turns/end", { json: { agent: "main", turn_id: "t-1" } })).status, 500);
+      rmSync(path.join(memoryDir, ".git"));
+      assert.equal((await call("/v1/turns/end", { json: { agent: "main", turn_id: "t-2" } })).status, 204);
+      const files = execFileSync("git", ["-c", `safe.directory=${memoryDir}`, "ls-files"], { cwd: memoryDir, encoding: "utf8" });
+      assert.equal(files, "always.md\n");
     });
 
     it("sets the agent waiting", async (t) => {
@@ -233,8 +261,8 @@ describe("the sandbox's API", () => {
       const schedule = made.json();
       assert.deepEqual(schedule, { id: schedule.id, agent: "main", reason: "every morning", cron: "0 9 * * *" });
       assert.deepEqual((await call("/v1/schedules?agent=main")).json(), { schedules: [schedule] });
-      assert.equal((await call(`/v1/schedules/${schedule.id}`, { method: "DELETE" })).status, 204);
-      assert.equal((await call(`/v1/schedules/${schedule.id}`, { method: "DELETE" })).status, 404);
+      assert.equal((await call(`/v1/schedules/${schedule.id}?agent=main`, { method: "DELETE" })).status, 204);
+      assert.equal((await call(`/v1/schedules/${schedule.id}?agent=main`, { method: "DELETE" })).status, 404);
       assert.deepEqual((await call("/v1/schedules?agent=main")).json(), { schedules: [] });
     });
 
@@ -260,9 +288,240 @@ describe("the sandbox's API", () => {
     });
   });
 
+  describe("sub-agents", () => {
+    const at = "2026-11-14T09:00:00Z";
+    const started = { agent: "review-pr-22", purpose: "review PR 22", closed: false };
+    const block = (agent: string, kind: string, extra: Record<string, unknown> = {}) => ({
+      agent,
+      activities: [{ kind, at, turn_id: "t-1", ...extra }],
+    });
+
+    it("are kept as the runner says, sent down the stream, and listed until closed", async (t) => {
+      const { call, agents, streamed } = await setup(t);
+      assert.equal((await call("/v1/agents", { json: started })).status, 204);
+      const t0 = "2026-11-14T09:00:00.000Z";
+      assert.deepEqual(agents.list(), [{ agent: "review-pr-22", purpose: "review PR 22", state: "waiting", started_at: t0, state_since: t0 }]);
+      assert.deepEqual(streamed, [{ event: "agent", data: started }]);
+
+      assert.equal((await call("/v1/agents", { json: { ...started, closed: true } })).status, 204);
+      assert.deepEqual(agents.list(), []);
+      assert.deepEqual(streamed.at(-1), { event: "agent", data: { ...started, closed: true } });
+    });
+
+    it("are kept with the last status the runner sent, across a restart of the backend", async (t) => {
+      const { call, db, feed, conversation, clock } = await setup(t);
+      await call("/v1/agents", { json: started });
+      clock.advance(5);
+      await call("/v1/agents", { json: { ...started, purpose: "review PR 22 again" } });
+      await call("/v1/agents", { json: { agent: "dig-logs", purpose: "dig the logs", closed: false } });
+      await call("/v1/agents", { json: { agent: "dig-logs", purpose: "dig the logs", closed: true } });
+      const again = new SubAgents(db, feed, new Conversation(db, feed, { now: clock.now }), { now: clock.now });
+      const t0 = "2026-11-14T09:00:00.000Z";
+      assert.deepEqual(again.list(), [
+        { agent: "review-pr-22", purpose: "review PR 22 again", state: "waiting", started_at: t0, state_since: t0 },
+      ]);
+      assert.equal(conversation.stateOf("review-pr-22").state, "waiting");
+    });
+
+    it("are refused as main, under a name of another shape, or without a purpose or closed", async (t) => {
+      const { call, agents, streamed } = await setup(t);
+      for (const body of [
+        { ...started, agent: "main" },
+        { ...started, agent: "Review" },
+        { ...started, agent: "-a" },
+        { ...started, agent: "a/b" },
+        { ...started, agent: "a".repeat(64) },
+        { purpose: "x", closed: false },
+        { agent: "a", closed: false },
+        { agent: "a", purpose: 1, closed: false },
+        { agent: "a", purpose: "x" },
+        { agent: "a", purpose: "x", closed: "no" },
+      ]) {
+        const answer = await call("/v1/agents", { json: body });
+        assert.equal(answer.status, 400, JSON.stringify(body));
+        assert.equal(typeof answer.json().error, "string");
+      }
+      assert.deepEqual(agents.list(), []);
+      assert.deepEqual(streamed, []);
+      assert.equal((await call("/v1/agents")).status, 405);
+    });
+
+    it("cannot reply, answer an A2A task or touch the schedules", async (t) => {
+      // Guards against: a sub-agent's words reaching the owner or another agent (ADR-0022).
+      const { call, conversation } = await setup(t);
+      const agent = "review-pr-22";
+      for (const [pathname, options] of [
+        ["/v1/replies", { json: { agent, text: "done" } }],
+        ["/v1/a2a/replies", { json: { agent, in_reply_to: 1, state: "completed" } }],
+        ["/v1/schedules", { json: { agent, reason: "x", cron: "0 9 * * *" } }],
+        [`/v1/schedules?agent=${agent}`, {}],
+        [`/v1/schedules/s-1?agent=${agent}`, { method: "DELETE" }],
+        ["/v1/schedules/s-1", { method: "DELETE" }],
+      ] as const) {
+        const answer = await call(pathname, options);
+        assert.equal(answer.status, 400, pathname);
+        assert.equal(typeof answer.json().error, "string");
+      }
+      assert.deepEqual(conversation.page().entries, []);
+    });
+
+    it("tell the main agent they stopped by events to herself, under their own stream", async (t) => {
+      const { call, sourcesDir } = await setup(t);
+      const payload = { reason: "stopped", purpose: "review PR 22", text: "Two comments.\nFirst, ..." };
+      const notice = { agent: "review-pr-22", id: "review-pr-22/1", summary: "Two comments.", payload };
+      assert.equal((await call("/v1/self-events", { json: notice })).status, 202);
+      assert.equal((await call("/v1/self-events", { json: notice })).status, 202);
+      const { events } = (await call("/v1/events?agent=main&wait=0")).json();
+      assert.equal(events.length, 1);
+      assert.equal(events[0].source, "self");
+      assert.equal(events[0].stream, "review-pr-22");
+      assert.equal(path.dirname(events[0].appended.path), path.join(sourcesDir, "self", "review-pr-22"));
+      const line = JSON.parse(readFileSync(events[0].appended.path, "utf8"));
+      assert.equal(line.stream, "review-pr-22");
+      assert.deepEqual(line.payload, payload);
+    });
+
+    it("leave the main agent's events to herself without a stream", async (t) => {
+      const { call, sourcesDir } = await setup(t);
+      await call("/v1/self-events", { json: self("s-1") });
+      const [event] = (await call("/v1/events?agent=main&wait=0")).json().events;
+      assert.equal(event.stream, undefined);
+      assert.equal(path.dirname(event.appended.path), path.join(sourcesDir, "self"));
+    });
+
+    it("cannot put an event to herself under a name of another shape", async (t) => {
+      const { call } = await setup(t);
+      for (const agent of ["Review", "../x", "a.b", ""]) {
+        const answer = await call("/v1/self-events", { json: { ...self("s-1"), agent } });
+        assert.equal(answer.status, 400, agent);
+      }
+      assert.deepEqual((await call("/v1/events?agent=main&wait=0")).json(), { events: [] });
+    });
+
+    it("send their activity down the stream and are thinking until their turn ends", async (t) => {
+      const { call, agents, streamed } = await setup(t);
+      await call("/v1/agents", { json: started });
+      const startedAt = "2026-11-14T09:01:00Z";
+      const turn = (kind: string, when: string, extra = {}) => ({
+        agent: "review-pr-22",
+        activities: [{ kind, at: when, turn_id: "t-1", ...extra }],
+      });
+      assert.equal((await call("/v1/activity", { json: turn("turn_start", startedAt) })).status, 204);
+      assert.deepEqual(agents.list()[0]?.state, "thinking");
+      assert.equal(agents.list()[0]?.state_since, startedAt);
+      assert.equal(agents.list()[0]?.started_at, "2026-11-14T09:00:00.000Z");
+      await call("/v1/activity", { json: turn("message", "2026-11-14T09:02:00Z", { text: "so" }) });
+      assert.equal(agents.list()[0]?.state_since, startedAt, "a block of the same turn does not move it");
+      assert.deepEqual(streamed.slice(1, 3), [
+        { event: "state", data: { agent: "review-pr-22", state: "thinking" } },
+        { event: "activity", data: { agent: "review-pr-22", activity: { kind: "turn_start", at: startedAt, turn_id: "t-1" } } },
+      ]);
+      await call("/v1/activity", { json: turn("turn_end", "2026-11-14T09:03:00Z") });
+      assert.deepEqual(agents.list()[0]?.state, "waiting");
+      assert.equal(agents.list()[0]?.state_since, "2026-11-14T09:03:00Z");
+      assert.deepEqual(streamed.at(-1), { event: "state", data: { agent: "review-pr-22", state: "waiting" } });
+    });
+
+    it("are waiting at the end of their turn and have /memory committed under their name", async (t) => {
+      const { call, agents, memoryDir, streamed } = await setup(t);
+      await call("/v1/agents", { json: started });
+      await call("/v1/activity", { json: block("review-pr-22", "turn_start") });
+      writeFileSync(path.join(memoryDir, "notes.md"), "# notes\n");
+      // The runner sends the turn_end block before the end of the turn.
+      await call("/v1/activity", { json: block("review-pr-22", "turn_end") });
+      assert.equal((await call("/v1/turns/end", { json: { agent: "review-pr-22", turn_id: "t-1" } })).status, 204);
+      assert.equal(agents.list()[0]?.state, "waiting");
+      assert.deepEqual(streamed.at(-1), { event: "state", data: { agent: "review-pr-22", state: "waiting" } });
+      const log = execFileSync("git", ["-c", `safe.directory=${memoryDir}`, "log", "--format=%s%n%b"], { cwd: memoryDir, encoding: "utf8" });
+      assert.equal(log.trim(), "Turn t-1\nAgent: review-pr-22");
+    });
+
+    it("keep their state and since when across a restart of the backend", async (t) => {
+      // Guards against: a sub-agent shown as waiting since the restart when it has waited since yesterday.
+      const { call, db, feed, clock } = await setup(t);
+      await call("/v1/agents", { json: started });
+      await call("/v1/activity", { json: block("review-pr-22", "turn_start") });
+      await call("/v1/activity", { json: { agent: "review-pr-22", activities: [{ kind: "turn_end", at: "2026-11-14T09:01:00Z", turn_id: "t-1" }] } });
+      clock.advance(24 * 60);
+      const agents = new SubAgents(db, feed, new Conversation(db, feed, { now: clock.now }), { now: clock.now });
+      assert.deepEqual(agents.list()[0], {
+        agent: "review-pr-22",
+        purpose: "review PR 22",
+        state: "waiting",
+        started_at: "2026-11-14T09:00:00.000Z",
+        state_since: "2026-11-14T09:01:00Z",
+      });
+    });
+
+    it("are listed by their last turn_start or turn_end, whatever else came", async (t) => {
+      const { call, agents, conversation, streamed } = await setup(t);
+      await call("/v1/agents", { json: started });
+      conversation.activities("review-pr-22", [{ kind: "thinking", at, turn_id: "t-1", text: "hm" }]);
+      assert.equal(agents.list()[0]?.state, "waiting");
+      assert.equal(streamed.at(-1)?.event, "activity", "no state for a block other than a turn's start or end");
+      conversation.activities("review-pr-22", [{ kind: "turn_start", at, turn_id: "t-2" }]);
+      await call("/v1/turns/end", { json: { agent: "review-pr-22", turn_id: "t-2" } });
+      assert.deepEqual(streamed.at(-1), { event: "state", data: { agent: "review-pr-22", state: "waiting" } });
+      assert.equal(agents.list()[0]?.state, "thinking", "the end of a turn alone is not in the record");
+    });
+
+    it("are not listed when only their activity came, and are listed with their state once the runner names them", async (t) => {
+      const { call, agents, streamed } = await setup(t);
+      assert.equal((await call("/v1/activity", { json: block("dig-logs", "turn_start") })).status, 204);
+      assert.equal(streamed.at(-1)?.event, "activity");
+      assert.deepEqual(agents.list(), []);
+      await call("/v1/agents", { json: { agent: "dig-logs", purpose: "dig the logs", closed: false } });
+      assert.deepEqual(agents.list().map((agent) => agent.state), ["thinking"]);
+    });
+
+    it("cannot send activity or end a turn under a name of another shape", async (t) => {
+      const { call, streamed } = await setup(t);
+      assert.equal((await call("/v1/activity", { json: block("Dig", "turn_start") })).status, 400);
+      assert.equal((await call("/v1/turns/end", { json: { agent: "a b", turn_id: "t-1" } })).status, 400);
+      assert.deepEqual(streamed, []);
+    });
+  });
+
+  it("answers 413 to a body over the 16 MiB of the spec, and keeps none of it", async (t) => {
+    // Guards against: a sandbox that can make the backend read and keep a body of any size.
+    const { call, conversation } = await setup(t);
+    const answer = await call("/v1/replies", { json: { agent: "main", text: "x".repeat(16 * 1024 * 1024) } });
+    assert.equal(answer.status, 413);
+    assert.deepEqual(conversation.page().entries, []);
+  });
+
   it("answers 404 to a path it does not have", async (t) => {
     const { call } = await setup(t);
     assert.equal((await call("/v1/nothing")).status, 404);
     assert.equal((await call("/v1/replies")).status, 405);
+  });
+
+  describe("A2A replies", () => {
+    it("answers in the task of the a2a event it names, and says what became of the task", async (t) => {
+      // Guards against: her answer to another agent not reaching its task.
+      const { call, inbox, queue } = await setup(t);
+      const task = inbox.receive("claude", { text: "Restart it?", messageId: "m-1" });
+      const [event] = queue.take({ after: 0 });
+      const asked = await call("/v1/a2a/replies", { method: "POST", json: { agent: "main", in_reply_to: event!.seq, state: "input-required", text: "Which one?" } });
+      assert.equal(asked.status, 200);
+      assert.deepEqual(asked.json(), { task_id: task.taskId, state: "input-required" });
+      assert.equal(inbox.task("claude", task.taskId)!.messages.at(-1)!.text, "Which one?");
+    });
+
+    it("refuses a reply to an event that is no A2A task's, to a closed task, and a question without text", async (t) => {
+      // Guards against: a reply that goes nowhere taken as sent, so that she believes the agent has it.
+      const { call, inbox, queue } = await setup(t);
+      inbox.receive("claude", { text: "hello", messageId: "m-1" });
+      const [event] = queue.take({ after: 0 });
+      const reply = (body: Record<string, unknown>) => call("/v1/a2a/replies", { method: "POST", json: { agent: "main", ...body } });
+      assert.equal((await reply({ in_reply_to: 9999, state: "completed" })).status, 404);
+      assert.equal((await reply({ in_reply_to: event!.seq, state: "input-required" })).status, 400);
+      assert.equal((await reply({ in_reply_to: event!.seq, state: "failed" })).status, 400);
+      assert.equal((await reply({ state: "completed" })).status, 400);
+      assert.equal((await reply({ in_reply_to: event!.seq, state: "completed" })).status, 200);
+      const again = await reply({ in_reply_to: event!.seq, state: "completed", text: "more" });
+      assert.equal(again.status, 409);
+      assert.match(again.json().error, /completed/);
+    });
   });
 });

@@ -3,6 +3,8 @@
 // real token in its place.
 
 import type {
+  A2AReplyRequest,
+  A2AReplyResponse,
   Activity,
   AgentId,
   DeliveredEvent,
@@ -13,6 +15,7 @@ import type {
   ScheduleListResponse,
   ScheduleWhen,
   SelfEventRequest,
+  SubAgentStatus,
 } from "@penelope/contract";
 
 export class BackendError extends Error {
@@ -43,6 +46,11 @@ export class Backend {
     this.agent = options.agent;
   }
 
+  /** The same API, called as another agent: a sub-agent's requests carry its name. */
+  as(agent: AgentId): Backend {
+    return new Backend({ url: this.url, token: this.token, agent });
+  }
+
   /** `GET /v1/events`: waits up to `wait` seconds for events after `after`. */
   async poll(after: number, wait: number, signal?: AbortSignal): Promise<DeliveredEvent[]> {
     const query = new URLSearchParams({ agent: this.agent, after: String(after), wait: String(wait) });
@@ -66,8 +74,17 @@ export class Backend {
     return (await this.post("/v1/replies", reply)) as ReplyResponse;
   }
 
+  async a2aReply(reply: Without<A2AReplyRequest>): Promise<A2AReplyResponse> {
+    return (await this.post("/v1/a2a/replies", reply)) as A2AReplyResponse;
+  }
+
   async selfEvent(event: Without<SelfEventRequest>): Promise<void> {
     await this.post("/v1/self-events", event);
+  }
+
+  /** `POST /v1/agents`: this agent, a sub-agent, was started or closed. */
+  async subAgentStatus(status: Without<SubAgentStatus>): Promise<void> {
+    await this.post("/v1/agents", status);
   }
 
   async createSchedule(schedule: { reason: string } & ScheduleWhen): Promise<Schedule> {

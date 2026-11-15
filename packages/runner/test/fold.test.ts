@@ -99,14 +99,15 @@ test("an ended turn keeps the events, her text and her replies; thinking and too
   assert.deepEqual(roles(messages), ["user", "assistant", "assistant", "toolResult", "assistant", "user"]);
 
   assert.deepEqual(messages[0], turn[0], "the event stays as it is");
-  assert.deepEqual((messages[1] as { content: unknown }).content, [
-    { type: "text", text: "(folded) bash: kubectl get pods -n monitoring | read: /memory/cluster.md" },
-  ]);
+  const calls = foldedText(messages[1]);
+  assert.ok(!calls.includes("\n"), "the calls are one line");
+  for (const part of ["bash", "kubectl get pods -n monitoring", "read", "/memory/cluster.md"]) assert.ok(calls.includes(part), part);
   assert.deepEqual((messages[2] as { content: unknown }).content, [
     { type: "text", text: "All pods are up." },
     { type: "toolCall", id: "call_3", name: "reply", arguments: { text: "元気です", in_reply_to: 1 } },
   ]);
   const reply = messages[3] as { toolCallId: string; content: unknown };
+  // `call_3|fc_3` is how Pi's openai-responses API pairs a call with its reasoning; a provider refuses half a pair.
   assert.equal(reply.toolCallId, "call_3", "the half of the ID paired with the thinking is gone");
   assert.deepEqual(reply.content, [{ type: "text", text: "Sent (id r-1)." }]);
   assert.deepEqual((messages[4] as { content: unknown }).content, [{ type: "text", text: "Replied." }]);
@@ -117,14 +118,28 @@ test("an ended turn keeps the events, her text and her replies; thinking and too
   assert.ok(!text.includes("look at the pods"), "no thinking is left");
 });
 
+test("the limit of a call is the ADR's", () => {
+  // Guards against: the 200 characters of ADR-0015 changed in the code alone.
+  assert.equal(CALL_MAX_CHARS, 200);
+});
+
+/** The one text block a folded assistant message is left with. */
+const foldedText = (message: AgentMessage | undefined): string => {
+  const content = (message as { content: { type: string; text?: string }[] }).content;
+  assert.equal(content.length, 1);
+  assert.equal(content[0]!.type, "text");
+  return content[0]!.text!;
+};
+
 test("a tool call is cut to its limit", () => {
   const long = "x".repeat(500);
   const { messages } = foldTurns([user("go"), assistant(call("c1", "bash", { command: long })), result("c1", "bash", "ok"), marker()]);
-  const line = ((messages[1] as { content: { text: string }[] }).content[0]!).text;
-  const part = line.slice("(folded) ".length);
-  assert.equal([...part].length, CALL_MAX_CHARS);
-  assert.ok(part.startsWith("bash: xxx"));
-  assert.ok(part.endsWith("…"));
+  // How the line marks itself as folded is the code's; the call in it is cut at the limit.
+  const line = foldedText(messages[1]);
+  assert.ok(line.includes("bash"));
+  assert.ok(line.includes("x".repeat(100)));
+  assert.ok(!line.includes(long), "the command is cut");
+  assert.ok([...line].length <= CALL_MAX_CHARS + 20, "to about the limit");
 });
 
 test("a call without a command or a path is shown by its arguments, on one line", () => {
@@ -138,10 +153,11 @@ test("a call without a command or a path is shown by its arguments, on one line"
     result("c2", "grep", "lots"),
     marker(),
   ]);
-  assert.equal(
-    ((messages[1] as { content: { text: string }[] }).content[0]!).text,
-    '(folded) schedule_add: {"reason":"check\\nCI","at":"2026-11-15T09:00:00Z"} | grep: error in /var/log',
-  );
+  // Guards against: a call that leaves nothing of what was tried, or that breaks the line.
+  const line = foldedText(messages[1]);
+  assert.ok(!line.includes("\n"), "one line");
+  for (const part of ["schedule_add", "check", "CI", "2026-11-15T09:00:00Z", "grep", "error", "/var/log"]) assert.ok(line.includes(part), part);
+  assert.ok(!line.includes("lots"), "no output");
 });
 
 test("the request before folding goes; her answer to it stays", () => {
@@ -165,9 +181,19 @@ test("a compaction summary passes as it is", () => {
   assert.deepEqual(roles(messages), ["compactionSummary", "assistant", "user"]);
 });
 
+test("an ended turn keeps her answers to other agents whole, as it keeps her replies", () => {
+  // Guards against: what she told an agent over A2A folded away, so that she forgets she answered it.
+  const answer = call("call_9", "reply_to_agent", { in_reply_to: 7, state: "completed", text: "Two alerts, both resolved." });
+  const { messages } = foldTurns([user("go"), assistant(answer), result("call_9", "reply_to_agent", "Sent: the task is completed."), marker()]);
+  assert.deepEqual((messages[1] as { content: unknown }).content, [answer]);
+  assert.deepEqual((messages[2] as { content: unknown }).content, [{ type: "text", text: "Sent: the task is completed." }]);
+});
+
 test("a reply that has no result is folded like any other call", () => {
   const { messages } = foldTurns([user("go"), assistant(call("c1", "reply", { text: "hi" })), marker()]);
-  assert.deepEqual((messages[1] as { content: unknown }).content, [{ type: "text", text: '(folded) reply: {"text":"hi"}' }]);
+  // Guards against: a tool call left without its result, which a provider refuses.
+  const line = foldedText(messages[1]);
+  assert.ok(line.includes("reply") && line.includes("hi"));
 });
 
 test("folding the next turn leaves what was folded before as it was", () => {

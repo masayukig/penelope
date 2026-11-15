@@ -21,8 +21,8 @@ type ToolResult = Extract<AgentMessage, { role: "toolResult" }>;
 export const TURN_END = "penelope.turn_end";
 /** The custom message that asks, before a turn is folded, for what she wants to keep. */
 export const FOLD_ASK = "penelope.fold_ask";
-/** The calls kept whole, with their results: what reached her owner. */
-export const KEPT_TOOLS = new Set(["reply"]);
+/** The calls kept whole, with their results: what reached her owner, or an agent she answered over A2A. */
+export const KEPT_TOOLS = new Set(["reply", "reply_to_agent"]);
 /** The longest a folded call, or a kept call's result, is in characters. */
 export const CALL_MAX_CHARS = 200;
 /** Stands before the folded calls of one answer. */
