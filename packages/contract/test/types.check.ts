@@ -28,6 +28,10 @@ import type {
   SessionRotatedRequest,
   SourcesLine,
   StreamEvent,
+  SubAgent,
+  SubAgentNotice,
+  SubAgentsResponse,
+  SubAgentStatus,
   TurnBatch,
   TurnEndRequest,
   TurnEvent,
@@ -170,6 +174,28 @@ export const schedules = { schedules: [schedule] } satisfies ScheduleListRespons
 
 export const rotated = { agent: "main" } satisfies SessionRotatedRequest;
 
+export const started = { agent: "review-pr-22", purpose: "review PR 22", closed: false } satisfies SubAgentStatus;
+export const closed = { ...started, closed: true } satisfies SubAgentStatus;
+// @ts-expect-error a sub-agent's status names its purpose
+export const noPurpose = { agent: "review-pr-22", closed: false } satisfies SubAgentStatus;
+// @ts-expect-error a sub-agent is closed or not
+export const notSaid = { agent: "review-pr-22", purpose: "x" } satisfies SubAgentStatus;
+
+export const stopped = { reason: "stopped", purpose: "review PR 22", text: "Two comments.\nFirst, ..." } satisfies SubAgentNotice;
+export const failed = { reason: "failed", purpose: "review PR 22", text: "the model's API did not answer" } satisfies SubAgentNotice;
+export const interrupted = { reason: "interrupted", purpose: "review PR 22", text: "" } satisfies SubAgentNotice;
+// @ts-expect-error the reasons are stopped, failed and interrupted
+export const done = { reason: "done", purpose: "x", text: "" } satisfies SubAgentNotice;
+// @ts-expect-error the notice carries the text, empty when there is none
+export const noText = { reason: "interrupted", purpose: "x" } satisfies SubAgentNotice;
+
+export const subAgentStopped = {
+  agent: "review-pr-22",
+  id: "review-pr-22/1",
+  summary: "Two comments.",
+  payload: stopped,
+} satisfies SelfEventRequest;
+
 export const error = { error: "seqs must be a list of integers" } satisfies ErrorBody;
 
 // --- The input of a turn (docs/events.md, "ターンに入る形") ---
@@ -242,6 +268,33 @@ export const streamed = [
   { event: "state", data: { agent: "main", state: "thinking" } },
   { event: "state", data: { agent: "main", state: "waiting" } },
 ] satisfies StreamEvent[];
+
+export const subAgents = {
+  agents: [
+    {
+      agent: "review-pr-22",
+      purpose: "review PR 22",
+      state: "thinking",
+      started_at: "2026-11-14T09:00:00Z",
+      state_since: "2026-11-14T09:05:00Z",
+    },
+  ],
+} satisfies SubAgentsResponse;
+export const noSubAgents = { agents: [] } satisfies SubAgentsResponse;
+// @ts-expect-error a listed sub-agent is in a turn or waiting
+export const runningSubAgent = { agent: "a", purpose: "x", state: "running", started_at: at, state_since: at } satisfies SubAgent;
+// @ts-expect-error a listed sub-agent names its purpose
+export const subAgentWithoutPurpose = { agent: "a", state: "waiting", started_at: at, state_since: at } satisfies SubAgent;
+// @ts-expect-error a listed sub-agent says when it was started and since when it is in its state
+export const subAgentWithoutTimes = { agent: "a", purpose: "x", state: "waiting" } satisfies SubAgent;
+
+export const streamedSubAgents = [
+  { event: "agent", data: started },
+  { event: "agent", data: closed },
+  { event: "state", data: { agent: "review-pr-22", state: "thinking" } },
+] satisfies StreamEvent[];
+// @ts-expect-error the agent event says whether it is closed
+export const agentWithoutClosed = { event: "agent", data: { agent: "a", purpose: "x" } } satisfies StreamEvent;
 
 // @ts-expect-error the states are thinking and waiting
 export const sleeping = { event: "state", data: { agent: "main", state: "sleeping" } } satisfies StreamEvent;

@@ -7,9 +7,10 @@ import type http from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import type { AgentResponse, PostMessageResponse } from "@penelope/contract";
+import type { AgentResponse, PostMessageResponse, SubAgentsResponse } from "@penelope/contract";
 
 import { isA2APath } from "./a2a/endpoint.ts";
+import type { SubAgents } from "./agents.ts";
 import { type AgentSettings, ICON_TYPES } from "./config.ts";
 
 import type { Conversation } from "./conversation.ts";
@@ -31,6 +32,8 @@ const SUMMARY_LENGTH = 200;
 export type UiOptions = {
   queue: Queue;
   conversation: Conversation;
+  /** The sub-agents that are not closed, for `GET /api/agents`. */
+  agents: SubAgents;
   feed: Feed;
   login: GitHubLogin;
   sessions: LoginSessions;
@@ -49,7 +52,7 @@ export type UiOptions = {
 };
 
 export function uiHandler(options: UiOptions): Handler {
-  const { queue, conversation, feed, login, sessions, ownerId, agent, now } = options;
+  const { queue, conversation, agents, feed, login, sessions, ownerId, agent, now } = options;
   const maxBytes = options.maxBytes ?? DEFAULT_UI_BYTES;
   const secure = options.publicUrl?.startsWith("https:") ?? false;
   const web = options.web ?? notBuilt;
@@ -161,6 +164,9 @@ export function uiHandler(options: UiOptions): Handler {
         sendJson(response, 200, page);
         return;
       }
+      case "GET /api/agents":
+        sendJson(response, 200, { agents: agents.list() } satisfies SubAgentsResponse);
+        return;
       case "GET /api/stream":
         stream(feed, request, response);
         return;

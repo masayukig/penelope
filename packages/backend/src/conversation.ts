@@ -4,7 +4,7 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-import type { Activity, AgentId, HistoryEntry, HistoryResponse, ReplyRequest, Trigger } from "@penelope/contract";
+import type { Activity, AgentId, AgentState, HistoryEntry, HistoryResponse, ReplyRequest, Trigger } from "@penelope/contract";
 
 import type { Feed } from "./feed.ts";
 import { iso } from "./time.ts";
@@ -108,6 +108,19 @@ export class Conversation {
   /** The turn is over: the agent waits for events again. */
   turnEnded(agent: AgentId): void {
     this.feed.publish({ event: "state", data: { agent, state: "waiting" } });
+  }
+
+  /**
+   * Whether the agent is in a turn, and since when: its last turn_start
+   * (thinking) or turn_end (waiting) in the record, at that block's time.
+   * Waiting, with no time, when it has had no turn.
+   */
+  stateOf(agent: AgentId): { state: AgentState; since?: string } {
+    const row = this.db
+      .prepare("SELECT kind, at FROM activities WHERE agent = ? AND kind IN ('turn_start', 'turn_end') ORDER BY row DESC LIMIT 1")
+      .get(agent) as { kind: "turn_start" | "turn_end"; at: string } | undefined;
+    if (row === undefined) return { state: "waiting" };
+    return { state: row.kind === "turn_start" ? "thinking" : "waiting", since: row.at };
   }
 
   sessionRotated(agent: AgentId): void {

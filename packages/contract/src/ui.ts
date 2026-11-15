@@ -2,7 +2,7 @@
 // screens are agreed with the owner.
 
 import type { Source } from "./events.ts";
-import type { Activity, AgentId } from "./sandbox.ts";
+import type { Activity, AgentId, SubAgentStatus } from "./sandbox.ts";
 
 /** `POST /api/messages` (JSON, or multipart with files). */
 export type PostMessageRequest = { text: string };
@@ -27,7 +27,23 @@ export type AgentState = "thinking" | "waiting";
 export type StreamEvent =
   | { event: "reply"; data: Extract<HistoryEntry, { kind: "agent" }> }
   | { event: "activity"; data: { agent: AgentId; activity: Activity } }
-  | { event: "state"; data: { agent: AgentId; state: AgentState } };
+  | { event: "state"; data: { agent: AgentId; state: AgentState } }
+  /** A sub-agent was started or closed. */
+  | { event: "agent"; data: SubAgentStatus };
+
+/** One sub-agent that is not closed, as `GET /api/agents` lists it. */
+export type SubAgent = {
+  agent: AgentId;
+  purpose: string;
+  state: AgentState;
+  /** RFC 3339: when the runner first said it was started. */
+  started_at: string;
+  /** RFC 3339: since when it is in `state`; when it was started if it has had no turn. */
+  state_since: string;
+};
+
+/** `GET /api/agents`: the sub-agents that are not closed. */
+export type SubAgentsResponse = { agents: SubAgent[] };
 
 /** `GET /api/agent`, read without a login: what the UI shows of the agent. */
 export type AgentResponse = {
