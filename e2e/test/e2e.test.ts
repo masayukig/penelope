@@ -261,6 +261,9 @@ describe("the Pod end to end", () => {
       `curl -sS -o /dev/null -w '%{http_code} %header{penelope-sentinel}' -H 'Authorization: Bearer ${MODEL_SURROGATE}' http://plain.example.net/leak`,
     );
     assert.equal(leak.stdout, "403 deny");
+    // A name under a wildcard registration: opened, and its surrogate swapped for the real key.
+    const app = exec("sandbox", "curl -sS -H 'Authorization: Bearer e2e-surrogate-apps-0001' https://a.apps.example.com/app");
+    assert.equal(app.stdout, "app a.apps.example.com real\n");
     // Link-local, and the Sentinel's own port reached directly: refused.
     exec("sandbox", "curl -sS -m 5 http://169.254.169.254/latest/meta-data/", { check: false });
     exec("sandbox", "curl -sS -m 5 http://127.0.0.1:15001/", { check: false });
@@ -284,6 +287,7 @@ describe("the Pod end to end", () => {
     assert.ok(has({ kind: "tcp", action: "passthrough", host: "plain.example.net", port: 443, uid: 1000 }), "the passthrough");
     assert.ok(has({ kind: "http", action: "open", host: "model.example.com", method: "POST", path: "/v1/chat/completions", uid: 1000 }), "the model");
     assert.ok(has({ kind: "http", action: "open", host: "backend.example.com", method: "POST", path: "/v1/replies", uid: 1000 }), "the backend");
+    assert.ok(has({ kind: "http", action: "open", host: "a.apps.example.com", method: "GET", path: "/app", status: 200 }), "the wildcard's name");
     assert.ok(has({ kind: "dns", host: "plain.example.net", qtype: "A" }), "the name lookup");
     assert.ok(has({ action: "deny", reason: "surrogate-out-of-place", host: "plain.example.net" }), "the surrogate");
     assert.ok(has({ action: "deny", reason: "link-local", addr: "169.254.169.254" }), "link-local");

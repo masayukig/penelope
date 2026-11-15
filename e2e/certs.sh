@@ -17,7 +17,7 @@ ca outside-ca "penelope e2e outside CA"
 
 openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj "/CN=outside" \
   -keyout outside.key -out outside.csr 2>/dev/null
-printf 'subjectAltName=DNS:model.example.com,DNS:github.com,DNS:api.github.com,DNS:plain.example.net,DNS:kubernetes.example.com,DNS:auth.example.com\nextendedKeyUsage=serverAuth\n' > outside.ext
+printf 'subjectAltName=DNS:model.example.com,DNS:github.com,DNS:api.github.com,DNS:plain.example.net,DNS:kubernetes.example.com,DNS:auth.example.com,DNS:a.apps.example.com\nextendedKeyUsage=serverAuth\n' > outside.ext
 openssl x509 -req -in outside.csr -CA outside-ca.crt -CAkey outside-ca.key -CAcreateserial -days 2 \
   -extfile outside.ext -out outside.crt 2>/dev/null
 rm -f outside.csr outside.ext outside-ca.srl
