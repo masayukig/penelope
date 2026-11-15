@@ -1,8 +1,9 @@
 # receivers の仕様
 
-receivers の設定、HTTP の口、プラグインの内側の契約、Alertmanager のプラグインが出来事を作る形を決める。
+receivers の設定、HTTP の口、プラグインの内側の契約、Alertmanager と GitHub のプラグインが出来事を作る形を決める。
 方針は [ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md) と
-[ADR-0023](adr/0023-receivers-plugins-in-the-repository-and-alertmanager-first.md) にある。ここにはその形を書く。
+[ADR-0023](adr/0023-receivers-plugins-in-the-repository-and-alertmanager-first.md)・
+[ADR-0024](adr/0024-github-webhooks-pass-review-requests-and-dismissals-without-state.md) にある。ここにはその形を書く。
 出来事の封筒と取り込み口は [events.md](events.md)、コンテナの UID・volume・待ち受けは [pod.md](pod.md) にある。
 
 具体的なホスト名・token の値・配置ごとの名前は、配置のリポジトリの設定にだけ書く。ここの例はすべて架空である。
@@ -57,11 +58,23 @@ receivers の設定、HTTP の口、プラグインの内側の契約、Alertman
 
 `listen`・`intake`・`intake_timeout_seconds` は既定のまま省く。2 つ目の Alertmanager を足すなら、`name` を `lab`、`source` を `alertmanager-lab` のようにした有効化を並べる。
 
+GitHub の webhook も受けるなら、前の形から引き継いだ URL `/v1/webhooks/github` の有効化を並べる。
+
+| 欄 | 値 |
+| --- | --- |
+| `plugins[1].name` | `github` |
+| `plugins[1].plugin` | `github` |
+| `plugins[1].source` | 省く（`github` になる） |
+| `plugins[1].settings.secret_file` | `/run/secrets/penelope-receivers/github-webhook-secret` |
+| `plugins[1].settings.authors` | `["renovate[bot]", "example-bot[bot]"]` |
+| `plugins[1].settings.reviewers` | `["example-operator"]` |
+
 ### プラグインの一覧
 
 | `plugin` | 種類 | 節 |
 | --- | --- | --- |
 | `alertmanager` | webhook | 下の「Alertmanager のプラグイン」 |
+| `github` | webhook | 下の「GitHub のプラグイン」 |
 
 ## HTTP の口
 
@@ -75,7 +88,7 @@ receivers は、`listen` の TCP で HTTP のサーバーを 1 つだけ持つ�
 | 応答 | 意味 |
 | --- | --- |
 | `200` | 受けた。作った出来事はすべて取り込み口が `202` で受けた（作った出来事が 0 件のときも同じ） |
-| `400` | body が読めない、またはプラグインの形でない。送り直しても通らない |
+| `400` | body が読めない、またはヘッダーと body がプラグインの形でない。送り直しても通らない |
 | `401` | 送り手の確かめを通らない。出来事は作らない |
 | `404` | `<name>` の webhook の有効化が無い。ほかの知らないパスも同じ |
 | `405` | `/v1/webhooks/<name>` に POST 以外で来た。`Allow: POST` を付ける |
@@ -87,7 +100,7 @@ receivers は、`listen` の TCP で HTTP のサーバーを 1 つだけ持つ�
 - 確かめ（`401`）は、body を読む（`400`）より先に行う。
 - 出来事は 1 件ずつ順に取り込み口へ送り、最初に `202` を受けられなかったところで止めて `503` を返す。それまでに入った出来事は、送り直しのときに backend が重複として落とす。
 - 取り込み口が `400`・`413` を返したときも `503` にする。receivers が作った封筒の誤りなので、標準エラーに出来事の `source`・`id` と応答を書く。
-- 要求ごとに標準エラーへ 1 行書く: 有効化の名前、応答の番号、取り込み口が受けた出来事の数、捨てたアラートの数。形は `receivers: webhook=<name> status=<番号> events=<数> dropped=<数>` で、有効化に当たらない要求（`404`）の名前は `-` である。`400` のときは、どの欄がなぜ外れたか（`reason="alerts[0]: fingerprint must be a non-empty string"` のように）を後ろに足す。body の中身と鍵は書かない。`/healthz` は書かない。
+- 要求ごとに標準エラーへ 1 行書く: 有効化の名前、応答の番号、取り込み口が受けた出来事の数、捨てたものの数（Alertmanager なら捨てたアラート、GitHub なら照らして当たらなかった依頼と取り消し）。形は `receivers: webhook=<name> status=<番号> events=<数> dropped=<数>` で、有効化に当たらない要求（`404`）の名前は `-` である。`400` のときは、どの欄がなぜ外れたか（`reason="alerts[0]: fingerprint must be a non-empty string"` のように）を後ろに足す。body の中身と鍵は書かない。`/healthz` は書かない。
 - 取り込み口に受けられなかったときは、その前にもう 1 行、出来事の `source/id` と理由（応答の番号と body の先頭、つながらない、待ちが切れた）を書く。
 
 ## プラグインの内側の契約
@@ -165,6 +178,8 @@ Alertmanager の webhook（`webhook_configs`）の知らせを受ける。`plugi
 
 例: `KubePodCrashLooping` → `kubepodcrashlooping`、`Disk usage: /var` → `disk_usage___var`。
 
+GitHub のプラグインも、同じ手順でリポジトリから `stream` を作る（下の「GitHub のプラグイン」）。
+
 #### `summary` の形
 
 - `[<状態> <severity>] <alertname>: <annotations.summary>`。`<状態>` は `FIRING` か `RESOLVED`。
@@ -176,11 +191,121 @@ Alertmanager の webhook（`webhook_configs`）の知らせを受ける。`plugi
 
 `source` が `alertmanager` なら、上の例のアラートは `/sources/alertmanager/kubepodcrashlooping/<YYYY-MM-DD>.jsonl` に 1 行として足される（[events.md](events.md) の「`/sources`」）。
 
+## GitHub のプラグイン
+
+GitHub の webhook（GitHub App やリポジトリの webhook）の配送を受け、レビューの依頼とレビューの取り消しだけを出来事にする。`plugin` は `github`、種類は webhook。状態を持たず、1 回の配送だけから出来事を 0 件か 1 件作る。
+
+### 設定
+
+| `settings` の欄 | 既定 | 中身 |
+| --- | --- | --- |
+| `secret_file` | なし（必須） | webhook の秘密を書いたファイル。前後の空白と改行を除いたものが秘密。読めない・空なら起動しない |
+| `authors` | なし（必須） | 扱う PR の作者のログインの一覧。1 つ以上。`renovate[bot]` のような App のログインも書ける |
+| `reviewers` | なし（必須） | 依頼を受け、レビューを出す人のログインの一覧。1 つ以上 |
+
+- `authors`・`reviewers` の要素は空でない文字列。空の一覧、空の文字列、大文字と小文字だけが違う同じログインの重なりがあれば、起動しない。
+- 照らすときは、大文字と小文字を区別しない。
+- 送り手の GitHub の側は、Content type を `application/json` にし、Secret に同じ秘密を置き、Pull request と Pull request review のイベントを購読する（App なら Pull requests の read の権限が要る）。ほかのイベントを購読しても、読まずに `200` を返すだけである。
+
+### 確かめ
+
+- `X-Hub-Signature-256` が `sha256=<64 桁の 16 進>` の形で、その 16 進が、秘密を鍵にした body のバイト列の HMAC-SHA256 と一致するものだけを通す。16 進の大文字と小文字は問わない。
+- 比べるのに要る時間が、どこまで一致したかで変わらない比べ方をする。16 進を 32 バイトに戻してから比べる。
+- ヘッダーが無い・形が違う・署名が違う要求は、どれも同じ `401` で断る。`X-Hub-Signature`（SHA-1）は見ない。
+- 確かめは、ヘッダーと body を読み分けるより先に行う（下の「読み分けの順」）。
+
+### body
+
+読む 2 つのイベントの body は、UTF-8 の JSON のオブジェクトで、次の欄を持つ。1 つでも外れれば `400` で断る。`pull_request.base.repo.full_name` をリポジトリとして使うのは、2 つのイベントのどちらにもあるためである。
+
+| 欄 | 型 | 使うイベント |
+| --- | --- | --- |
+| `action` | 文字列 | 両方 |
+| `pull_request.number` | 正の整数 | 両方 |
+| `pull_request.title` | 文字列 | 両方 |
+| `pull_request.html_url` | 文字列 | 両方 |
+| `pull_request.user.login` | 空でない文字列 | 両方 |
+| `pull_request.head.sha` | 空でない文字列 | 両方 |
+| `pull_request.head.ref` | 文字列 | 両方 |
+| `pull_request.base.ref` | 文字列 | 両方 |
+| `pull_request.base.repo.full_name` | `<owner>/<name>` の形の文字列 | 両方 |
+| `requested_reviewer.login` | 空でない文字列 | `pull_request` の `review_requested` で、`requested_reviewer` がオブジェクトのとき |
+| `review.user.login` | 空でない文字列 | `pull_request_review` の `dismissed` |
+
+- `action` が読む action でないときは、`action` のほかの欄を確かめない（下の「読み分けの順」）。
+- `review_requested` で `requested_reviewer` が無いか `null` のもの（チームへの依頼で、`requested_team` を持つ）は、形が合っているものとして出来事を作らない。
+- そのほかの欄（`sender`・`installation`・`repository` など）は確かめない。
+
+### 読み分けの順
+
+| 順 | 見るもの | 外れたときの応答 |
+| --- | --- | --- |
+| 1 | 署名（上の「確かめ」） | `401` |
+| 2 | `X-GitHub-Event` がある | `400` |
+| 3 | `X-GitHub-Event` が `pull_request` か `pull_request_review` | `200`、出来事 0 件（`ping` もここ） |
+| 4 | body が JSON のオブジェクトで、`action` が文字列 | `400` |
+| 5 | `action` が、`pull_request` なら `review_requested`、`pull_request_review` なら `dismissed` | `200`、出来事 0 件 |
+| 6 | `X-GitHub-Delivery` があり空でない | `400` |
+| 7 | 上の「body」の欄がそろっている | `400` |
+| 8 | 依頼の相手（`requested_reviewer.login`）か、取り消されたレビューの人（`review.user.login`）が `reviewers` にあり、`pull_request.user.login` が `authors` にある | `200`、出来事 0 件（チームへの依頼もここ） |
+| 9 | すべて通った | 出来事 1 件を取り込み口に送る（`200` か `503`） |
+
+### 出来事の作り方
+
+| 欄 | 作り方 |
+| --- | --- |
+| `id` | `X-GitHub-Delivery` の値そのまま |
+| `occurred_at` | 受けた時刻 |
+| `stream` | `pull_request.base.repo.full_name` の `/` を `.` に替え、上の「`stream` の写し方」で写したもの（`yuanying/natsumi` → `yuanying.natsumi`） |
+| `delivery` | いつも `batch`。いつも明示する |
+| `summary` | 下の「`summary` の形」 |
+| `payload` | 下の表の欄だけを持つ JSON のオブジェクト |
+
+`stream` は封筒の欄の名前で、`/sources/<source>/` の中の分け先である。GitHub では、リポジトリごとの置き場所になる。
+
+| `payload` の欄 | 中身 |
+| --- | --- |
+| `event` | `X-GitHub-Event`（`pull_request` か `pull_request_review`） |
+| `action` | `review_requested` か `dismissed` |
+| `delivery` | `X-GitHub-Delivery` |
+| `repository` | `pull_request.base.repo.full_name`（`<owner>/<name>`、届いたまま） |
+| `number` | `pull_request.number` |
+| `title` | `pull_request.title` |
+| `url` | `pull_request.html_url` |
+| `author` | `pull_request.user.login` |
+| `head_sha` | `pull_request.head.sha` |
+| `head_ref` | `pull_request.head.ref` |
+| `base_ref` | `pull_request.base.ref` |
+| `reviewer` | `review_requested` なら `requested_reviewer.login`、`dismissed` なら `review.user.login`。どちらも届いたまま |
+
+- PR の本文、コメント、差分、レビューの本文は入れない。上の表にない欄は足さない。
+- `payload` の題とブランチの名前は外の人が書いた文である。
+
+#### `summary` の形
+
+- `review_requested` なら `[review requested] <repository>#<number>: <title>`、`dismissed` なら `[review dismissed] <repository>#<number>: <title>`。
+- 組み立てた 1 行の改行と制御文字の扱いと、200 文字（Unicode のコードポイント）までに切ることは、Alertmanager の「`summary` の形」と同じである。
+- 例: `[review requested] yuanying/natsumi#12: Update dependency example to v1.2.3`
+
+### 応答
+
+- 応答の番号は上の「HTTP の口」と「読み分けの順」のとおりで、body を持たない。
+- 出来事を作るのは 1 回の配送に 1 件までである。GitHub は 10 秒以内に 2xx を受けない配送を失敗とし、失敗した配送を自動では送り直さない（`503` も同じ）。送り直しは、人が Redeliver したときだけで、そのときの `X-GitHub-Delivery` は元と同じなので、backend が重複として落とす。
+- 要求ごとの 1 行のログは「HTTP の口」のとおりである。「読み分けの順」の 8 で当たらなかったものは `events=0 dropped=1`、3 と 5 で読まなかったものは `events=0 dropped=0` になる。
+
+### 置き場所の例
+
+`source` が `github` なら、上の例の依頼は `/sources/github/yuanying.natsumi/<YYYY-MM-DD>.jsonl` に 1 行として足される（[events.md](events.md) の「`/sources`」）。
+
+### 未決
+
+- 承認の後の push で ruleset の `dismiss_stale_reviews_on_push` が承認を取り消したときに、`pull_request_review` の `dismissed` が届くか。GitHub Docs に書かれていないので、実装の作業単位が、`dismiss_stale_reviews_on_push` を持つリポジトリで確かめて、この節に事実を書く。
+
 ## 後に足すプラグイン
 
-ADR-0023 が決めず、後の判断に回したもの。それぞれ、決めるときに ADR を書き、この文書に節を足す。
+ADR-0023・ADR-0024 が決めず、後の判断に回したもの。それぞれ、決めるときに ADR を書き、この文書に節を足す。
 
-- GitHub の webhook（署名で確かめる。どの出来事を通すか）。
+- GitHub のほかのイベント（issue、コメント、`pull_request_review` の `submitted` など）を読むこと。
 - Slack（Socket Mode か Events API か。`delivery` の決め方。上の「プラグインの内側の契約」の未決）。
 - 鳴り続けているアラートの知らせ（いまは鳴り始めと鳴り止みだけ）。
 - オーナーへの知らせの仕組みと、エージェントが Alertmanager にアラートを足す道（`drop_labels` の印）との関係。
