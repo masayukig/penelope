@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { Activity, HistoryEntry, StreamEvent } from "@penelope/contract";
+import type { Activity, HistoryEntry, StreamEvent, SubAgent } from "@penelope/contract";
 
-import { type Action, currentFlow, faceOf, FACE_RESET_MS, initialState, reduce, type State, statusOf } from "../src/model/store.ts";
+import { type Action, currentFlow, faceOf, FACE_RESET_MS, initialState, reduce, type State, statusOf, subAgentsOf } from "../src/model/store.ts";
 
 const T = "turn-1";
 const run = (actions: Action[], state: State = initialState) => actions.reduce(reduce, state);
@@ -189,5 +189,78 @@ describe("a message from the owner", () => {
       stream(activity({ kind: "turn_start", at: "2026-11-14T09:00:00Z", turn_id: T })),
     ]);
     assert.deepEqual(currentFlow(s).map((entry) => entry.kind), ["turn_start", "interrupt"]);
+  });
+});
+
+describe("the sub-agents", () => {
+  const started = "2026-11-14T08:00:00Z";
+  const sub = (agent: string, extra: Partial<SubAgent> = {}): SubAgent => ({ agent, purpose: `purpose of ${agent}`, state: "waiting", started_at: started, state_since: started, ...extra });
+  const subActivity = (agent: string, a: Activity): StreamEvent => ({ event: "activity", data: { agent, activity: a } });
+  const subState = (agent: string, s: "thinking" | "waiting"): StreamEvent => ({ event: "state", data: { agent, state: s } });
+  const names = (s: State) => subAgentsOf(s).map((a) => a.agent);
+
+  it("lists them in the order the backend gives, and keeps that order as their states change", () => {
+    const s = run([
+      { type: "agents", agents: [sub("a"), sub("b", { state: "thinking" }), sub("c")] },
+      stream(subState("c", "thinking")),
+      stream(subState("b", "waiting")),
+    ]);
+    assert.deepEqual(names(s), ["a", "b", "c"]);
+    assert.deepEqual(
+      subAgentsOf(s).map((a) => a.status.kind),
+      ["waiting", "waiting", "thinking"],
+    );
+  });
+
+  it("adds one the stream says was started, and drops one it says was closed", () => {
+    const s = run([
+      { type: "agents", agents: [sub("a")] },
+      stream({ event: "agent", data: { agent: "b", purpose: "check the backups", closed: false } }),
+      stream({ event: "agent", data: { agent: "a", purpose: "purpose of a", closed: true } }),
+    ]);
+    assert.deepEqual(names(s), ["b"]);
+    assert.equal(subAgentsOf(s)[0]!.purpose, "check the backups");
+  });
+
+  it("follows each one's turn apart from the main agent's, with its latest line", () => {
+    const at = "2026-11-14T09:00:00Z";
+    const s = run([
+      { type: "agents", agents: [sub("a"), sub("b")] },
+      stream(subState("a", "thinking")),
+      stream(subActivity("a", { kind: "turn_start", at, turn_id: "a-1" })),
+      stream(subActivity("a", { kind: "thinking", at, turn_id: "a-1", text: "look at the nodes" })),
+      stream(subActivity("a", { kind: "tool_call", at, turn_id: "a-1", call_id: "c-1", name: "bash", arguments: { command: "kubectl get nodes" } })),
+    ]);
+    const [a, b] = subAgentsOf(s);
+    assert.deepEqual(a!.status, { kind: "tool", tool: { name: "bash", detail: "kubectl get nodes" } });
+    assert.deepEqual(a!.latest, { kind: "tool_call", text: "bash: kubectl get nodes" });
+    assert.deepEqual(
+      a!.flow.map((item) => item.kind),
+      ["turn_start", "thinking", "tool_call"],
+    );
+    assert.equal(b!.status.kind, "waiting");
+    // The main agent's turn and state are its own.
+    assert.equal(statusOf(s).kind, "waiting");
+    assert.deepEqual(currentFlow(s), []);
+  });
+
+  // The backend tells since when from the turn's blocks; the stream's state has no time.
+  it("takes since when it waits from the end of its turn", () => {
+    const end = "2026-11-14T10:00:00Z";
+    const s = run([
+      { type: "agents", agents: [sub("a", { state: "thinking", state_since: "2026-11-14T09:00:00Z" })] },
+      stream(subActivity("a", { kind: "turn_end", at: end, turn_id: "a-1" })),
+      stream(subState("a", "waiting")),
+    ]);
+    assert.equal(subAgentsOf(s)[0]!.stateSince, end);
+  });
+
+  it("reads the list again as it is when it comes again", () => {
+    const s = run([
+      { type: "agents", agents: [sub("a"), sub("b")] },
+      { type: "stream-open" },
+      { type: "agents", agents: [sub("b"), sub("c")] },
+    ]);
+    assert.deepEqual(names(s), ["b", "c"]);
   });
 });

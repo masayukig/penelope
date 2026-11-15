@@ -27,6 +27,8 @@ export const words = {
   approvals: "承認待ち",
   approvalsNone: "いまはありません",
   main: "本体",
+  subAgents: "サブエージェント",
+  subCount: (n: number) => `サブ ${n}`,
   idle: "いまは何もしていません。次の出来事を待っています。",
   turnStart: "ターンの始まり",
   trigger: "きっかけ",
@@ -58,6 +60,24 @@ export function statusWord(status: Status): string {
     case "tool":
       return "ツールを使っている";
   }
+}
+
+/** The state of a sub-agent: it waits stopped until the main agent speaks to it. */
+export function subAgentWord(status: Status): string {
+  return status.kind === "waiting" ? "止まって待っている" : statusWord(status);
+}
+
+/** How many sub-agents run and wait, as the head of their column says it. */
+export function subCountWord(running: number, waiting: number): string {
+  return waiting > 0 ? `走っている ${running} ・ 待っている ${waiting}` : `走っている ${running}`;
+}
+
+/** Since when a sub-agent has waited: the time today, else the day too. */
+export function sinceOf(at: string, now: number = Date.now()): string {
+  const day = dayOf(at, now);
+  if (day === words.today) return `${timeOf(at)} から`;
+  if (day === words.yesterday) return `${day} ${timeOf(at)} から`;
+  return `${day}から`;
 }
 
 /** The words of the faces of an avatar (ADR-0016). One it does not know is read as neutral. */

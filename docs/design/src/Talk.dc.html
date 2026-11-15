@@ -81,6 +81,9 @@ body{margin:0}
 <span aria-hidden="true" style="flex: none; width: 8px; height: 8px; border-radius: 9999px; background: {{dotColor}}"></span>
 <span style="flex: none; font-weight: 600">{{statusText}}</span>
 <span style="flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--color-text-secondary); font-family: ui-monospace, 'SF Mono', Monaco, Consolas, monospace; font-size: 12px">{{statusDetail}}</span>
+<sc-if value="{{hasSubs}}" hint-placeholder-val="{{ false }}">
+<span style="flex: none; padding: 2px 10px; border-radius: 9999px; background: var(--color-background-surface); color: var(--color-text-secondary); font-size: 12px">サブ {{subs}}</span>
+</sc-if>
 <svg aria-hidden="true" style="flex: none" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>
 </button>
 </sc-if>
@@ -126,13 +129,15 @@ body{margin:0}
 
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["busy","empty","offline"],"default":"busy"},"strip":{"editor":"boolean","default":false},"attach":{"editor":"boolean","default":false},"h":{"editor":"text","default":"760px"},"size":{"editor":"text","default":"14px"},"$preview":{"width":760,"height":760}}'>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["busy","empty","offline"],"default":"busy"},"strip":{"editor":"boolean","default":false},"attach":{"editor":"boolean","default":false},"subs":{"editor":"int","default":0,"min":0,"max":6},"h":{"editor":"text","default":"760px"},"size":{"editor":"text","default":"14px"},"$preview":{"width":760,"height":760}}'>
 class Component extends DCLogic {
 renderVals() {
 const mode = this.props.mode ?? 'busy';
 const busy = mode === 'busy';
 return {
 attach: !!this.props.attach,
+subs: Number(this.props.subs ?? 0),
+hasSubs: Number(this.props.subs ?? 0) > 0,
 isEmpty: mode === 'empty',
 hasMsgs: mode !== 'empty',
 busy: busy,

@@ -1,13 +1,17 @@
 // A stand-in for the backend's API for the UI (docs/ui-api.md), answered
 // through the fetch the App is given. The test writes to the stream as the
 // backend would, and drops the line when it wants.
-import type { AgentResponse, HistoryEntry, StreamEvent } from "@penelope/contract";
+import type { AgentResponse, HistoryEntry, StreamEvent, SubAgent } from "@penelope/contract";
 
 type Line = { write: (text: string) => void; end: () => void };
 
 export class FakeBackend {
   agent: AgentResponse = { name: "Iris" };
   history: HistoryEntry[] = [];
+  /** The sub-agents that are not closed, as GET /api/agents lists them. */
+  agents: SubAgent[] = [];
+  /** How many times GET /api/agents was read. */
+  agentsRead = 0;
   signedIn = true;
   /** While down, nothing can be reached. */
   down = false;
@@ -28,6 +32,10 @@ export class FakeBackend {
     }
     if (!this.signedIn) return json(401, { error: "not signed in" });
     if (method === "GET" && url.pathname === "/api/history") return json(200, { entries: [...this.history].reverse() });
+    if (method === "GET" && url.pathname === "/api/agents") {
+      this.agentsRead++;
+      return json(200, { agents: this.agents });
+    }
     if (method === "POST" && url.pathname === "/api/messages") {
       let text = "";
       let files: string[] = [];

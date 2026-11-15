@@ -10,7 +10,7 @@ import type { AgentResponse } from "@penelope/contract";
 
 import { type Api, createApi, type Fetch, Unauthorized } from "../model/api.ts";
 import { Outbox } from "../model/outbox.ts";
-import { currentFlow, FACE_RESET_MS, faceOf, initialState, reduce, statusOf } from "../model/store.ts";
+import { currentFlow, FACE_RESET_MS, faceOf, initialState, reduce, statusOf, subAgentsOf } from "../model/store.ts";
 import { openStream } from "../model/stream.ts";
 import { AgentContext } from "./agent.tsx";
 import { Desktop } from "./Desktop.tsx";
@@ -52,6 +52,16 @@ export function App({ fetch, sleep }: AppProps) {
     }
   }, [api]);
 
+  // The sub-agents outlive what the stream replays: read on each connection, then kept by the stream.
+  const readAgents = useCallback(async () => {
+    try {
+      const { agents } = await api.agents();
+      dispatch({ type: "agents", agents });
+    } catch (error) {
+      if (error instanceof Unauthorized) dispatch({ type: "unauthorized" });
+    }
+  }, [api]);
+
   // The history first: it also tells whether there is a session.
   useEffect(() => {
     void readHistory();
@@ -66,6 +76,7 @@ export function App({ fetch, sleep }: AppProps) {
       onOpen: () => {
         dispatch({ type: "stream-open" });
         outbox.online();
+        void readAgents();
         // What came while the line was down and is no longer kept for the replay.
         if (opened.current++ > 0) void readHistory();
       },
@@ -77,7 +88,7 @@ export function App({ fetch, sleep }: AppProps) {
       onUnauthorized: () => dispatch({ type: "unauthorized" }),
     });
     return () => stream.close();
-  }, [signedIn, fetch, sleep, outbox, readHistory]);
+  }, [signedIn, fetch, sleep, outbox, readHistory, readAgents]);
 
   const before = state.before;
   const onOlder = useMemo(
@@ -103,6 +114,7 @@ export function App({ fetch, sleep }: AppProps) {
     onOlder,
     status,
     flow: currentFlow(state),
+    subAgents: subAgentsOf(state),
     expression: faceOf(state, now),
     onLogout: () => {
       void api.logout().finally(() => dispatch({ type: "unauthorized" }));

@@ -1,6 +1,6 @@
 // The backend's API for the UI (docs/ui-api.md), over a fetch that the tests
 // replace.
-import type { AgentResponse, HistoryResponse, PostMessageResponse } from "@penelope/contract";
+import type { AgentResponse, HistoryResponse, PostMessageResponse, SubAgentsResponse } from "@penelope/contract";
 
 export type Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -19,6 +19,8 @@ export class Refused extends Error {
 
 export type Api = {
   agent(): Promise<AgentResponse>;
+  /** The sub-agents that are not closed. */
+  agents(): Promise<SubAgentsResponse>;
   history(before?: string): Promise<HistoryResponse>;
   send(text: string, files: readonly File[]): Promise<PostMessageResponse>;
   logout(): Promise<void>;
@@ -42,6 +44,7 @@ export function createApi(fetch: Fetch): Api {
 
   return {
     agent: async () => (await call("/api/agent")).json() as Promise<AgentResponse>,
+    agents: async () => (await call("/api/agents")).json() as Promise<SubAgentsResponse>,
     history: async (before) =>
       (await call(before === undefined ? "/api/history" : `/api/history?before=${encodeURIComponent(before)}`)).json() as Promise<HistoryResponse>,
     send: async (text, files) => {

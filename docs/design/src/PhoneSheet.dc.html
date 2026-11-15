@@ -15,7 +15,7 @@ body{margin:0}
 </helmet>
 <div style="color-scheme: {{scheme}}; --color-background-body: light-dark(#f1f1f1, #1b1b1b); --color-background-surface: light-dark(#ffffff, #262626); --color-text-primary: light-dark(#000000, #ffffff); --color-text-secondary: light-dark(#474747, #9e9e9e); --color-border-emphasized: light-dark(#d4d4d4, #525252); --color-overlay: light-dark(#00000080, #000000CC); position: relative; width: 390px; height: 844px; overflow: hidden; color: var(--color-text-primary); font-family: Figtree, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif; font-size: 16px; line-height: 1.6">
 
-<dc-import name="Phone" dark="{{dark}}" hint-size="390px,844px"></dc-import>
+<dc-import name="Phone" subs="{{subs}}" dark="{{dark}}" hint-size="390px,844px"></dc-import>
 
 <div aria-hidden="true" style="position: absolute; inset: 0; background: var(--color-overlay)"></div>
 
@@ -28,18 +28,22 @@ body{margin:0}
 <h2 style="margin: 0; font-size: 12px; font-weight: 600; color: var(--color-text-secondary)">承認待ち</h2>
 <p style="margin: 0; color: var(--color-text-secondary)">いまはありません</p>
 </div>
-<div style="flex: 1; min-height: 0; overflow: auto">
+<div style="flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 20px">
+<sc-if value="{{hasSubs}}" hint-placeholder-val="{{ false }}">
+<dc-import name="Agents" n="{{subs}}" hint-size="100%,240px"></dc-import>
+</sc-if>
 <dc-import name="Activity" hint-size="100%,400px"></dc-import>
 </div>
 </section>
 
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"subs":{"editor":"int","default":0,"min":0,"max":6},"$preview":{"width":390,"height":844}}'>
 class Component extends DCLogic {
 renderVals() {
 const dark = !!this.props.dark;
-return { dark: dark, scheme: dark ? 'dark' : 'light' };
+const subs = Number(this.props.subs ?? 0);
+return { subs: subs, hasSubs: subs > 0, dark: dark, scheme: dark ? 'dark' : 'light' };
 }
 }
 </script>
