@@ -123,7 +123,7 @@ export class Stream {
 
 /** One message of a request the fake model received, as far as the test reads it. */
 export type ChatMessage = { role: string; content?: unknown; tool_calls?: { function: { name: string; arguments: string } }[] };
-export type ModelCall = { at: string; credential: string; stream: boolean; messages: ChatMessage[] };
+export type ModelCall = { at: string; credential: string; stream: boolean; messages: ChatMessage[]; tools: string[] };
 export type Seen = { at: string; scheme: string; host: string; method: string; path: string; credential: string };
 
 async function control<T>(path: string, init: { method?: string; body?: string } = {}): Promise<T> {

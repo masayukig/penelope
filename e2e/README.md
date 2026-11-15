@@ -60,4 +60,5 @@ make e2e
 5. sandbox に本物の鍵が無い。取り込み口の socket が見えない。backend の UI 向けの口に loopback で届いても、ログインを求められる。
 6. receivers から取り込み口へ出来事を入れ、`/sources` に追記される。重複は受けたことになり、`control` は断られる。`batch` は待ち、後から来た `now` が待っている `batch` を連れて 1 つのターンに届く。
 7. ほかのエージェントが A2A で頼む。token なしで Agent Card が読める。allow-list に無い ServiceAccount は、TokenReview でも gated の assertion でも断られる。送り手が ServiceAccount の token で頼み（TokenReview）、ターンが `reply_to_agent` で聞き返し、送り手が gated の assertion で答え、ターンが閉じた答えを送り手が `GetTask` で読む。依頼と答えは `/sources/a2a/claude/` に追記され、API server には backend 自身の token で尋ねている。
-8. 夜の制御の出来事で、振り返り → 整理係 → 新しいセッションが回り、`handoff.md` と整理係の変えたものがコミットされる。新しいセッションのシステムプロンプトに `handoff.md` が入り、前の日の会話は無い。次の切り替えの後も、ターンは回り続ける。
+8. 本体がサブエージェントを起こす（`subagent_start`）。サブエージェントは自分のシステムプロンプトと作業の場所で、本体の道具（`reply`・`reply_to_agent`・`self_event`・`subagent_*`）を持たずに走り、`/memory` に書いて問いで止まる。その地の文が `self` の出来事として本体に届き（`/sources/self/<名前>/`）、本体が続きを送り（`subagent_send`）、同じセッションで続いたサブエージェントの結果を受けて閉じる（`subagent_close`）。サブエージェントの書いたものは、そのターンの終わりに `Agent: <名前>` でコミットされる。UI の流れには起こした・閉じたことと途中経過が乗り、閉じたサブエージェントは `/api/agents` に載らない。
+9. 夜の制御の出来事で、振り返り → 整理係 → 新しいセッションが回り、`handoff.md` と整理係の変えたものがコミットされる。新しいセッションのシステムプロンプトに `handoff.md` が入り、前の日の会話は無い。次の切り替えの後も、ターンは回り続ける。

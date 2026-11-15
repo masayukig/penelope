@@ -7,7 +7,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import type { DeliveredEvent, Schedule } from "@penelope/contract";
+import type { DeliveredEvent, Schedule, SelfEventRequest } from "@penelope/contract";
 
 export const TOKEN = "real-token-example";
 
@@ -31,6 +31,10 @@ export class FakeBackend {
   /** When each event was last handed over. */
   private readonly handed = new Map<number, number>();
   redeliverMs = 300;
+  /** How many of the next self-events are refused with a 503, as if the backend were away. */
+  failSelfEvents = 0;
+  /** The self-events the backend took, in order. */
+  readonly selfEvents: SelfEventRequest[] = [];
   private readonly schedules: Schedule[] = [];
   private waiters: (() => void)[] = [];
   private replies = 0;
@@ -157,7 +161,13 @@ export class FakeBackend {
       this.schedules.splice(index, 1);
       return answer(204);
     }
+    if (key === "POST /v1/self-events" && this.failSelfEvents > 0) {
+      this.failSelfEvents--;
+      return answer(503, { error: "unavailable" });
+    }
+    if (key === "POST /v1/self-events") this.selfEvents.push(body as SelfEventRequest);
     if (
+      key === "POST /v1/agents" ||
       key === "POST /v1/activity" ||
       key === "POST /v1/turns/end" ||
       key === "POST /v1/self-events" ||

@@ -18,7 +18,7 @@ import type { Activity, ControlPayload, DeliveredEvent } from "@penelope/contrac
 import { TurnRecorder } from "./activities.ts";
 import type { Backend } from "./backend.ts";
 import type { Config } from "./config.ts";
-import { readConnectors } from "./connectors.ts";
+import { type Connector, readConnectors } from "./connectors.ts";
 import { FOLD_ASK, foldExtension, TURN_END } from "./fold.ts";
 import { inlineImages } from "./images.ts";
 import {
@@ -40,7 +40,8 @@ import {
   reflectionInput,
   systemPrompt,
 } from "./prompts.ts";
-import { backendTools } from "./tools.ts";
+import { SubAgents } from "./subagents.ts";
+import { backendTools, subAgentTools } from "./tools.ts";
 import { formatEvents } from "./turn-input.ts";
 
 export interface RunnerOptions {
@@ -49,6 +50,8 @@ export interface RunnerOptions {
   modelRuntime: ModelRuntime;
   settings: () => SettingsManager;
   log?: (line: string) => void;
+  /** The first wait before a sub-agent's notice is sent again (ADR-0022). */
+  retryMs?: number;
 }
 
 interface Turn {
@@ -76,6 +79,7 @@ export class Runner {
   private readonly setup: PiSetup;
   private readonly log: (line: string) => void;
   private readonly places: Places;
+  private readonly subAgents: SubAgents;
 
   private session: AgentSession | undefined;
   private state: SessionState | undefined;
@@ -95,11 +99,19 @@ export class Runner {
     this.config = options.config;
     this.backend = options.backend;
     this.log = options.log ?? ((line) => process.stderr.write(`${line}\n`));
-    this.setup = {
+    const pi = { config: options.config, modelRuntime: options.modelRuntime, settings: options.settings };
+    // A sub-agent has Pi's tools alone, and its turns are not folded.
+    this.subAgents = new SubAgents({
       config: options.config,
-      modelRuntime: options.modelRuntime,
-      settings: options.settings,
-      tools: backendTools(options.backend),
+      setup: { ...pi, tools: [], extensions: [] },
+      backend: options.backend,
+      connectors: () => this.connectors(),
+      log: this.log,
+      retryMs: options.retryMs ?? 1000,
+    });
+    this.setup = {
+      ...pi,
+      tools: [...backendTools(options.backend), ...subAgentTools(this.subAgents)],
       extensions: [
         foldExtension({
           folding: () => options.config.turnFold,
@@ -119,27 +131,33 @@ export class Runner {
   /** Runs until `signal` aborts. */
   async run(signal: AbortSignal): Promise<void> {
     await this.open();
+    await this.subAgents.restore();
     signal.addEventListener("abort", () => {
       this.stopping = true;
       this.wake?.();
       void this.session?.abort();
+      void this.subAgents.stop();
     });
     try {
       await Promise.all([this.poll(signal), this.work(signal)]);
     } finally {
+      await this.subAgents.stop();
       this.session?.dispose();
     }
   }
 
+  /** The connectors' documents as they are now; none without a directory. */
+  private async connectors(): Promise<{ dir: string; list: Connector[] } | undefined> {
+    const dir = this.config.connectorsDir;
+    if (!dir) return undefined;
+    const { connectors: list, skipped } = await readConnectors(dir);
+    for (const { path, reason } of skipped) this.log(`connector left out: ${path} ${reason}`);
+    return { dir, list };
+  }
+
   private async mainPrompt(): Promise<string> {
     const files = await readPromptFiles(this.config.memoryDir, this.config.promptFileMaxBytes);
-    const dir = this.config.connectorsDir;
-    let connectors;
-    if (dir) {
-      const { connectors: list, skipped } = await readConnectors(dir);
-      for (const { path, reason } of skipped) this.log(`connector left out: ${path} ${reason}`);
-      connectors = { dir, list };
-    }
+    const connectors = await this.connectors();
     return systemPrompt(this.config.identity, this.places, files, {
       folding: this.config.turnFold,
       ...(connectors ? { connectors } : {}),

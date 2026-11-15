@@ -14,6 +14,8 @@ export interface Answer {
   thinking?: string;
   text?: string;
   calls?: { tool: string; args: Record<string, unknown> }[];
+  /** The request fails with this message, as when the model's API answers with an error. */
+  error?: string;
 }
 
 /** What the model was given for one call. */
@@ -29,6 +31,8 @@ export interface Call {
   lastImages: string[];
   /** Every message but the system prompt, as the provider was given them. */
   messages: Message[];
+  /** The names of the tools the model was given. */
+  tools: string[];
 }
 
 /** Decides each answer from the call. Called once per model request. */
@@ -64,6 +68,16 @@ function userTexts(messages: Message[]): string[] {
     );
   }
   return texts;
+}
+
+/** The tools the system messages declare, replayed in order. */
+function toolsOf(system: SystemMessage[]): string[] {
+  const tools = new Set<string>();
+  for (const message of system) {
+    for (const tool of message.toolsAdded ?? []) tools.add(tool.name);
+    for (const tool of message.toolsRemoved ?? []) tools.delete(tool.name);
+  }
+  return [...tools].sort();
 }
 
 /** A runtime with the scripted model in it, under a directory of its own. */
@@ -108,7 +122,7 @@ export async function fakeRuntime(root: string, script: Script): Promise<ModelRu
         const system = context.messages.filter((m) => m.role === "system") as SystemMessage[];
         const rest = context.messages.filter((m) => m.role !== "system");
         const last = rest.at(-1);
-        const answer = await script({
+        const call = script({
           systemPrompt: system.map((m) => getSystemMessageText(m)).join("\n"),
           userTexts: userTexts(rest),
           lastRole: last?.role ?? "",
@@ -119,7 +133,24 @@ export async function fakeRuntime(root: string, script: Script): Promise<ModelRu
                 .map((part) => part.mimeType ?? "")
             : [],
           messages: structuredClone(rest),
+          tools: toolsOf(system),
         });
+        // A request cancelled while the script is still deciding ends as Pi's own aborted ones do.
+        const answer = await new Promise<Answer | undefined>((resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => resolve(undefined), { once: true });
+          Promise.resolve(call).then(resolve, reject);
+        });
+        if (!answer) {
+          message.stopReason = "aborted";
+          push({ type: "error", reason: "aborted", error: message });
+          return;
+        }
+        if (answer.error) {
+          message.stopReason = "error";
+          message.errorMessage = answer.error;
+          push({ type: "error", reason: "error", error: message });
+          return;
+        }
         push({ type: "start", partial: message });
         if (answer.thinking) {
           const index = message.content.length;

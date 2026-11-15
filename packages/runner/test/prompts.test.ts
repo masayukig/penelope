@@ -11,6 +11,7 @@ import {
   foldAskInput,
   readPromptFiles,
   reflectionInput,
+  subAgentSystemPrompt,
   systemPrompt,
   type Places,
 } from "../src/prompts.ts";
@@ -183,4 +184,41 @@ test("the system prompt does not say the sandbox holds no real key, since she ma
   const prompt = systemPrompt(identity, places, await readPromptFiles(places.memory, 1000));
   assert.ok(!prompt.includes("there are no real keys in the sandbox"));
   assert.match(prompt, /stand-in/);
+});
+
+test("the memory's shape names agents/, where the roles of sub-agents are", async () => {
+  // Guards against: her not knowing where the roles of her sub-agents are kept, or which one is used without a role.
+  const places = await memory({});
+  const prompt = systemPrompt(identity, places, []);
+  assert.match(prompt, /agents\/<role>\.md/);
+  assert.match(prompt, /default\.md/);
+});
+
+test("a sub-agent's system prompt states what it is, its purpose and place, and has the role's body after it", () => {
+  const places = { memory: "/memory", sources: "/sources", home: "/home/agent" };
+  const prompt = subAgentSystemPrompt(identity, places, {
+    name: "alerts",
+    purpose: "Look at today's alerts",
+    cwd: "/home/agent/agents/alerts",
+    role: { path: "/memory/agents/default.md", body: "頼まれた仕事だけをする。" },
+  });
+  // Guards against: a sub-agent that does not know who started it, what for, where it works, or where its words go.
+  assert.ok(prompt.includes("sub-agent"));
+  assert.ok(prompt.includes(identity.name));
+  assert.ok(prompt.includes("Look at today's alerts"));
+  assert.ok(prompt.includes("/home/agent/agents/alerts"));
+  assert.match(prompt, /Sentinel/);
+  assert.match(prompt, /question/);
+  assert.ok(prompt.trimEnd().endsWith("頼まれた仕事だけをする。"), "the role's body comes last");
+  assert.ok(prompt.includes("/memory/agents/default.md"));
+  // It is not told the shape of her memory, nor how she answers her owner.
+  assert.ok(!prompt.includes("personality.md"));
+  assert.ok(!prompt.includes("handoff.md"));
+  assert.ok(!/\breply\b/.test(prompt));
+});
+
+test("a sub-agent's system prompt without a role's body is the fixed part alone", () => {
+  const places = { memory: "/memory", sources: "/sources", home: "/home/agent" };
+  const prompt = subAgentSystemPrompt(identity, places, { name: "bare", purpose: "p", cwd: "/home/agent/agents/bare" });
+  assert.ok(!prompt.includes("/memory/agents/"));
 });

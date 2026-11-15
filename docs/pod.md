@@ -36,7 +36,7 @@
 | オーナーの skill（例 `/skills`、配置が置く） | 読み取り | — | — | — |
 | コネクタの文書（`/etc/penelope/connectors/`、配置が置く） | 読み取り | — | — | — |
 
-- Pi のディレクトリ（設定・認証・モデル・skill）とセッションの記録は HOME の下に置く（`/home/agent/.pi/agent/`、セッションは `/home/agent/.pi/agent/sessions/main/`）。別の volume にはしない。HOME が永続なので足りる。
+- Pi のディレクトリ（設定・認証・モデル・skill）とセッションの記録は HOME の下に置く（`/home/agent/.pi/agent/`、セッションは `/home/agent/.pi/agent/sessions/main/`、サブエージェントの記録とセッションは `/home/agent/.pi/agent/sessions/agents/`）。別の volume にはしない。HOME が永続なので足りる。
 - オーナーの skill は `<名前>/SKILL.md` の並びで、runner は `PENELOPE_OWNER_SKILLS_DIR` が指す場所から記憶の `skills/` と並べて読む。同じ名前が両方にあれば、オーナーの方が一覧に載る。読み取りで mount するので、エージェントは書き換えられない。設定が無いか、場所が無ければ、オーナーの skill は無い。
 - コネクタの文書は `<名前>.md` の並びで、runner は `PENELOPE_CONNECTORS_DIR` が指す場所から読み、一覧をシステムプロンプトに出す（[sentinel-config.md](sentinel-config.md) の「コネクタの文書」）。読み取りで mount する。設定が無いか、場所が無ければ、コネクタの一覧は無い。
 - 自分で作った VM への ssh の鍵は、エージェントが HOME に自分で作る（[ADR-0021](adr/0021-her-own-ssh-key-in-home-for-the-vms-she-makes.md)）。配置は ssh の鍵も ssh-agent も置かない。ssh の接続は、ほかの外向きと同じく Sentinel へ向け直され、既定の扱いに従う。

@@ -59,6 +59,7 @@ const MEMORY_SHAPE = ({ memory, ownerSkills }: Places, owner: string) => `- pers
     ? ` So are ${owner}'s skills, in ${ownerSkills}/, which is read-only; where a name is in both, the one listed is ${owner}'s.`
     : ""
 }
+- agents/<role>.md: the roles of sub-agents, one file each, with \`name\` and \`description\` in its front matter. When a sub-agent is started with a role, the body of its file follows the sub-agent's system prompt; without one, the body of agents/default.md does.
 - Any other file: one topic each.`;
 
 function appended(files: PromptFile[]): string {
@@ -94,6 +95,10 @@ ${entries.join("\n")}
 </connectors>`;
 }
 
+/** The Sentinel, as both her and her sub-agents are told of it. */
+const SENTINEL = (owner: string) =>
+  `Every connection out of the sandbox goes through the Sentinel, a relay outside it. The Sentinel records the traffic and can hold a request until ${owner} approves it. For some hosts it opens the TLS connection and puts the real credential in place of the stand-in the sandbox holds; the sandbox is given no real keys. The certificates it presents are issued by an internal CA, which is in the system trust store. A tool that carries its own CA bundle trusts it once pointed at the system bundle, /etc/ssl/certs/ca-certificates.crt.`;
+
 /** Her system prompt, made once for each session. */
 export function systemPrompt(
   identity: Identity,
@@ -108,7 +113,7 @@ export function systemPrompt(
 
 You run in a sandbox: a Linux container where you are the user \`agent\`, with your home at ${home}, which is also your working directory. Your home, ${memory} and the record of this session persist. The rest of the filesystem comes from the image and is reset when the container is made again. The usual development tools are installed, and you can add more.
 
-Every connection out of the sandbox goes through the Sentinel, a relay outside it. The Sentinel records the traffic and can hold a request until your owner approves it. For some hosts it opens the TLS connection and puts the real credential in place of the stand-in the sandbox holds; the sandbox is given no real keys. The certificates it presents are issued by an internal CA, which is in the system trust store. A tool that carries its own CA bundle trusts it once pointed at the system bundle, /etc/ssl/certs/ca-certificates.crt.${connectorsSection(options.connectors)}
+${SENTINEL("your owner")}${connectorsSection(options.connectors)}
 
 # Events and answers
 
@@ -162,4 +167,42 @@ The contents of the events ${identity.name} received are in ${sources}, one JSON
 /** The curator's one input. `today` is the date of the night, YYYY-MM-DD. */
 export function curatorInput(places: Places, today: string): string {
   return `It is the night of ${today}. The day's session has ended, and what it left for the next one is in ${join(places.memory, "handoff.md")}. The memory is yours until this turn ends; the next session starts from it.`;
+}
+
+/** What a sub-agent is started with (ADR-0022). */
+export interface SubAgentPlace {
+  name: string;
+  purpose: string;
+  cwd: string;
+  /** The role file whose body follows: the chosen role's, or default.md; left out when there is none. */
+  role?: { path: string; body: string };
+}
+
+/**
+ * A sub-agent's system prompt: that it is one, what for and where, where its
+ * words go, the sandbox, the connectors and the skills. Her personality and
+ * the shape of her memory are not in it. The role's body follows as it is.
+ */
+export function subAgentSystemPrompt(
+  identity: Identity,
+  places: Places,
+  agent: SubAgentPlace,
+  options: { connectors?: { dir: string; list: Connector[] } } = {},
+): string {
+  const { name } = identity;
+  const skills = places.ownerSkills ? `${places.memory}/skills/ and ${places.ownerSkills}/` : `${places.memory}/skills/`;
+  const prompt = `You are a sub-agent of ${name}, ${identity.role}, whose owner is ${identity.owner}. ${name} started you, named \`${agent.name}\`, for this purpose: ${agent.purpose}
+
+Your requests come from ${name} alone: the first one when you were started, and more words when ${name} sends them after you have stopped. You stop when you answer without calling a tool. Then the text of that last answer reaches ${name} in full, as an event; nothing else of your run reaches ${name}, and nothing of it reaches ${identity.owner}. You can stop with a question; ${name}'s answer comes as more words, and you go on in this session.
+
+# Where you are
+
+You run in a sandbox: a Linux container where you are the user \`agent\`, with your home at ${places.home}. Your working directory is ${agent.cwd}. Your home and the record of this session persist. The rest of the filesystem comes from the image and is reset when the container is made again. The usual development tools are installed, and you can add more.
+
+${SENTINEL(identity.owner)}${connectorsSection(options.connectors)}
+
+# Skills
+
+The skills in ${skills} are listed at the end of this system prompt.${agent.role ? `\n\n${agent.role.path} follows as it was when this session started.` : ""}`;
+  return agent.role ? `${prompt}\n\n# ${agent.role.path}\n\n${agent.role.body.trim()}\n` : `${prompt}\n`;
 }

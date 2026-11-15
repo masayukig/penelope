@@ -23,6 +23,7 @@ test("the required settings and the defaults", () => {
     sourcesDir: "/sources",
     agentDir: "/home/agent/.pi/agent",
     sessionDir: "/home/agent/.pi/agent/sessions/main",
+    subAgentDir: "/home/agent/.pi/agent/sessions/agents",
     promptFileMaxBytes: 65536,
     imageMaxBytes: 5242880,
     pollWaitSeconds: 30,
@@ -39,6 +40,7 @@ test("the optional settings", () => {
     PENELOPE_SOURCES: "/s",
     PI_CODING_AGENT_DIR: "/pi",
     PENELOPE_SESSIONS: "/sessions",
+    PENELOPE_SUB_AGENTS: "/agents",
     PENELOPE_PROMPT_FILE_MAX_BYTES: "100",
     PENELOPE_POLL_WAIT_SECONDS: "5",
     PENELOPE_IMAGE_MAX_BYTES: "1000",
@@ -56,6 +58,7 @@ test("the optional settings", () => {
   assert.equal(config.sourcesDir, "/s");
   assert.equal(config.agentDir, "/pi");
   assert.equal(config.sessionDir, "/sessions");
+  assert.equal(config.subAgentDir, "/agents");
   assert.equal(config.promptFileMaxBytes, 100);
   assert.equal(config.pollWaitSeconds, 5);
 });

@@ -419,6 +419,52 @@ describe("the Pod end to end", () => {
     assert.ok(reviews.every((review) => review.caller === "backend"), JSON.stringify(reviews));
   }));
 
+  it("has a sub-agent started, stopped with a question, told more and closed by the main agent", track(async () => {
+    // Guards against: a sub-agent's last words not reaching the main agent as a `self` event, more words not going on
+    // in its session, its memory left uncommitted, or the UI not told it was started and closed.
+    await send("E2E-SUB-START");
+    await replied("E2E-REPLY-SUB", 180_000);
+
+    const agents = stream.events.filter((event) => event.event === "agent").map((event) => event.data);
+    assert.deepEqual(agents, [
+      { agent: "e2e-sub", purpose: "E2E-SUB-PURPOSE", closed: false },
+      { agent: "e2e-sub", purpose: "E2E-SUB-PURPOSE", closed: true },
+    ]);
+    const own = stream.events
+      .filter((event) => event.event === "activity" && (event.data as { agent: string }).agent === "e2e-sub")
+      .map((event) => (event.data as { activity: { kind: string } }).activity.kind);
+    assert.equal(own.filter((kind) => kind === "turn_start").length, 2, "two runs of the sub-agent on the stream");
+    assert.deepEqual((await browser.json<{ agents: unknown[] }>("/api/agents")).body.agents, [], "closed, it is not listed");
+
+    // Each time it stopped, its last words were appended to /sources/self/<name>/ for the main agent.
+    const day = new Date().toISOString().slice(0, 10);
+    const lines = exec("sandbox", `cat /sources/self/e2e-sub/${day}.jsonl`).stdout.trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(
+      lines.map((line) => [line.source, line.stream, line.id, line.payload]),
+      [
+        ["self", "e2e-sub", "e2e-sub/1", { reason: "stopped", purpose: "E2E-SUB-PURPOSE", text: "E2E-SUB-QUESTION: which branch?" }],
+        ["self", "e2e-sub", "e2e-sub/2", { reason: "stopped", purpose: "E2E-SUB-PURPOSE", text: "E2E-SUB-RESULT: the build is fixed." }],
+      ],
+    );
+
+    // The sub-agent: its own system prompt and working directory, none of the main agent's tools, one session.
+    const sub = (await outside.modelCalls()).filter((call) => where(call).system.includes("You are a sub-agent"));
+    assert.ok(sub.length >= 4, "two runs, the first with tool calls");
+    assert.ok(where(sub[0]!).system.includes("E2E-SUB-PURPOSE"));
+    assert.ok(where(sub[0]!).system.includes("/home/agent/agents/e2e-sub"));
+    for (const tool of ["reply", "reply_to_agent", "self_event", "subagent_start"]) {
+      assert.ok(!sub.some((call) => call.tools.includes(tool)), `the sub-agent has no ${tool}`);
+    }
+    assert.ok(JSON.stringify(sub.at(-1)!.messages).includes("E2E-SUB-FIRST"), "more words go on in the same session");
+
+    // What it wrote to /memory was committed at the end of its turn, as its own.
+    const log = await eventually("the sub-agent's commit", () => {
+      const text = memoryLog();
+      return text.includes("notes/e2e-sub.md") ? text : undefined;
+    });
+    assert.match(log, /Turn [0-9a-f-]{36}\nAgent: e2e-sub\n+notes\/e2e-sub\.md\n/);
+  }));
+
   // Last, as from here on a night comes every minute.
   it("switches the session at night: reflection, curator, a new session, and handoff.md committed", track(async () => {
     // Guards against: the nightly switch not running through, or the new session not starting from handoff.md.

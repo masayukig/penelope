@@ -15,6 +15,7 @@ import type {
   ScheduleListResponse,
   ScheduleWhen,
   SelfEventRequest,
+  SubAgentStatus,
 } from "@penelope/contract";
 
 export class BackendError extends Error {
@@ -43,6 +44,11 @@ export class Backend {
     this.url = options.url.replace(/\/+$/, "");
     this.token = options.token;
     this.agent = options.agent;
+  }
+
+  /** The same API, called as another agent: a sub-agent's requests carry its name. */
+  as(agent: AgentId): Backend {
+    return new Backend({ url: this.url, token: this.token, agent });
   }
 
   /** `GET /v1/events`: waits up to `wait` seconds for events after `after`. */
@@ -74,6 +80,11 @@ export class Backend {
 
   async selfEvent(event: Without<SelfEventRequest>): Promise<void> {
     await this.post("/v1/self-events", event);
+  }
+
+  /** `POST /v1/agents`: this agent, a sub-agent, was started or closed. */
+  async subAgentStatus(status: Without<SubAgentStatus>): Promise<void> {
+    await this.post("/v1/agents", status);
   }
 
   async createSchedule(schedule: { reason: string } & ScheduleWhen): Promise<Schedule> {
