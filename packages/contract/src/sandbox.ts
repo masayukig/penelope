@@ -6,6 +6,31 @@ import type { Delivery, Source } from "./events.ts";
 /** Which agent is calling. The main agent is `main`; a sub-agent's is the name its parent gives it. */
 export type AgentId = "main" | (string & {});
 
+/**
+ * `POST /v1/agents`: a sub-agent was started (`closed: false`) or closed
+ * (`closed: true`); the runner sends it again for each open one when it
+ * starts. `agent` is the sub-agent's name, never `main`.
+ */
+export type SubAgentStatus = FromAgent & {
+  /** The one line the main agent gave when it started the sub-agent. */
+  purpose: string;
+  closed: boolean;
+};
+
+/** Why a sub-agent stopped: its last words, a failed run, or a run cut by the runner stopping. */
+export type SubAgentStopReason = "stopped" | "failed" | "interrupted";
+
+/**
+ * The `payload` of the event to the main agent each time a sub-agent stops
+ * (`POST /v1/self-events` with the sub-agent as `agent`, `id` `<name>/<n>`).
+ */
+export type SubAgentNotice = {
+  reason: SubAgentStopReason;
+  purpose: string;
+  /** The whole of its last words; the failure for `failed`; empty when there are none. */
+  text: string;
+};
+
 /** Every request carries the agent: in the body, or as the `agent` query parameter of a GET. */
 export type FromAgent = { agent: AgentId };
 

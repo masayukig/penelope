@@ -128,6 +128,9 @@ function onStream(state: State, event: StreamEvent): State {
       if (activity.kind === "turn_start") return { ...state, turn: [activity] };
       return { ...state, turn: [...state.turn, activity] };
     }
+    case "agent":
+      // The sub-agents' column comes later.
+      return state;
   }
 }
 

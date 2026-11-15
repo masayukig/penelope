@@ -41,7 +41,8 @@ RUN npm ci
 RUN npm run build
 
 # The backend's runtime dependencies, without the dev tools. The links npm
-# makes to the workspaces are dropped: only the backend's dist is copied.
+# makes to the workspaces are dropped: the final stage copies the backend's
+# dist, and the contract's package.json and dist in place of its link.
 FROM --platform=$BUILDPLATFORM node:24.22.3-trixie-slim AS backend-deps
 WORKDIR /src
 COPY package.json package-lock.json ./
@@ -78,6 +79,8 @@ ENV NODE_ENV=production PENELOPE_VERSION=${VERSION}
 WORKDIR /app
 COPY --from=ts-build /src/packages/backend/package.json ./
 COPY --from=backend-deps /src/node_modules ./node_modules
+COPY --from=ts-build /src/packages/contract/package.json ./node_modules/@penelope/contract/
+COPY --from=ts-build /src/packages/contract/dist ./node_modules/@penelope/contract/dist
 COPY --from=ts-build /src/packages/backend/dist ./dist
 COPY --from=ts-build /src/packages/web/dist ./web
 COPY assets/avatars ./avatars
@@ -95,7 +98,8 @@ USER 1002:1002
 ENTRYPOINT ["node", "/app/dist/main.js"]
 
 # The runner's runtime dependencies. None of them is built for a platform, so
-# they are installed here on the builder's own and copied as they are.
+# they are installed here on the builder's own and copied as they are. The
+# link to the contract is dropped, as for the backend.
 FROM --platform=$BUILDPLATFORM node:24.22.3-trixie-slim AS runner-deps
 WORKDIR /src
 COPY package.json package-lock.json ./
@@ -177,6 +181,8 @@ WORKDIR /opt/penelope/runner
 COPY --from=ts-build /src/packages/runner/package.json ./
 COPY --from=ts-build /src/packages/runner/dist ./dist
 COPY --from=runner-deps /src/node_modules ./node_modules
+COPY --from=ts-build /src/packages/contract/package.json ./node_modules/@penelope/contract/
+COPY --from=ts-build /src/packages/contract/dist ./node_modules/@penelope/contract/dist
 ENV NODE_ENV=production PENELOPE_VERSION=${VERSION} \
     HOME=/home/agent USER=agent \
     PATH=/home/agent/.local/bin:/home/agent/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
