@@ -81,13 +81,15 @@ export function FlowLine({ item, all }: { item: FlowItem; all: readonly FlowItem
         </li>
       );
     case "tool_call": {
+      const what = argumentsText(item.arguments);
       const result = all.find((other): other is Extract<Activity, { kind: "tool_result" }> => other.kind === "tool_result" && other.call_id === item.call_id);
       return (
         <li className="flow-block">
           <span className="flow-tool">
             <span className="flow-label">{words.tool}</span>
             <Code>
-              <strong>{item.name}</strong>: {argumentsText(item.arguments)}
+              <strong>{item.name}</strong>
+              {what === "" ? null : `: ${what}`}
             </Code>
           </span>
           {result ? (

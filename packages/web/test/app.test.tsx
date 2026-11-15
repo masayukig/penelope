@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, it } from "node:test";
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -130,11 +131,13 @@ describe("the Web UI", () => {
     await act(async () =>
       backend.send({
         event: "activity",
-        data: { agent: "main", activity: { kind: "tool_call", at, turn_id: "t-1", call_id: "c-1", name: "bash", arguments: { command: "kubectl get pods -A" } } },
+        data: { agent: "main", activity: { kind: "tool_call", at, turn_id: "t-1", call_id: "c-1", name: "bash", arguments: { command: "kubectl get pods -A", timeout: 60 } } },
       }),
     );
     await waitFor(() => within(panel()).getByText("ツールを使っている"));
-    assert.match(panel().textContent ?? "", /kubectl get pods -A/);
+    // The command, not the JSON of the arguments.
+    assert.match(panel().textContent ?? "", /bash: kubectl get pods -A/);
+    assert.doesNotMatch(panel().textContent ?? "", /"command"|timeout/);
     await act(async () => {
       backend.send({ event: "activity", data: { agent: "main", activity: { kind: "turn_end", at, turn_id: "t-1" } } });
       backend.send({ event: "state", data: { agent: "main", state: "waiting" } });
@@ -295,10 +298,11 @@ describe("the sub-agents in the Web UI", () => {
     await act(async () => {
       backend.send({ event: "state", data: { agent: "fleet-fix", state: "thinking" } });
       backend.send(subActivity("fleet-fix", { kind: "turn_start", at, turn_id: "f-1" }));
-      backend.send(subActivity("fleet-fix", { kind: "tool_call", at, turn_id: "f-1", call_id: "c-1", name: "bash", arguments: { command: "flux get kustomizations" } }));
+      backend.send(subActivity("fleet-fix", { kind: "tool_call", at, turn_id: "f-1", call_id: "c-1", name: "bash", arguments: { command: "flux get kustomizations", timeout: 60 } }));
     });
     await waitFor(() => assert.match(within(column()!).getByRole("heading").parentElement!.textContent ?? "", /走っている 3$/));
     assert.match(column()!.textContent ?? "", /bash: flux get kustomizations/);
+    assert.doesNotMatch(column()!.textContent ?? "", /"command"|timeout/);
     await act(async () => {
       backend.send({ event: "agent", data: { agent: "cluster-test", purpose: "try the update on the test cluster", closed: true } });
       backend.send({ event: "agent", data: { agent: "cert-audit", purpose: "list the certificates", closed: false } });
@@ -343,6 +347,82 @@ describe("the sub-agents in the Web UI", () => {
     assert.ok(within(toggle).getByText("サブ 3"));
   });
 
+  // Happy-dom lays nothing out, so what keeps a line in its frame is read
+  // from the rules of styles.css that decide its width.
+  describe("with long words", () => {
+    const longName = "renovate-review-of-every-open-pull-request-in-fleet-infra-at-on"; // 63
+    const longPurpose = "テスト全5VMのpause設定を独立して再確認（読み取りのみ）。設定ファイルと containerd config dump と既存の sandbox コンテナの image を見比べる";
+    const longCommand = "kubectl --kubeconfig /home/agent/.kube/test-cluster.yaml get nodes -o jsonpath='{range.items[*]}{.metadata.name}{.status.nodeInfo.containerRuntimeVersion}{end}'";
+    let style: HTMLStyleElement | undefined;
+    afterEach(() => style?.remove());
+
+    async function startLong() {
+      style = document.createElement("style");
+      style.textContent = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/^@import .*$/gm, "");
+      document.head.append(style);
+      const backend = new FakeBackend();
+      const since = new Date().toISOString();
+      backend.agents = [{ agent: longName, purpose: longPurpose, state: "thinking", started_at: since, state_since: since }];
+      start(backend);
+      await backend.connected();
+      await waitFor(() => assert.ok(column()));
+      await act(async () => {
+        backend.send(subActivity(longName, { kind: "turn_start", at: since, turn_id: "l-1" }));
+        backend.send(subActivity(longName, { kind: "tool_call", at: since, turn_id: "l-1", call_id: "c-1", name: "bash", arguments: { command: longCommand, timeout: 120 } }));
+        backend.send(subActivity(longName, { kind: "tool_result", at: since, turn_id: "l-1", call_id: "c-1", is_error: false, output: "x".repeat(400) }));
+      });
+      await waitFor(() => assert.ok(column()!.querySelector(".sub-latest")));
+      return opener(longName);
+    }
+    const css = (el: Element) => getComputedStyle(el);
+    const cut = (el: Element) => {
+      assert.equal(css(el).whiteSpace, "nowrap", el.className);
+      assert.equal(css(el).overflow, "hidden", el.className);
+      assert.equal(css(el).textOverflow, "ellipsis", el.className);
+    };
+
+    it("cuts the name, the purpose and the latest line at the frame, and keeps the state in sight", async () => {
+      const head = await startLong();
+      const latest = head.querySelector(".sub-latest")!;
+      assert.equal(latest.textContent, `bash: ${longCommand}`);
+      for (const el of [head.querySelector(".sub-name")!, head.querySelector(".sub-purpose")!, latest]) cut(el);
+      assert.equal(css(head.querySelector(".sub-state")!).flexShrink, "0");
+      // A flex item is no narrower than its content unless told: everything
+      // between the frame's button and the lines may shrink below it.
+      for (let el: Element | null = head.querySelector(".sub-head"); el && el !== head; el = el.parentElement) {
+        assert.equal(parseFloat(css(el).minWidth), 0, `${el.tagName}.${el.className}`);
+      }
+    });
+
+    it("wraps the purpose and the tool's call once opened", async () => {
+      const head = await startLong();
+      await act(async () => fireEvent.click(head));
+      await waitFor(() => assert.equal(head.getAttribute("aria-expanded"), "true"));
+      const purpose = head.querySelector(".sub-purpose")!;
+      assert.equal(css(purpose).whiteSpace, "normal");
+      assert.equal(css(purpose).overflowWrap, "anywhere");
+      const tool = column()!.querySelector(".sub-flow .flow-tool")!;
+      assert.match(tool.textContent ?? "", new RegExp(`bash: ${longCommand.slice(0, 40).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+      assert.equal(css(tool).overflowWrap, "anywhere");
+      assert.equal(parseFloat(css(tool).minWidth), 0);
+      assert.equal(parseFloat(css(column()!.querySelector(".sub-flow")!).minWidth), 0);
+    });
+
+    // The ring is Astryx's (its tokens, keyboard only), drawn on the frame
+    // rather than on the button inside it.
+    it("draws the focus ring on the frame", async () => {
+      await startLong();
+      const rules = [...style!.sheet!.cssRules].filter((r): r is CSSStyleRule => "selectorText" in r);
+      const onFrame = rules.find((r) => /\.sub:has\(.*:focus-visible\)/.test(r.selectorText));
+      assert.ok(onFrame, "a ring on .sub while its button has the keyboard's focus");
+      assert.match(onFrame.style.getPropertyValue("outline-width"), /--focus-outline-width/);
+      assert.match(onFrame.style.getPropertyValue("outline-color"), /--focus-outline-color/);
+      const offButton = rules.find((r) => /\.sub .*astryx-collapsible-trigger:focus-visible/.test(r.selectorText) && !r.selectorText.includes(":has("));
+      assert.ok(offButton, "none on the button inside it");
+      assert.equal(offButton.style.getPropertyValue("outline-style"), "none");
+    });
+  });
+
   it("keeps the sub-agents' turns out of the main agent's now and out of the timeline", async () => {
     const backend = new FakeBackend();
     backend.agents = three();
@@ -354,7 +434,7 @@ describe("the sub-agents in the Web UI", () => {
     await act(async () => {
       backend.send(subActivity("cluster-test", { kind: "turn_start", at, turn_id: "c-1" }));
       backend.send(subActivity("cluster-test", { kind: "thinking", at, turn_id: "c-1", text: "drain the workers one by one" }));
-      backend.send(subActivity("cluster-test", { kind: "tool_call", at, turn_id: "c-1", call_id: "c-1", name: "bash", arguments: { command: "kubectl get nodes" } }));
+      backend.send(subActivity("cluster-test", { kind: "tool_call", at, turn_id: "c-1", call_id: "c-1", name: "bash", arguments: { command: "kubectl get nodes", timeout: 60 } }));
     });
     await waitFor(() => assert.match(column()!.textContent ?? "", /kubectl get nodes/));
     const now = within(panel()).getByRole("region", { name: "Iris（本体）" });
