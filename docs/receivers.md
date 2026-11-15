@@ -203,14 +203,14 @@ GitHub の webhook（GitHub App やリポジトリの webhook）の配送を受�
 | `authors` | なし（必須） | 扱う PR の作者のログインの一覧。1 つ以上。`renovate[bot]` のような App のログインも書ける |
 | `reviewers` | なし（必須） | 依頼を受け、レビューを出す人のログインの一覧。1 つ以上 |
 
-- `authors`・`reviewers` の要素は空でない文字列。空の一覧、空の文字列、大文字と小文字だけが違う同じログインの重なりがあれば、起動しない。
+- `authors`・`reviewers` の要素は空でない文字列。空の一覧、空の文字列、大文字と小文字だけが違う同じログインの重なりがあれば、起動しない。要素の誤りは `plugins[1].settings.reviewers[1]` のように、何番目かを付けて書く。
 - 照らすときは、大文字と小文字を区別しない。
 - 送り手の GitHub の側は、Content type を `application/json` にし、Secret に同じ秘密を置き、Pull request と Pull request review のイベントを購読する（App なら Pull requests の read の権限が要る）。ほかのイベントを購読しても、読まずに `200` を返すだけである。
 
 ### 確かめ
 
 - `X-Hub-Signature-256` が `sha256=<64 桁の 16 進>` の形で、その 16 進が、秘密を鍵にした body のバイト列の HMAC-SHA256 と一致するものだけを通す。16 進の大文字と小文字は問わない。
-- 比べるのに要る時間が、どこまで一致したかで変わらない比べ方をする。16 進を 32 バイトに戻してから比べる。
+- 比べるのに要る時間が、どこまで一致したかで変わらない比べ方をする。16 進を 32 バイトに戻してから比べる。ヘッダーが無い・形が違うときも、32 バイトの 0 を同じように比べてから断るので、断り方で時間が変わらない。
 - ヘッダーが無い・形が違う・署名が違う要求は、どれも同じ `401` で断る。`X-Hub-Signature`（SHA-1）は見ない。
 - 確かめは、ヘッダーと body を読み分けるより先に行う（下の「読み分けの順」）。
 
@@ -233,7 +233,7 @@ GitHub の webhook（GitHub App やリポジトリの webhook）の配送を受�
 | `review.user.login` | 空でない文字列 | `pull_request_review` の `dismissed` |
 
 - `action` が読む action でないときは、`action` のほかの欄を確かめない（下の「読み分けの順」）。
-- `review_requested` で `requested_reviewer` が無いか `null` のもの（チームへの依頼で、`requested_team` を持つ）は、形が合っているものとして出来事を作らない。
+- `review_requested` で `requested_reviewer` が無いか `null` のもの（チームへの依頼で、`requested_team` を持つ）は、形が合っているものとして出来事を作らない。`requested_reviewer` がオブジェクトでも `null` でもなければ `400` で断る。
 - そのほかの欄（`sender`・`installation`・`repository` など）は確かめない。
 
 ### 読み分けの順
@@ -241,7 +241,7 @@ GitHub の webhook（GitHub App やリポジトリの webhook）の配送を受�
 | 順 | 見るもの | 外れたときの応答 |
 | --- | --- | --- |
 | 1 | 署名（上の「確かめ」） | `401` |
-| 2 | `X-GitHub-Event` がある | `400` |
+| 2 | `X-GitHub-Event` があり空でない | `400` |
 | 3 | `X-GitHub-Event` が `pull_request` か `pull_request_review` | `200`、出来事 0 件（`ping` もここ） |
 | 4 | body が JSON のオブジェクトで、`action` が文字列 | `400` |
 | 5 | `action` が、`pull_request` なら `review_requested`、`pull_request_review` なら `dismissed` | `200`、出来事 0 件 |
@@ -292,6 +292,11 @@ GitHub の webhook（GitHub App やリポジトリの webhook）の配送を受�
 - 応答の番号は上の「HTTP の口」と「読み分けの順」のとおりで、body を持たない。
 - 出来事を作るのは 1 回の配送に 1 件までである。GitHub は 10 秒以内に 2xx を受けない配送を失敗とし、失敗した配送を自動では送り直さない（`503` も同じ）。送り直しは、人が Redeliver したときだけで、そのときの `X-GitHub-Delivery` は元と同じなので、backend が重複として落とす。
 - 要求ごとの 1 行のログは「HTTP の口」のとおりである。「読み分けの順」の 8 で当たらなかったものは `events=0 dropped=1`、3 と 5 で読まなかったものは `events=0 dropped=0` になる。
+- `400` の理由は次のどれかである。欄の理由は、外れた最初の欄の道筋（途中がオブジェクトでなければ、そこまで）と外れ方だけで、値を写さない。
+  - `X-GitHub-Event is missing`・`X-GitHub-Delivery is missing`
+  - `the body is not a JSON object`（UTF-8 でない、JSON でない、オブジェクトでない）
+  - `action: must be a string`
+  - `pull_request.base.repo: must be an object`・`pull_request.number: must be a positive integer`・`pull_request.base.repo.full_name: must be <owner>/<name>`・`requested_reviewer: must be an object or null` のような `<欄>: <外れ方>`
 
 ### 置き場所の例
 
