@@ -38,6 +38,7 @@ export function where(messages: readonly ChatMessage[]): { system: string; input
 
 const write = (path: string, content: string) => ({ name: "write", args: { path, content } });
 const reply = (text: string) => ({ name: "reply", args: { text } });
+const subAgent = (name: string, args: Record<string, unknown>) => ({ name, args });
 
 /** The seq of the input's `a2a` event: what `reply_to_agent` names (docs/events.md, "ターンに入る形"). */
 function a2aSeq(input: string): number | undefined {
@@ -54,6 +55,23 @@ const replyToAgent = (input: string, state: string, text: string) => ({ name: "r
 export function script(messages: readonly ChatMessage[]): Answer {
   const { system, input, steps } = where(messages);
   const plan: Answer[] = (() => {
+    // A sub-agent asks back on its first request, writing a note to the memory, and answers once it is told more.
+    // It waits first, so that the main agent's turn that started it has ended and the note is committed as its own.
+    if (system.includes("You are a sub-agent")) {
+      if (input.includes("E2E-SUB-MORE")) return [{ text: "E2E-SUB-RESULT: the build is fixed." }];
+      return [
+        { calls: [{ name: "bash", args: { command: "sleep 3" } }] },
+        { calls: [write("/memory/notes/e2e-sub.md", "# Sub-agent\n\nWritten by a sub-agent.\n")] },
+        { text: "E2E-SUB-QUESTION: which branch?" },
+      ];
+    }
+    if (input.includes("E2E-SUB-START")) {
+      return [{ calls: [subAgent("subagent_start", { name: "e2e-sub", purpose: "E2E-SUB-PURPOSE", prompt: "E2E-SUB-FIRST fix the build" })] }, { text: "Started." }];
+    }
+    if (input.includes("E2E-SUB-QUESTION")) return [{ calls: [subAgent("subagent_send", { name: "e2e-sub", text: "E2E-SUB-MORE main" })] }, { text: "Answered it." }];
+    if (input.includes("E2E-SUB-RESULT")) {
+      return [{ calls: [subAgent("subagent_close", { name: "e2e-sub" })] }, { calls: [reply("E2E-REPLY-SUB")] }, { text: "Closed it." }];
+    }
     if (system.includes("You are the curator")) {
       return [{ calls: [write("/memory/INDEX.md", "# Index\n\n- notes/e2e.md: the end-to-end test's notes.\n")] }, { text: "Tidied." }];
     }

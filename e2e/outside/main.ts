@@ -52,7 +52,7 @@ const fakeCluster = cluster({
 
 type Credential = "real" | "surrogate" | "none" | "other";
 type Seen = { at: string; scheme: "https" | "http"; host: string; method: string; path: string; credential: Credential };
-type ModelCall = { at: string; credential: Credential; stream: boolean; messages: ChatMessage[] };
+type ModelCall = { at: string; credential: Credential; stream: boolean; messages: ChatMessage[]; tools: string[] };
 
 const seen: Seen[] = [];
 const modelCalls: ModelCall[] = [];
@@ -87,8 +87,9 @@ async function model(request: http.IncomingMessage, response: http.ServerRespons
   const credential = credentialOf(request, MODEL_KEY, MODEL_SURROGATE);
   const text = await body(request);
   if (request.method !== "POST" || !request.url?.endsWith("/chat/completions")) return json(response, 404, { error: "not found" });
-  const parsed = JSON.parse(text) as { model: string; stream?: boolean; messages: ChatMessage[] };
-  modelCalls.push({ at: new Date().toISOString(), credential, stream: parsed.stream === true, messages: parsed.messages });
+  const parsed = JSON.parse(text) as { model: string; stream?: boolean; messages: ChatMessage[]; tools?: { function: { name: string } }[] };
+  const tools = (parsed.tools ?? []).map((tool) => tool.function.name);
+  modelCalls.push({ at: new Date().toISOString(), credential, stream: parsed.stream === true, messages: parsed.messages, tools });
   if (credential !== "real") return json(response, 401, { error: { message: "the model's key is not the real one" } });
   const answer = script(parsed.messages);
   if (!parsed.stream) return json(response, 200, completion(answer, parsed.model));
