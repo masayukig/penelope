@@ -28,25 +28,25 @@ function sources(days: Record<string, Record<string, (SourcesLine | string)[]>>,
 const cli = (root: string, ...args: string[]) => run(["--sources", root, "--time-zone", "UTC", ...args], {});
 
 describe("slackctl", () => {
-  test("channels lists each stream with its workspace and channel", () => {
+  test("channels lists each stream with its workspace and channel", async () => {
     const root = sources({
       "work.dev": { "2026-11-15": [line(message(ts("09:00"), "hi"))], "2026-11-16": [line(message(ts("09:01"), "hi again"))] },
       "work.dm.alice": { "2026-11-14": [line(message(ts("09:02"), "psst", { channel: DM }))] },
     });
-    const result = cli(root, "channels");
+    const result = await cli(root, "channels");
     assert.equal(result.code, 0, result.stderr);
     assert.equal(result.stdout, ["work.dev\twork #dev (channel C0DEV)\tlast 2026-11-16", "work.dm.alice\twork DM with alice (channel D0ALICE)\tlast 2026-11-14", ""].join("\n"));
   });
 
-  test("workspaces lists the workspaces seen", () => {
+  test("workspaces lists the workspaces seen", async () => {
     const root = sources({
       "work.dev": { "2026-11-16": [line(message(ts("09:00"), "hi"))] },
       "home.general": { "2026-11-16": [line({ ...message(ts("09:00"), "hi"), workspace: "home", channel: { id: "C0GEN", name: "general", type: "channel" } })] },
     });
-    assert.equal(cli(root, "workspaces").stdout, "home\t1 channel\nwork\t1 channel\n");
+    assert.equal((await cli(root, "workspaces")).stdout, "home\t1 channel\nwork\t1 channel\n");
   });
 
-  test("history draws the latest messages of a channel as they stand, across the days read", () => {
+  test("history draws the latest messages of a channel as they stand, across the days read", async () => {
     const at = ts("09:00");
     const root = sources({
       "work.dev": {
@@ -55,17 +55,17 @@ describe("slackctl", () => {
         "2026-11-16": [line(reaction(at, "wave", BOB)), "not json", line(message(ts("09:05"), "and more"))],
       },
     });
-    const result = cli(root, "history", "work.dev", "--days", "2");
+    const result = await cli(root, "history", "work.dev", "--days", "2");
     assert.equal(result.code, 0, result.stderr);
     assert.equal(
       result.stdout,
       ["work #dev (channel C0DEV, stream work.dev)", `- 11-16 09:00 alice [${at}]: hello`, "  reactions: :wave: bob", `- 11-16 09:05 alice [${ts("09:05")}]: and more`, ""].join("\n"),
     );
-    assert.match(cli(root, "history", "work.dev", "--limit", "1").stdout, /and more/);
-    assert.doesNotMatch(cli(root, "history", "work.dev", "--limit", "1").stdout, /hello/);
+    assert.match((await cli(root, "history", "work.dev", "--limit", "1")).stdout, /and more/);
+    assert.doesNotMatch((await cli(root, "history", "work.dev", "--limit", "1")).stdout, /hello/);
   });
 
-  test("thread draws one thread, from the day of its parent on", () => {
+  test("thread draws one thread, from the day of its parent on", async () => {
     const parent = ts("09:00");
     const root = sources({
       "work.dev": {
@@ -73,31 +73,31 @@ describe("slackctl", () => {
         "2026-11-17": [line(message(ts("09:30"), "Yes.", { user: BOB, thread: parent }))],
       },
     });
-    const result = cli(root, "thread", "work.dev", parent);
+    const result = await cli(root, "thread", "work.dev", parent);
     assert.equal(result.code, 0, result.stderr);
     assert.equal(result.stdout, ["work #dev (channel C0DEV, stream work.dev)", `- 11-16 09:00 alice [${parent}]: Shall we?`, `  - 11-16 09:30 bob [${ts("09:30")}]: Yes.`, ""].join("\n"));
-    assert.equal(cli(root, "thread", "work.dev", ts("10:00")).code, 1);
+    assert.equal((await cli(root, "thread", "work.dev", ts("10:00"))).code, 1);
   });
 
-  test("another source is read with --source", () => {
+  test("another source is read with --source", async () => {
     const root = sources({ "work.dev": { "2026-11-16": [line(message(ts("09:00"), "hello"), { source: "slack-home" })] } }, "slack-home");
-    assert.match(cli(root, "--source", "slack-home", "history", "work.dev").stdout, /hello/);
+    assert.match((await cli(root, "--source", "slack-home", "history", "work.dev")).stdout, /hello/);
   });
 
-  test("a stream that is not there, or a name that is not a stream, is an error", () => {
+  test("a stream that is not there, or a name that is not a stream, is an error", async () => {
     const root = sources({ "work.dev": { "2026-11-16": [line(message(ts("09:00"), "hello"))] } });
-    const missing = cli(root, "history", "work.ops");
+    const missing = await cli(root, "history", "work.ops");
     assert.equal(missing.code, 1);
     assert.match(missing.stderr, /no stream work\.ops/);
-    assert.equal(cli(root, "history", "../etc").code, 2);
+    assert.equal((await cli(root, "history", "../etc")).code, 2);
   });
 
-  test("no command, or one it does not know, prints how to use it", () => {
-    const result = run([], {});
+  test("no command, or one it does not know, prints how to use it", async () => {
+    const result = await run([], {});
     assert.equal(result.code, 2);
     assert.match(result.stderr, /usage: slackctl/);
-    assert.equal(run(["--help"], {}).code, 0);
-    assert.equal(run(["what"], {}).code, 2);
+    assert.equal((await run(["--help"], {})).code, 0);
+    assert.equal((await run(["what"], {})).code, 2);
   });
 });
 
