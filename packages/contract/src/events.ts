@@ -1,7 +1,7 @@
 // The event envelope and what the intake answers (docs/events.md).
 
 /** The sources the backend has itself. Plugins in receivers add their own names. */
-export type BuiltinSource = "ui" | "cron" | "a2a" | "self" | "control";
+export type BuiltinSource = "ui" | "cron" | "a2a" | "self" | "control" | "heartbeat";
 
 /** Where an event came from. Also the first directory under /sources. */
 export type Source = BuiltinSource | (string & {});
@@ -58,6 +58,13 @@ export type ControlPayload = { kind: "nightly" };
 
 /** The payload of a `cron` event: one of her schedules came due. */
 export type CronPayload = { schedule_id: string; reason: string };
+
+/**
+ * The payload of a `heartbeat` event (ADR-0031): the awake hours went
+ * `quiet_minutes` with no turn, counted from `since` (when her last turn
+ * ended, or when the backend started if she has had none).
+ */
+export type HeartbeatPayload = { since: string; quiet_minutes: number };
 
 /** The body of every 4xx and 5xx answer of the backend. */
 export type ErrorBody = { error: string };

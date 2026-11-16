@@ -85,7 +85,7 @@ describe("the intake", () => {
   it("answers 400 to an event from one of the backend's own sources", async (t) => {
     // Guards against: a receivers' plugin starting the nightly switch or speaking as the owner.
     const { target, queue } = await setup(t);
-    for (const source of ["ui", "cron", "a2a", "self", "control"]) {
+    for (const source of ["ui", "cron", "a2a", "self", "control", "heartbeat"]) {
       const answer = await ask(target, "/v1/events", { json: { ...envelope, source } });
       assert.equal(answer.status, 400, source);
       assert.equal(typeof answer.json().error, "string");

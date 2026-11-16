@@ -49,6 +49,7 @@ make e2e
 - **ServiceAccount の token と kubeconfig**: クラスタが無いので、どのコンテナにも無い。backend の TokenReview のための token は、偽の API server が知っている値（`kube-token`）を mount し、API server の名前と CA は設定で偽物に向ける。
 - **gated**: 前段の gated は置かない。送り手の呼び出しは backend に直に届き、gated の assertion の呼び出しは、テストが偽の gated に署名させた assertion を自分で付ける。
 - **`batch` の待ち**: backend の `PENELOPE_BATCH_QUIET_MINUTES` を、使える最も短い 1 分にする。GitHub の出来事は `batch` だけで届くので、既定の 5 分ではテストが長くなる。
+- **heartbeat**: 既定では切ってある（`PENELOPE_HEARTBEAT_MINUTES` が空）。そのシナリオだけ、backend を作り直して N を使える最も短い 1 分にする。次の夜の切り替えのシナリオで作り直すときに切れる。
 - **夜の切り替え**: テストは最後に backend を作り直し、`PENELOPE_NIGHTLY_CRON` を毎分（`* * * * *`）にして次の切り替えを待つ。起動にかかった時間や今の時刻に左右されない。取り込み口は `control` の出来事を断るので、外から夜を起こす道は無い。
 
 ## 通すシナリオ
@@ -65,4 +66,5 @@ make e2e
 8. GitHub の形の配送（`pull_request` の `review_requested`）を Pod の外から receivers の webhook に送る。署名が違えば `401` で断られ、`ping` と `authors` に無い作者の PR は出来事にならない。署名の合う依頼は `/sources/github/example-org.example-repo/` に `batch` として追記され、同じ `X-GitHub-Delivery` の送り直しは重複として落ちる。PR の本文は残らない。`batch` の待ちの後、その出来事だけで 1 つのターンに入る。
 9. ほかのエージェントが A2A で頼む。token なしで Agent Card が読める。allow-list に無い ServiceAccount は、TokenReview でも gated の assertion でも断られる。送り手が ServiceAccount の token で頼み（TokenReview）、ターンが `reply_to_agent` で聞き返し、送り手が gated の assertion で答え、ターンが閉じた答えを送り手が `GetTask` で読む。依頼と答えは `/sources/a2a/claude/` に追記され、API server には backend 自身の token で尋ねている。
 10. 本体がサブエージェントを起こす（`subagent_start`）。サブエージェントは自分のシステムプロンプトと作業の場所で、本体の道具（`reply`・`reply_to_agent`・`self_event`・`subagent_*`）を持たずに走り、`/memory` に書いて問いで止まる。その地の文が `self` の出来事として本体に届き（`/sources/self/<名前>/`）、本体が続きを送り（`subagent_send`）、同じセッションで続いたサブエージェントの結果を受けて閉じる（`subagent_close`）。サブエージェントの書いたものは、そのターンの終わりに `Agent: <名前>` でコミットされる。UI の流れには起こした・閉じたことと途中経過が乗り、閉じたサブエージェントは `/api/agents` に載らない。
-11. 夜の制御の出来事で、振り返り → 整理係 → 新しいセッションが回り、`handoff.md` と整理係の変えたものがコミットされる。新しいセッションのシステムプロンプトに `handoff.md` が入り、前の日の会話は無い。次の切り替えの後も、ターンは回り続ける。
+11. heartbeat を 1 分で入れた backend に作り直すと、何もないまま 1 分たって heartbeat の出来事だけで 1 つのターンが始まる（`delivery` は `now`、中身は `/sources/heartbeat/` にある）。偽のモデルは地の文もツールも無しで終え、畳む前の頼みは送られない。そのターンが終わってから 1 分たって、次の heartbeat が入る。
+12. 夜の制御の出来事で、振り返り → 整理係 → 新しいセッションが回り、`handoff.md` と整理係の変えたものがコミットされる。新しいセッションのシステムプロンプトに `handoff.md` が入り、前の日の会話は無い。次の切り替えの後も、ターンは回り続ける。

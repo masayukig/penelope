@@ -37,6 +37,7 @@ describe("the configuration", () => {
       nightly: "0 4 * * *",
       batch: { quietMs: 5 * 60_000, maxMs: 30 * 60_000 },
       redeliverMs: 5 * 60_000,
+      heartbeatMs: undefined,
       builtinDelivery: { ui: "now", cron: "now", a2a: "now", self: "now" },
       inline: new Set(["ui", "control"]),
       gitAuthor: { name: "penelope-backend", email: "backend@penelope.invalid" },
@@ -120,6 +121,10 @@ describe("the configuration", () => {
     );
   });
 
+  it("has a heartbeat only when its minutes are set (ADR-0031)", () => {
+    assert.equal(loadConfig({ PENELOPE_HEARTBEAT_MINUTES: "60" }, read).heartbeatMs, 60 * 60_000);
+  });
+
   it("refuses values it cannot use", () => {
     for (const env of [
       { PENELOPE_LISTEN: "8080" },
@@ -127,6 +132,8 @@ describe("the configuration", () => {
       { PENELOPE_AWAKE_HOURS: "morning" },
       { PENELOPE_NIGHTLY_CRON: "at night" },
       { PENELOPE_BATCH_QUIET_MINUTES: "-1" },
+      { PENELOPE_HEARTBEAT_MINUTES: "0" },
+      { PENELOPE_HEARTBEAT_MINUTES: "an hour" },
       { PENELOPE_DELIVERY_UI: "later" },
       { PENELOPE_OWNER_GITHUB_ID: "someone" },
       { PENELOPE_PUBLIC_URL: "not a url" },

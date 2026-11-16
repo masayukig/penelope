@@ -51,7 +51,11 @@ function a2aSeq(input: string): number | undefined {
 }
 const replyToAgent = (input: string, state: string, text: string) => ({ name: "reply_to_agent", args: { in_reply_to: a2aSeq(input), state, text } });
 
-/** What the model says next. Each turn ends with text of her own, so that no turn is asked before it is folded. */
+/**
+ * What the model says next. Each turn ends with text of her own, so that no
+ * turn is asked before it is folded; a heartbeat's turn ends at once with no
+ * word and no tool, which is not asked either (ADR-0031).
+ */
 export function script(messages: readonly ChatMessage[]): Answer {
   const { system, input, steps } = where(messages);
   const plan: Answer[] = (() => {
@@ -78,6 +82,7 @@ export function script(messages: readonly ChatMessage[]): Answer {
     if (input.includes("This session ends now")) {
       return [{ calls: [write("/memory/handoff.md", "E2E-HANDOFF: the next session starts from here.\n")] }, { text: "Handed off." }];
     }
+    if (input.includes('"source":"heartbeat"')) return [{}];
     if (input.includes("E2E-TURN-1")) {
       return [
         { calls: [write("/memory/notes/e2e.md", "# E2E\n\nWritten in the first turn.\n")] },
