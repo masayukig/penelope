@@ -760,6 +760,35 @@ describe("the Pod end to end", () => {
     );
   }));
 
+  it("lists a schedule she made in the UI's API, and removes it there for her schedule_list too", track(async () => {
+    // Guards against: the UI's list of the schedules not being what her schedule_list sees, or a removal from the UI
+    // that she still finds (docs/ui-api.md, "予約").
+    await send("E2E-SCHEDULE-ADD");
+    await replied("E2E-REPLY-SCHEDULE-ADD");
+    const [added] = await callsFor("E2E-SCHEDULE-ADD", 1);
+    assert.ok(added, "the turn that added the schedule");
+    const made = JSON.parse(textOf(added.messages.findLast((message) => message.role === "tool")!.content)) as { id: string };
+
+    type Entry = { id: string; reason: string; cron?: string; at?: string; next_at: string };
+    const listed = browser.json<{ schedules: Entry[] }>("/api/schedules");
+    assert.equal(listed.status, 200);
+    const [entry] = listed.body.schedules;
+    assert.equal(listed.body.schedules.length, 1, JSON.stringify(listed.body));
+    assert.deepEqual([entry!.id, entry!.reason, entry!.cron, entry!.at], [made.id, "E2E-SCHEDULE-REASON", "0 9 1 1 *", undefined]);
+    assert.ok(Date.parse(entry!.next_at) > Date.now(), `comes due next: ${entry!.next_at}`);
+
+    assert.equal(browser.request(`/api/schedules/${encodeURIComponent(made.id)}`, { method: "DELETE" }).status, 204);
+    assert.equal(browser.request(`/api/schedules/${encodeURIComponent(made.id)}`, { method: "DELETE" }).status, 404);
+    assert.deepEqual(browser.json<{ schedules: Entry[] }>("/api/schedules").body.schedules, []);
+
+    // She was not told; she finds it gone when she lists them.
+    await send("E2E-SCHEDULE-LIST");
+    await replied("E2E-REPLY-SCHEDULE-LIST");
+    const [list] = await callsFor("E2E-SCHEDULE-LIST", 1);
+    assert.ok(list, "the turn that listed the schedules");
+    assert.equal(textOf(list.messages.findLast((message) => message.role === "tool")!.content), "[]");
+  }));
+
   it("makes a turn of a heartbeat after the quiet minutes, and asks nothing before folding it", track(async () => {
     // Guards against: no heartbeat after a quiet stretch (ADR-0031), a heartbeat that carries more than the fact,
     // a second one queued before the first one's turn has ended, or a heartbeat's turn with no tool costing a

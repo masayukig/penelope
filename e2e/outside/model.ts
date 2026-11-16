@@ -80,6 +80,16 @@ export function script(messages: readonly ChatMessage[]): Answer {
     if (input.includes("E2E-JOB-START")) {
       return [{ calls: [{ name: "job_start", args: { command: "sleep 2; echo E2E-JOB-$((6 * 7))" } }] }, { text: "Started the job." }];
     }
+    if (input.includes("E2E-SCHEDULE-ADD")) {
+      return [
+        { calls: [{ name: "schedule_add", args: { reason: "E2E-SCHEDULE-REASON", cron: "0 9 1 1 *" } }] },
+        { calls: [reply("E2E-REPLY-SCHEDULE-ADD")] },
+        { text: "Scheduled." },
+      ];
+    }
+    if (input.includes("E2E-SCHEDULE-LIST")) {
+      return [{ calls: [{ name: "schedule_list", args: {} }] }, { calls: [reply("E2E-REPLY-SCHEDULE-LIST")] }, { text: "Listed." }];
+    }
     if (input.includes("E2E-JOB-42")) return [{ calls: [reply("E2E-REPLY-JOB")] }, { text: "The job ended." }];
     if (system.includes("You are the curator")) {
       return [{ calls: [write("/memory/INDEX.md", "# Index\n\n- notes/e2e.md: the end-to-end test's notes.\n")] }, { text: "Tidied." }];
