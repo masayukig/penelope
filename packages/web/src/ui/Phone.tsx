@@ -15,6 +15,7 @@ import { ChevronUpIcon, MenuIcon } from "./icons.tsx";
 import { NoticesButton } from "./Notices.tsx";
 import { StatusLabel } from "./Now.tsx";
 import { AgentNow } from "./Panel.tsx";
+import { Schedules } from "./Schedules.tsx";
 import { SubAgentCount } from "./SubAgents.tsx";
 import { type Place, PlaceItems, Placeholder } from "./places.tsx";
 import { Talk } from "./Talk.tsx";
@@ -48,7 +49,13 @@ export function Phone(props: ScreenProps) {
         </button>
         <span />
       </div>
-      {place === "talk" ? <Talk {...props} strip={strip} topInset density="compact" /> : <Placeholder place={place} />}
+      {place === "talk" ? (
+        <Talk {...props} strip={strip} topInset density="compact" />
+      ) : place === "events" ? (
+        <Schedules api={props.api} onUnauthorized={props.onUnauthorized} topInset />
+      ) : (
+        <Placeholder place={place} />
+      )}
       <MobileNav isOpen={menu} onOpenChange={setMenu} header={agent.name} side="start">
         <PlaceItems
           place={place}

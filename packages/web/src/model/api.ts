@@ -1,6 +1,15 @@
 // The backend's API for the UI (docs/ui-api.md), over a fetch that the tests
 // replace.
-import type { AgentResponse, HistoryResponse, PostMessageResponse, PushResponse, PushSubscriptionRequest, PushUnsubscribeRequest, SubAgentsResponse } from "@penelope/contract";
+import type {
+  AgentResponse,
+  HistoryResponse,
+  PostMessageResponse,
+  PushResponse,
+  PushSubscriptionRequest,
+  PushUnsubscribeRequest,
+  SchedulesResponse,
+  SubAgentsResponse,
+} from "@penelope/contract";
 
 export type Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -28,6 +37,10 @@ export type Api = {
   push(): Promise<PushResponse>;
   subscribePush(subscription: PushSubscriptionRequest): Promise<void>;
   unsubscribePush(endpoint: string): Promise<void>;
+  /** Her schedules, with when each comes due next. */
+  schedules(): Promise<SchedulesResponse>;
+  /** Removes one of her schedules; Refused with 404 when it is already gone. */
+  removeSchedule(id: string): Promise<void>;
 };
 
 export function createApi(fetch: Fetch): Api {
@@ -73,6 +86,10 @@ export function createApi(fetch: Fetch): Api {
     unsubscribePush: async (endpoint) => {
       const body: PushUnsubscribeRequest = { endpoint };
       await call("/api/push/subscriptions/delete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    },
+    schedules: async () => (await call("/api/schedules")).json() as Promise<SchedulesResponse>,
+    removeSchedule: async (id) => {
+      await call(`/api/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
     },
   };
 }
