@@ -42,6 +42,7 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 
 - 中身（`payload`）をそのままターンに載せる受信元。封筒の欄ではなく、backend の設定で受信元ごとに決める。
 - 既定は `ui`（オーナーのメッセージ）・`job`（裏の仕事の終わり、[ADR-0030](adr/0030-background-jobs-run-by-the-runner-and-their-end-as-an-event.md)）・`control`（制御の出来事）。サブエージェントの知らせ（`self`）は inline でない。
+- Slack のプラグインの出来事を受ける配置は、その `source` も inline にする（[ADR-0029](adr/0029-slack-events-inline-drawn-as-channels-and-threads.md)）。runner がそれを描いてターンに載せる（下の「ターンに入る形」の「Slack の出来事」）。
 - inline の出来事も、ほかと同じく `/sources` に書く。
 
 ### 制御の出来事
@@ -168,10 +169,31 @@ runner は sandbox 向けの口で出来事を受け取り（[sandbox-api.md](sa
 | `appended` | 足された場所の一覧。ファイルごとに、接する行の範囲を 1 つにつないで並べる。1 件はひとつの出来事の `appended` と同じ形 |
 
 - まとめた出来事の添付は、行には載せない。`/sources` の行の `attachments` にある。
+- Slack の描き方で描く受信元のまとめは、さらに `text` を持つ（下の「Slack の出来事」）。ほかの受信元のまとめは `text` を持たない。
+
+### Slack の出来事
+
+Slack のプラグインの出来事は、runner が `packages/slack` の描き方で文にして載せる（[ADR-0029](adr/0029-slack-events-inline-drawn-as-channels-and-threads.md)）。一度に渡された分は、前に渡してから Slack で起きた変化である。描いた文の形は [receivers.md](receivers.md) の「描き方と読み取りの CLI」にある。
+
+| runner の設定 | 既定 | 中身 |
+| --- | --- | --- |
+| `PENELOPE_SLACK_SOURCES` | なし | Slack の描き方で描く受信元（`,` で区切る）。有効化の `source` の名前を書く。無ければ何も描かない |
+| `PENELOPE_SLACK_MAX_CHARS` | `6000` | 1 つの入力に載せる、描いた文の字数の上限。その入力の Slack の行の `text` を合わせた数 |
+
+- 描くのは、その受信元の **inline の出来事だけ**である。backend の `PENELOPE_INLINE_SOURCES`（[backend.md](backend.md)）に無ければ、ほかの受信元と同じ形（要約と場所）で入る。
+- `now` の出来事は、ひとつの出来事の行のままで、`text` が描いた文になる。変化の前の発言を 3 件まで、`(earlier)` の付いた 1 行で添える（スレッドの返信なら、同じスレッドの前の返信）。`appended` は持たず、`attachments` は持つ。
+- `batch` の出来事は、受信元と `stream` ごとに 1 行のまとめになり、`text` に描いた文を持つ。前の発言は添えない（返信の親とリアクションの付いた発言だけを `(earlier)` で添える）。`count`・`seqs`・`summary`・`appended` は、省いた分も含めて、まとめた出来事すべてのものである。
+- 同じ入力に `now` と `batch` が来たら、行はそれぞれの形で並ぶ。`batch` で描いた発言が、`now` の行に `(earlier)` で重ねて出ることがある。
+- 描くために、runner は変化の `stream` の `/sources` のファイルを、いちばん早い変化を受けた日（UTC）の前の日のものから読む。それより前の親やリアクションの付いた発言は `(not read)` と描く。
+- 時刻は runner の時間帯（`TZ`、無ければ UTC）で描く。
+- 量の上限を超えたら、上限を行に分ける。上限を行の数で等分した字数に収まる行はそのまま、残りの字数を長い行で分ける。行の中では古い変化から省き、`(<数> earlier changes left out; penelope-slack history <stream>)` を添える（`source` が `slack` でなければ `--source <source>` が入る）。1 つの変化だけでも収まらないときは、終わりを切って `…` にする。
+- 描けないとき（`payload` が描き方の知らない形、`stream` が無い、`/sources` のその `stream` の場所が読めない）は、その出来事を、ふつうの inline の出来事の行（`payload` の `text`、無ければ JSON）にする。`batch` でもまとめずに 1 件 1 行になる。runner のログに `slack: event <seq> of <source>/<stream> is not drawn: <理由>` を書く（本文は書かない）。描く途中で失敗したときは、その入力の描く出来事をどれも描かずに入れる（`now` はふつうの inline の行、`batch` は `text` の無いまとめ）。ログには `seq` の一覧と理由を書く。
+- 添付の画像は、ほかの inline の出来事と同じく、画像としても載る（上の「ひとつの出来事」。`batch` の出来事の画像も、1 つの入力に 4 枚までのうちに入る）。
 
 ### 畳んだ後
 
 - 終わったターンを畳むとき（[ADR-0015](adr/0015-fold-ended-turns-before-they-are-sent.md)）も、出来事の入力はそのまま残る。畳んだ後のターンにも、同じ `<events>` の形で出来事がある。
+- Slack の描いた文も出来事の入力の一部なので、畳んだ後に残る。`penelope-slack` の出力はツールの出力なので残らない。
 
 ### いつ渡すか
 

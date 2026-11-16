@@ -505,8 +505,10 @@ Slack の Socket Mode で、1 つ以上のワークスペースの発言・編�
 - 1 つのチャンネルは、見出しの行（`work #dev (channel C0DEV, stream work.dev)`、DM は `work DM with Alice (…)`）と、発言の行の並び。発言は `- <月-日 時:分> <話し手> [<ts>]: <本文>` で、エージェント自身なら話し手に `(you)`、ほかの bot なら `(bot)` を付ける。本文は記法を読める文にし、続きの行は字下げする。編集された発言は `(edited)` を付けて今の本文、削除された発言は `(deleted)` だけを出す。
 - 発言の下に、字下げして、リアクション（`reactions: :+1: Bob, Carol`）、ファイル（`file <名前>: <添付のパス>`、取らなかったものは `file <名前> (<種類>, <大きさ>): not fetched`）、スレッドの返信を並べる。
 - 親を読めなかった返信は `- thread of [<ts>] (not read)` の下に、読めなかった発言へのリアクションは `- message [<ts>] (not read)` の下に並ぶ。
-- ターンに載せる変化の描き方（変化だけを描き、返信の親とリアクションの付いた発言は `(earlier)` を付けて 60 文字までの 1 行にし、リアクションは `+ :名前: 人`・`- :名前: 人` の行で足し外しを出す。量の上限を超えたら古い変化を省き、`(<数> earlier changes left out; penelope-slack history <stream>)` を添える）も同じ package にある。ターンにどう入れるかは [events.md](events.md) の「ターンに入る形」で、Slack の出来事を inline にする作業単位が決める。
+- ターンに載せる変化の描き方（変化だけを描き、返信の親とリアクションの付いた発言は `(earlier)` を付けて 60 文字までの 1 行にし、リアクションは `+ :名前: 人`・`- :名前: 人` の行で足し外しを出す。量の上限を超えたら古い変化を省き、`(<数> earlier changes left out; penelope-slack history <stream>)` を添える）も同じ package にある。ターンにどう入れるかは [events.md](events.md) の「ターンに入る形」の「Slack の出来事」にある。
 - 時刻は CLI では `TZ` の時間帯（無ければ UTC）で出す。
+
+Slack の出来事をターンに描いて載せるには、配置が、この有効化の `source` を backend の `PENELOPE_INLINE_SOURCES` と runner の `PENELOPE_SLACK_SOURCES` の両方に書く。runner は同じ image の中のこの package で描くので、描き方と CLI の版は揃う。
 
 読み取りの CLI `penelope-slack` は sandbox の image に入る。
 
@@ -525,6 +527,6 @@ Slack の Socket Mode で、1 つ以上のワークスペースの発言・編�
 ADR-0023・ADR-0024 が決めず、後の判断に回したもの。それぞれ、決めるときに ADR を書き、この文書に節を足す。
 
 - GitHub のほかのイベント（issue、コメント、`pull_request_review` の `submitted` など）を読むこと。
-- Slack: [ADR-0028](adr/0028-slack-received-over-socket-mode-by-a-receivers-plugin.md) で決め、上の「Slack のプラグイン」に書いた。ターンに inline で載せることは [ADR-0029](adr/0029-slack-events-inline-drawn-as-channels-and-threads.md) で、後の作業単位が runner と backend の設定に足す。
+- Slack: [ADR-0028](adr/0028-slack-received-over-socket-mode-by-a-receivers-plugin.md) で決め、上の「Slack のプラグイン」に書いた。ターンに inline で載せることは [ADR-0029](adr/0029-slack-events-inline-drawn-as-channels-and-threads.md) で決め、上の「描き方と読み取りの CLI」と [events.md](events.md) の「Slack の出来事」に書いた。
 - 鳴り続けているアラートの知らせ（いまは鳴り始めと鳴り止みだけ）。
 - エージェントが Alertmanager にアラートを足す道（`drop_labels` の印）と、返事の知らせ（[ADR-0027](adr/0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md) の Web Push）との関係。
