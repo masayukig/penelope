@@ -12,6 +12,18 @@ make e2e
 - `PENELOPE_E2E_KEEP=1` を付けると、終わった後もコンテナを残し、全部のログを出す。失敗したときはいつもログを出す。
 - 鍵と証明書は走らせるたびに `e2e/.run/` に作り直す（git には入れない）。
 
+### 同じマシンで並べて走らせる
+
+worktree ごとに Compose の project 名と image の版を分ける。
+
+```sh
+COMPOSE_PROJECT_NAME=penelope-e2e-<ブランチ名> VERSION=<ブランチ名> make e2e
+```
+
+- `COMPOSE_PROJECT_NAME` が、コンテナ・volume と、テストが作る image（`<project 名>-outside`・`<project 名>-init`）の名前を分ける。既定は `penelope-e2e`。
+- `VERSION` が、`make images` の作るリポジトリの image（`penelope-<target>:<VERSION>`）の版を分ける。既定は `git describe` で、同じコミットの worktree どうしは重なる。
+- 鍵と証明書の `e2e/.run/` は worktree ごとにあるので重ならない。網は Docker の既定の bridge を共有するが、アドレスは Docker がコンテナごとに付ける。
+
 ## 並べ方
 
 | サービス | 役目 |
