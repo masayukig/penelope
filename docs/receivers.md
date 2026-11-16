@@ -1,9 +1,11 @@
 # receivers の仕様
 
-receivers の設定、HTTP の口、プラグインの内側の契約、Alertmanager と GitHub のプラグインが出来事を作る形を決める。
+receivers の設定、HTTP の口、プラグインの内側の契約、Alertmanager・GitHub・Slack のプラグインが出来事を作る形を決める。
 方針は [ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md) と
 [ADR-0023](adr/0023-receivers-plugins-in-the-repository-and-alertmanager-first.md)・
-[ADR-0024](adr/0024-github-webhooks-pass-review-requests-and-dismissals-without-state.md) にある。ここにはその形を書く。
+[ADR-0024](adr/0024-github-webhooks-pass-review-requests-and-dismissals-without-state.md)・
+[ADR-0028](adr/0028-slack-received-over-socket-mode-by-a-receivers-plugin.md)・
+[ADR-0029](adr/0029-slack-events-inline-drawn-as-channels-and-threads.md) にある。ここにはその形を書く。
 出来事の封筒と取り込み口は [events.md](events.md)、コンテナの UID・volume・待ち受けは [pod.md](pod.md) にある。
 
 具体的なホスト名・token の値・配置ごとの名前は、配置のリポジトリの設定にだけ書く。ここの例はすべて架空である。
@@ -17,8 +19,8 @@ receivers の設定、HTTP の口、プラグインの内側の契約、Alertman
 - 鍵の値は設定のファイルに書かず、値を書いたファイルの場所を書く（`_file` で終わる欄）。
 - 設定が読めない、または使えない値があれば、起動せずに終わる（終了コード 2）。標準エラーに、どの欄がなぜ使えないかを 1 行書く。
 - 設定と鍵のファイルは起動のときに 1 度だけ読む。変えたら再起動する。
-- 起動したら、標準エラーに待ち受けのアドレスと、有効化ごとの名前・プラグイン・`source` を 1 行書く。
-- SIGTERM で、新しい要求を受けるのをやめ、処理中の要求（取り込み口へ送っているものを含む）を終えてから終わる。終える要求の応答には `Connection: close` を付け、つなぎ置きの接続を残さない。
+- 起動したら、標準エラーに待ち受けのアドレスと、有効化ごとの名前・プラグイン・`source` を、webhook と接続の種類に分けて 1 行書く（`receivers: listening on 0.0.0.0:8081; webhooks: fraction (alertmanager, source alertmanager); connections: slack (slack, source slack)`）。
+- SIGTERM で、新しい要求を受けるのをやめ、処理中の要求（取り込み口へ送っているものを含む）を終えてから終わる。終える要求の応答には `Connection: close` を付け、つなぎ置きの接続を残さない。接続の種類のプラグインは、手元の出来事を取り込み口へ送り終えてから接続を閉じる。
 
 ## 設定
 
@@ -38,7 +40,7 @@ receivers の設定、HTTP の口、プラグインの内側の契約、Alertman
 
 | 欄 | 必須 | 中身 |
 | --- | --- | --- |
-| `name` | ○ | 有効化の名前。webhook のプラグインなら URL の `/v1/webhooks/<name>` になる。英小文字・数字・`-` で、1〜32 文字、`-` で始まらない。一覧の中で一意 |
+| `name` | ○ | 有効化の名前。webhook のプラグインなら URL の `/v1/webhooks/<name>` になる。接続の種類ではログの `connection=<name>` になる。英小文字・数字・`-` で、1〜32 文字、`-` で始まらない。一覧の中で一意 |
 | `plugin` | ○ | プラグインの名前（下の「プラグインの一覧」）。知らない名前なら起動しない |
 | `source` | | 取り込み口に送る出来事の `source`。省けば `plugin` の名前。[events.md](events.md) の `source` の文字の制限を満たし、backend の中の受信元の名前（`ui`・`cron`・`a2a`・`self`・`control`・`heartbeat`）でないもの。一覧の中で一意 |
 | `settings` | | プラグインごとの設定（各プラグインの節）。省けば `{}` |
@@ -58,7 +60,7 @@ receivers の設定、HTTP の口、プラグインの内側の契約、Alertman
 
 `listen`・`intake`・`intake_timeout_seconds` は既定のまま省く。2 つ目の Alertmanager を足すなら、`name` を `lab`、`source` を `alertmanager-lab` のようにした有効化を並べる。
 
-GitHub の webhook も受けるなら、前の形から引き継いだ URL `/v1/webhooks/github` の有効化を並べる。
+GitHub の webhook も受けるなら、前の形から引き継いだ URL `/v1/webhooks/github` の有効化を並べる。Slack を受けるなら、さらに `slack` の有効化を並べる（下の「Slack のプラグイン」の「設定」）。
 
 | 欄 | 値 |
 | --- | --- |
@@ -75,6 +77,7 @@ GitHub の webhook も受けるなら、前の形から引き継いだ URL `/v1/
 | --- | --- | --- |
 | `alertmanager` | webhook | 下の「Alertmanager のプラグイン」 |
 | `github` | webhook | 下の「GitHub のプラグイン」 |
+| `slack` | 接続 | 下の「Slack のプラグイン」 |
 
 ## HTTP の口
 
@@ -113,21 +116,35 @@ receivers の本体（以下、本体）とプラグインの境目。実装は�
 - HTTP のサーバー、パスの振り分け、body の上限、`404`・`405`・`413` の応答、`/healthz`。
 - 取り込み口への送信と、その結果からの `200`・`503` の応答。
 - 出来事の `source`。プラグインは `source` を知らず、本体が有効化の `source` を付ける。
+- 接続の種類のプラグインを、HTTP のサーバーと並べて起動し、SIGTERM で止める。
 
 ### プラグインが持つもの
 
-- 名前（設定の `plugin` に書くもの）と種類（いまは webhook だけ）。
+- 名前（設定の `plugin` に書くもの）と種類（webhook か接続）。
 - `settings` の確かめ: 起動のときに本体から `settings` を受け、知らない欄・使えない値・読めない鍵のファイルがあれば、理由を付けて断る。本体はそれを受けて起動しない。鍵のファイルを読むのはここである。
-- webhook のプラグインは、1 回の要求（ヘッダーと body のバイト列）を受けて、次のどちらかを返す。
+
+### webhook の種類
+
+- 1 回の要求（ヘッダーと body のバイト列）を受けて、次のどちらかを返す。
   - 断る: 応答の番号（`400` か `401`）。出来事は作らない。`400` には、本体がログに書く理由を付ける。理由は欄の名前と外れ方だけで、body の中身を写さない。
   - 受ける: 出来事の一覧（0 件でもよい）と、捨てたものの数と、本体がログに書く行（Alertmanager の `truncatedAlerts` など。0 行でもよい）。出来事は封筒の `source` を除くすべての欄（`id`・`occurred_at`・`summary`・`stream`・`delivery`・`payload`）を持つ。
 - 要求には、本体が受けた時刻を付けて渡す。プラグインは時計を読まない。
 - プラグインは取り込み口にも網にも触れない。要求から封筒を作るだけなので、HTTP のサーバーも socket も無しでテストできる。
-- 封筒の欄の型は `packages/contract` の `src/events.ts` の `Event` に従う。
 
-未決:
+### 接続の種類
 
-- webhook でないプラグイン（Slack の Socket Mode のように、receivers の方から送り手につなぐもの）の形。最初のそうしたプラグインが決め、この節に足す。
+自分から外のサービスへ接続を張って出来事を受けるもの（[ADR-0028](adr/0028-slack-received-over-socket-mode-by-a-receivers-plugin.md) の Decision 項 1）。HTTP のサーバーの下に道を持たない。
+
+- `settings` を確かめた後、本体が起動のときに 1 度だけ始める。そのとき本体は次の 3 つを渡す。
+  - 送り出し: 出来事の一覧を受け、1 件ずつ順に取り込み口へ送り、すべてが `202` で受けられたら真、最初に受けられなかったところで止めて偽を返す。出来事は webhook と同じ欄を持ち、加えて取り込み口へ添付として送るファイル（名前・MIME の種類・バイト列）を持てる。ファイルがあれば、取り込み口へは `multipart/form-data` で送る（[events.md](events.md) の「取り込み口」）。
+  - ログ: プラグインの書く 1 行。本体が `receivers: connection=<name> ` を前に付けて標準エラーに書く。
+  - 時計。
+- プラグインは、送り出しが真を返してから、外のサービスに受けたことを伝える。偽なら伝えず、外のサービスの送り直しに任せる（ADR-0023 の Decision 項 4）。
+- 接続が切れても、プラグインが自分でつなぎ直す。本体は止めない。
+- 本体が止めるとき、プラグインは新しい出来事を受けるのをやめ、手元の出来事を送り終えてから接続を閉じる。
+- 取り込み口が受けなかった出来事は、本体が webhook と同じ形の 1 行を書く: `receivers: connection=<name> intake did not take <source>/<id>: <理由>`。
+
+封筒の欄の型は `packages/contract` の `src/events.ts` の `Event` に従う。
 
 ## Alertmanager のプラグイン
 
@@ -306,11 +323,208 @@ GitHub の webhook（GitHub App やリポジトリの webhook）の配送を受�
 
 - 承認の後の push で ruleset の `dismiss_stale_reviews_on_push` が承認を取り消したときに、`pull_request_review` の `dismissed` が届くか。GitHub Docs に書かれていないので、実装の作業単位が、`dismiss_stale_reviews_on_push` を持つリポジトリで確かめて、この節に事実を書く。
 
+## Slack のプラグイン
+
+Slack の Socket Mode で、1 つ以上のワークスペースの発言・編集・削除・リアクション・ファイルを受ける。`plugin` は `slack`、種類は接続（[ADR-0028](adr/0028-slack-received-over-socket-mode-by-a-receivers-plugin.md)）。状態を持たず、起きたこと 1 つを 1 件の出来事にする。今の姿（編集の後の本文、付いているリアクション）は読む側が組み立てる（下の「描き方と読み取りの CLI」）。
+
+`payload` の型・描き方・`/sources` の読み方は、Slack のプラグインの package `packages/slack`（`@penelope/slack`）にあり、receivers のプラグイン・runner・読み取りの CLI が同じものを使う（[ADR-0029](adr/0029-slack-events-inline-drawn-as-channels-and-threads.md) の Decision 項 2）。Socket Mode と Web API の扱いは receivers の `src/plugins/slack/` にある。
+
+### 設定
+
+| `settings` の欄 | 既定 | 中身 |
+| --- | --- | --- |
+| `workspaces` | なし（必須） | 受けるワークスペースの一覧。1 つ以上（下の表） |
+| `backfill_hours` | `24` | つなぎ直しのたびに取り直す長さ（時間）。0 以上の整数。`0` なら取り直さない |
+| `max_file_bytes` | `20971520`（20 MiB） | 取ってくるファイル 1 つの大きさの上限。1〜62914560（60 MiB）の整数 |
+| `file_types` | `["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"]` | 取ってくるファイルの MIME の種類の一覧 |
+
+| `workspaces[]` の欄 | 必須 | 中身 |
+| --- | --- | --- |
+| `name` | ○ | ワークスペースの短い名前。`stream` と `id` の頭になる。英小文字・数字・`-` で、1〜32 文字、`-` で始まらない。一覧の中で一意 |
+| `app_token_file` | ○ | Slack App の app-level token（`xapp-` で始まる）を書いたファイル |
+| `bot_token_file` | ○ | bot の token（`xoxb-` で始まる）を書いたファイル |
+| `now_channels` | | どの発言も `now` にするチャンネルの名前（`#` は付けても付けなくてもよい）か ID の一覧。既定は `[]` |
+
+- token のファイルは、前後の空白と改行を除いたものが token である。読めない・空・頭が違う（app-level token と bot の token の取り違え）ときは、起動しない。理由にはファイルの場所だけを書き、token は書かない。
+- ワークスペースの欄に知らない欄があれば、起動しない（`plugins[2].settings.workspaces[0].colour: not a field of a workspace`）。
+
+架空の例:
+
+| 欄 | 値 |
+| --- | --- |
+| `plugins[2].name` | `slack` |
+| `plugins[2].plugin` | `slack` |
+| `plugins[2].settings.workspaces[0].name` | `work` |
+| `plugins[2].settings.workspaces[0].app_token_file` | `/run/secrets/penelope-receivers/slack-work-app-token` |
+| `plugins[2].settings.workspaces[0].bot_token_file` | `/run/secrets/penelope-receivers/slack-work-bot-token` |
+| `plugins[2].settings.workspaces[0].now_channels` | `["ops"]` |
+
+### Slack App の用意
+
+ワークスペースごとに、Slack App を次のように用意する。配置のリポジトリが token を置く前に、本人が App の設定をこの表と照らす。
+
+| 場所 | 設定 |
+| --- | --- |
+| Socket Mode | 有効にする。Request URL は要らない |
+| App-Level Tokens | `connections:write` の token を作る。これが `app_token_file` |
+| Event Subscriptions | 有効にし、Subscribe to bot events に `message.channels`・`message.groups`・`message.im`・`message.mpim`・`reaction_added`・`reaction_removed` を足す |
+| OAuth & Permissions の Bot Token Scopes | `channels:history`・`groups:history`・`im:history`・`mpim:history`（発言と取り直し）、`channels:read`・`groups:read`・`im:read`・`mpim:read`（チャンネルの名前と一覧）、`users:read`（人の名前）、`reactions:read`（取り直した発言のリアクション）、`files:read`（ファイル） |
+| App Home | DM を受けるなら、Messages Tab を有効にし、メッセージを送れるようにする |
+
+- エージェントが投稿に使う scope（`chat:write` など）は、Sentinel が持つ token の側の話で、受けるのには要らない。同じ App の bot の token を両方で使うときは、両方の scope を持たせる（ADR-0028 の Consequences）。
+- bot は、入っているチャンネルの出来事だけを受ける。受けたいチャンネルに bot を招く。
+- `app_mention` は購読しなくてよい。メンションは `message.*` で届く。購読しても、読まずに受けたことだけを返す。
+- 取り直しは `conversations.history` と `conversations.replies` を呼ぶ。Slack は 2025 年に、Marketplace に出していない配布の App のこの 2 つの上限を大きく下げた。自分のワークスペースにだけ入れる App として作る。
+
+### 接続
+
+- ワークスペースごとに接続を 1 本張る。最初に bot の token で `auth.test` を呼んで bot のユーザー・bot の ID・ワークスペースを知り、app-level token で `apps.connections.open` を呼んで得た URL へ WebSocket をつなぐ。
+- Slack が `hello` を送ってきたら、つながったとしてログに書き、取り直しを始める（下の「つなぎ直しの取り直し」）。人とチャンネルの名前の覚えは、そのたびに捨てる（名前の変更を拾うため）。
+- `disconnect`（`refresh_requested`・`warning` など）が来たら、その接続を閉じ、すぐに新しい接続を張る。
+- 30 秒ごとに ping を送る。次の ping の時までに pong も何かの封筒も来なければ、その接続を切ってつなぎ直す。
+- つなげない・`hello` の前に切れたときは、待ってからつなぎ直す。待ちは 1 秒から始め、続けて失敗するたびに倍にし、5 分を上限にする。`hello` を受けたら 1 秒に戻す。token が取り消されたときも、ログに書いてこの待ちでつなぎ直し続ける。
+- 封筒は届いた順に 1 つずつ扱う。`events_api` の封筒は、作った出来事をすべて取り込み口が受けてから `envelope_id` を返す。受けなければ返さず、Slack の送り直しに任せる。出来事を作らなかった封筒（読まない出来事、別のワークスペースの出来事）にも返す。
+- `events_api` でない封筒（`slash_commands`・`interactive` など）は、読まずに `envelope_id` を返す。
+- Slack は 3 秒以内に返されない封筒を送り直す。ファイルを取るのに長くかかると同じ出来事が 2 度届くが、同じ `id` なので backend が落とす。
+- 外向きの接続は Sentinel を通らない（[ADR-0003](adr/0003-all-egress-through-the-sentinel-passthrough-by-default.md)）。receivers のコンテナから `slack.com` とそのファイルの置き場に届く必要がある。
+
+### 出来事にするもの
+
+| Slack の出来事 | 出来事 |
+| --- | --- |
+| `message`（subtype なし・`bot_message`・`file_share`・`me_message`・`thread_broadcast`） | 発言。チャンネル・スレッドの返信・DM・グループ DM。エージェント自身の発言も |
+| `message` の `message_changed` | 編集。ただし本文とファイルが前と同じもの（リンクの展開や返信の数の変化）は捨てる |
+| `message` の `message_deleted` | 削除 |
+| `reaction_added`・`reaction_removed` | リアクションの付け外し。発言に付いたものだけ（ファイルへのものは捨てる） |
+| ほか（`channel_join` などの subtype、ほかの種類の出来事） | 捨てる |
+
+- 封筒の `payload.team_id` が、`auth.test` で知ったワークスペースと違う出来事は捨てる。
+
+### 出来事の作り方
+
+| 欄 | 作り方 |
+| --- | --- |
+| `id` | 発言は `<ワークスペース>/<チャンネルの ID>/<ts>`。取り直しで届いても同じになる。編集・削除・リアクションは `<ワークスペース>/<Slack の event_id>` |
+| `occurred_at` | 発言は `ts` の時刻。ほかは封筒の `event_time`、無ければ受けた時刻 |
+| `stream` | チャンネルは `<ワークスペース>.<チャンネルの名前>`、DM は `<ワークスペース>.dm.<相手のユーザー名>`。上の「`stream` の写し方」で写す（`work.dev`、`work.dm.alice`）。チャンネルの名前が分からなければ ID を使う |
+| `delivery` | 下の「`delivery`」 |
+| `summary` | 下の「`summary` の形」 |
+| `payload` | 下の「`payload`」 |
+
+- チャンネルの名前は `#` の無い名前、ユーザー名は Slack の `name`（表示名ではない）である。チャンネルの名前を変えると、その後の出来事は新しい `stream` に入る。チャンネルの ID は `payload` に残る。
+- グループ DM（mpim）の `stream` は、Slack の付けた名前（`mpdm-alice--bob-1` など）から作る。
+
+#### `delivery`
+
+- 発言が `now` になるのは、エージェント自身の発言でなく、次のどれかに当たるとき: bot へのメンション（本文に `<@bot のユーザー ID>` がある）、DM（`im`）、`now_channels` のチャンネル。
+- ほかの発言、編集・削除・リアクションは、すべて `batch`。いつも明示する。
+- グループ DM はメンションのときだけ `now` である。
+- 取り直しで届いた発言も、同じ決め方をする。backend に既にあれば重複として落ちるので、ターンには入らない。
+
+#### `summary` の形
+
+- 発言は `<ワークスペース> <場所> <話し手>: <本文>`。編集は `<ワークスペース> <場所> <話し手> edited: <本文>`、削除は `<ワークスペース> <場所>: a message was deleted`、リアクションは `<ワークスペース> <場所> <人> reacted :<名前>:`（外したら `took off`）。
+- `<場所>` は `#<チャンネルの名前>`、DM は `DM with <相手の表示名>`、グループ DM は `group DM <名前>`。
+- `<本文>` は Slack の記法を読める文にしたもの（`<@U…>` を `@<表示名>` に、リンクを `文字 (URL)` に）。改行と制御文字の扱いと、200 文字（Unicode のコードポイント）までに切ることは、Alertmanager の「`summary` の形」と同じである。
+- 例: `work #dev Alice: the deploy is done @Bob`
+
+#### `payload`
+
+型は `packages/slack` の `src/payload.ts` が正である。どの出来事も次の欄を持つ。
+
+| 欄 | 中身 |
+| --- | --- |
+| `type` | `message`・`message_changed`・`message_deleted`・`reaction_added`・`reaction_removed` |
+| `workspace` | ワークスペースの名前（設定の `name`） |
+| `channel` | `id`・`name`（`#` の無い名前、DM は相手の表示名）・`type`（`channel`・`group`（プライベートチャンネル）・`im`・`mpim`） |
+| `ts` | 発言の `ts`。編集・削除・リアクションでは、その対象の発言の `ts` |
+| `thread_ts` | スレッドの返信のときだけ、親の `ts`。親そのものには付けない。リアクションには付かない |
+
+`message` と `message_changed` は、さらに次を持つ。
+
+| 欄 | 中身 |
+| --- | --- |
+| `user` | 話し手。`id`（Slack のユーザー ID）と `name`（表示名、無ければ本名、無ければユーザー名、分からなければ ID）。ユーザーの無い bot の発言は `name` と `bot: true` だけ。bot のユーザーにも `bot: true` |
+| `own` | エージェントの bot の発言なら `true` |
+| `text` | Slack の本文そのまま（記法を含む） |
+| `names` | 本文の記法が ID で指す人とチャンネルの名前（`{"U0123": "Bob"}`）。無ければ省く |
+| `files` | 付いたファイル。1 件は `id`・`name`・`mimetype`・`size`・`attached`。無ければ省く |
+
+`message` は、さらに次を持つ。
+
+| 欄 | 中身 |
+| --- | --- |
+| `mention` | bot へのメンションなら `true` |
+| `subtype` | Slack の subtype があるときだけ |
+| `edited` | 受けたときに既に編集されていたら `true` |
+| `reactions` | 取り直した発言だけ。そのときに付いていたリアクション。1 件は `name`・`users`（上の `user` と同じ形）・`count` |
+| `fetched` | 取り直した発言なら `true` |
+
+リアクションは `user`・`own`・`reaction`（絵文字の名前、`:` は無し）を持つ。削除はほかの欄を持たない。
+
+- `payload` と `summary` の中身は外から来た文である（ADR-0028 の Decision 項 3）。
+
+### ファイル
+
+- 発言のファイルのうち、`mimetype` が `file_types` にあり、`size` が `max_file_bytes` 以下で、`url_private_download`（無ければ `url_private`）があるものを、bot の token で取ってくる。取れたものを出来事の添付として取り込み口へ送り、`payload` の `files` の `attached` を `true` にする。添付は `attached` が `true` のファイルの順に、`/sources` の行の `attachments` に並ぶ。
+- 1 つの出来事の添付は、合わせて 60 MiB までにする（取り込み口の 64 MiB の内に収めるため）。超えるもの、上限を超えるもの、種類の違うもの、取れなかったもの（取ってみたら上限より大きかったものを含む）は、`attached` を `false` にして、あったことだけを残す。
+- Slack が、取る権限の無いファイルに HTML のページを返したときは、取れなかったものとする。
+- 編集では、ファイルを取り直さない。
+
+### つなぎ直しの取り直し
+
+- `hello` を受けるたびに（起動の後の最初の接続も）、bot の入っている会話（`users.conversations` のチャンネル・プライベートチャンネル・DM・グループ DM）を 1 つずつ、`backfill_hours` 前から後の発言を `conversations.history` で取る。返信を持つ発言で、最後の返信がその時刻より後のものは、`conversations.replies` で返信も取る。
+- 取った発言は、ふつうの発言と同じ形の出来事にし（`fetched` と `reactions` が付く）、会話ごとにまとめて取り込み口へ送る。取り込み口が受けなければ、そこで取り直しをやめる（次のつなぎ直しでまた取り直す）。
+- Slack が断った会話はログに書いて飛ばし、ほかの会話を続ける。
+- 取り直しは 1 つずつ走る。走っている間に次の `hello` が来たら、終わってからもう一度走る。
+- 取り直しのたびに、取り直す長さの中のファイルをもう一度取ってくる。
+- 取り直せないもの: 切れていた間の編集・削除・リアクション（ADR-0028 の Decision 項 6）、親が取り直す長さより前にあるスレッドへの返信、取り直す長さより前の発言。
+
+### ログ
+
+標準エラーに次の形で書く。前に `receivers: connection=<name> workspace=<ワークスペース> ` が付く。本文・名前・token は書かない。
+
+| 行 | いつ |
+| --- | --- |
+| `connected` | `hello` を受けた |
+| `Slack asked for a new connection (<理由>)` | `disconnect` を受けた |
+| `no answer to a ping; closing the connection` | ping に答えが無い |
+| `cannot connect (<メソッド>: <Slack のコード>)`・`connecting again in <秒>s` | つなげない |
+| `envelope=events_api events=<数> dropped=<数> taken=<true か false>` | 封筒 1 つごと |
+| `filled in conversations=<数> events=<数> failed=<数>` | 取り直しの終わり。途中でやめたら後ろに `stopped` |
+| `cannot name a person (…)`・`cannot name a channel (…)`・`cannot fetch a file (…)`・`cannot fill in a conversation (…)` | Web API の呼び出しが断られた。出来事は名前の代わりに ID で作る、ファイルはあったことだけを残す |
+
+### 置き場所の例
+
+`source` が `slack` なら、`work` の `#dev` の発言は `/sources/slack/work.dev/<YYYY-MM-DD>.jsonl` に、その添付は `/sources/slack/files/<seq>-<ファイルの名前>` に足される（[events.md](events.md) の「`/sources`」）。
+
+### 描き方と読み取りの CLI
+
+`/sources` の行は追記するだけなので、発言の今の姿は、行を `seq` の順に組み立てて作る。`packages/slack` の描き方が、それをチャンネル → スレッド → 発言の形の文にする（ADR-0029）。
+
+- 1 つのチャンネルは、見出しの行（`work #dev (channel C0DEV, stream work.dev)`、DM は `work DM with Alice (…)`）と、発言の行の並び。発言は `- <月-日 時:分> <話し手> [<ts>]: <本文>` で、エージェント自身なら話し手に `(you)`、ほかの bot なら `(bot)` を付ける。本文は記法を読める文にし、続きの行は字下げする。編集された発言は `(edited)` を付けて今の本文、削除された発言は `(deleted)` だけを出す。
+- 発言の下に、字下げして、リアクション（`reactions: :+1: Bob, Carol`）、ファイル（`file <名前>: <添付のパス>`、取らなかったものは `file <名前> (<種類>, <大きさ>): not fetched`）、スレッドの返信を並べる。
+- 親を読めなかった返信は `- thread of [<ts>] (not read)` の下に、読めなかった発言へのリアクションは `- message [<ts>] (not read)` の下に並ぶ。
+- ターンに載せる変化の描き方（変化だけを描き、返信の親とリアクションの付いた発言は `(earlier)` を付けて 60 文字までの 1 行にし、リアクションは `+ :名前: 人`・`- :名前: 人` の行で足し外しを出す。量の上限を超えたら古い変化を省き、`(<数> earlier changes left out; penelope-slack history <stream>)` を添える）も同じ package にある。ターンにどう入れるかは [events.md](events.md) の「ターンに入る形」で、Slack の出来事を inline にする作業単位が決める。
+- 時刻は CLI では `TZ` の時間帯（無ければ UTC）で出す。
+
+読み取りの CLI `penelope-slack` は sandbox の image に入る。
+
+| 書き方 | 出すもの |
+| --- | --- |
+| `penelope-slack workspaces` | 見えるワークスペースと、そのチャンネルの数 |
+| `penelope-slack channels` | `stream` ごとに、ワークスペースとチャンネルと、いちばん新しいファイルの日 |
+| `penelope-slack history <stream> [--limit N] [--days N]` | その `stream` の新しい方の `N` 日分（既定 7）のファイルを読み、最後の `N` 件（既定 30、返信は数えない）の発言を今の姿で |
+| `penelope-slack thread <stream> <ts>` | 発言 `<ts>` とその返信のすべてを今の姿で。親の日の前の日から後のファイルを読む |
+
+- どれも `--sources <場所>`（既定 `/sources`）、`--source <名前>`（既定 `slack`。有効化の `source` を変えた配置で使う）、`--time-zone <時間帯>` を受ける。
+- 無い `stream` や `thread` は終了コード 1、書き方の誤りは 2 で、標準エラーに理由と使い方を書く。
+
 ## 後に足すプラグイン
 
 ADR-0023・ADR-0024 が決めず、後の判断に回したもの。それぞれ、決めるときに ADR を書き、この文書に節を足す。
 
 - GitHub のほかのイベント（issue、コメント、`pull_request_review` の `submitted` など）を読むこと。
-- Slack: [ADR-0028](adr/0028-slack-received-over-socket-mode-by-a-receivers-plugin.md) で決めた（Socket Mode、外へ接続を張る種類のプラグイン）。ターンへの載せ方は [ADR-0029](adr/0029-slack-events-inline-drawn-as-channels-and-threads.md)。形は Slack のプラグインを作る作業単位がこの文書に節を足す。
+- Slack: [ADR-0028](adr/0028-slack-received-over-socket-mode-by-a-receivers-plugin.md) で決め、上の「Slack のプラグイン」に書いた。ターンに inline で載せることは [ADR-0029](adr/0029-slack-events-inline-drawn-as-channels-and-threads.md) で、後の作業単位が runner と backend の設定に足す。
 - 鳴り続けているアラートの知らせ（いまは鳴り始めと鳴り止みだけ）。
 - エージェントが Alertmanager にアラートを足す道（`drop_labels` の印）と、返事の知らせ（[ADR-0027](adr/0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md) の Web Push）との関係。
