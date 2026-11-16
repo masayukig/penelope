@@ -38,6 +38,9 @@ export interface Config {
   sessionDir: string;
   /** Where each sub-agent's record and session are kept, one directory a name; persistent (ADR-0022). */
   subAgentDir: string;
+  /** Where each background job's record and output are kept, one directory a job; persistent (ADR-0030). */
+  jobDir: string;
+  jobs: JobLimits;
   /** A memory file larger than this is not put into the system prompt. */
   promptFileMaxBytes: number;
   /** An image of the owner's message larger than this is left as a path. */
@@ -45,6 +48,16 @@ export interface Config {
   pollWaitSeconds: number;
   /** Whether ended turns are folded before they are sent to the model (ADR-0015). */
   turnFold: boolean;
+}
+
+/** The limits on background jobs (ADR-0030 Decision 3). */
+export interface JobLimits {
+  /** How many run at once. */
+  max: number;
+  /** The longest one runs, and the time limit of one started without its own. */
+  maxSeconds: number;
+  /** The characters of the end of the output that the job's event carries. */
+  tailChars: number;
 }
 
 export class ConfigError extends Error {
@@ -97,6 +110,11 @@ export function readConfig(env: Env): Config {
   const promptFileMaxBytes = positiveInteger(env, "PENELOPE_PROMPT_FILE_MAX_BYTES", 65536, problems);
   const imageMaxBytes = positiveInteger(env, "PENELOPE_IMAGE_MAX_BYTES", 5 * 1024 * 1024, problems);
   const pollWaitSeconds = positiveInteger(env, "PENELOPE_POLL_WAIT_SECONDS", 30, problems);
+  const jobs: JobLimits = {
+    max: positiveInteger(env, "PENELOPE_JOBS_MAX", 5, problems),
+    maxSeconds: positiveInteger(env, "PENELOPE_JOB_MAX_SECONDS", 24 * 60 * 60, problems),
+    tailChars: positiveInteger(env, "PENELOPE_JOB_TAIL_CHARS", 4000, problems),
+  };
   const fold = env.PENELOPE_TURN_FOLD || "on";
   if (fold !== "on" && fold !== "off") problems.push("PENELOPE_TURN_FOLD must be on or off");
   if (problems.length > 0) throw new ConfigError(problems.join("; "));
@@ -116,6 +134,8 @@ export function readConfig(env: Env): Config {
     agentDir,
     sessionDir: env.PENELOPE_SESSIONS || join(agentDir, "sessions", "main"),
     subAgentDir: env.PENELOPE_SUB_AGENTS || join(agentDir, "sessions", "agents"),
+    jobDir: env.PENELOPE_JOBS || join(home, "jobs"),
+    jobs,
     promptFileMaxBytes,
     imageMaxBytes,
     pollWaitSeconds,

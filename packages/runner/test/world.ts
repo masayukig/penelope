@@ -50,6 +50,8 @@ export async function world(options: { turnFold?: boolean; ownerSkills?: boolean
     agentDir: join(home, ".pi", "agent"),
     sessionDir: join(home, ".pi", "agent", "sessions", "main"),
     subAgentDir: join(home, ".pi", "agent", "sessions", "agents"),
+    jobDir: join(home, "jobs"),
+    jobs: { max: 5, maxSeconds: 86400, tailChars: 4000 },
     promptFileMaxBytes: 65536,
     imageMaxBytes: 1_000_000,
     pollWaitSeconds: 1,

@@ -24,6 +24,8 @@ test("the required settings and the defaults", () => {
     agentDir: "/home/agent/.pi/agent",
     sessionDir: "/home/agent/.pi/agent/sessions/main",
     subAgentDir: "/home/agent/.pi/agent/sessions/agents",
+    jobDir: "/home/agent/jobs",
+    jobs: { max: 5, maxSeconds: 86400, tailChars: 4000 },
     promptFileMaxBytes: 65536,
     imageMaxBytes: 5242880,
     pollWaitSeconds: 30,
@@ -41,6 +43,10 @@ test("the optional settings", () => {
     PI_CODING_AGENT_DIR: "/pi",
     PENELOPE_SESSIONS: "/sessions",
     PENELOPE_SUB_AGENTS: "/agents",
+    PENELOPE_JOBS: "/jobs",
+    PENELOPE_JOBS_MAX: "2",
+    PENELOPE_JOB_MAX_SECONDS: "600",
+    PENELOPE_JOB_TAIL_CHARS: "100",
     PENELOPE_PROMPT_FILE_MAX_BYTES: "100",
     PENELOPE_POLL_WAIT_SECONDS: "5",
     PENELOPE_IMAGE_MAX_BYTES: "1000",
@@ -59,6 +65,8 @@ test("the optional settings", () => {
   assert.equal(config.agentDir, "/pi");
   assert.equal(config.sessionDir, "/sessions");
   assert.equal(config.subAgentDir, "/agents");
+  assert.equal(config.jobDir, "/jobs");
+  assert.deepEqual(config.jobs, { max: 2, maxSeconds: 600, tailChars: 100 });
   assert.equal(config.promptFileMaxBytes, 100);
   assert.equal(config.pollWaitSeconds, 5);
 });
@@ -88,6 +96,8 @@ test("a thinking level is one Pi knows", () => {
 test("numbers are positive integers", () => {
   assert.throws(() => readConfig({ ...required, PENELOPE_PROMPT_FILE_MAX_BYTES: "-1" }), ConfigError);
   assert.throws(() => readConfig({ ...required, PENELOPE_POLL_WAIT_SECONDS: "x" }), ConfigError);
+  assert.throws(() => readConfig({ ...required, PENELOPE_JOBS_MAX: "0" }), ConfigError);
+  assert.throws(() => readConfig({ ...required, PENELOPE_JOB_MAX_SECONDS: "1h" }), ConfigError);
 });
 
 test("folding is on or off", () => {

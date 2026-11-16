@@ -1,13 +1,15 @@
 // The tools that only the main agent has: those that reach the backend (the
 // reply to the owner, the answer to an agent that asked over A2A, her
 // schedules and events to herself), each only calling the backend's API
-// (docs/sandbox-api.md), and those that start and talk to her sub-agents
-// (ADR-0022). Their descriptions state what they do (ADR-0008).
+// (docs/sandbox-api.md), those that start and talk to her sub-agents
+// (ADR-0022), and those of her background jobs (ADR-0030). Their
+// descriptions state what they do (ADR-0008).
 
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import type { Backend } from "./backend.ts";
+import type { Jobs } from "./jobs.ts";
 import type { SubAgents } from "./subagents.ts";
 
 function text(value: string) {
@@ -173,4 +175,44 @@ export function subAgentTools(agents: SubAgents): ToolDefinition[] {
   });
 
   return [start, send, list, close] as ToolDefinition[];
+}
+
+export function jobTools(jobs: Jobs, limits: { max: number; maxSeconds: number; tailChars: number }): ToolDefinition[] {
+  const start = defineTool({
+    name: "job_start",
+    label: "Start a background job",
+    description: `Run a shell command in the background, under bash in a process group of its own, as you and through the Sentinel like any other. It returns as soon as the command has started, with the job's id and the file its standard output and standard error both go to. When the command ends, a \`job\` event reaches you: how it ended (\`exited\` with its exit code, \`signaled\`, \`stopped\` by job_stop, \`timed-out\`, or \`interrupted\` when the runner started again while it ran), the command, how long it took, the file, and the last ${limits.tailChars} characters of the output. At most ${limits.max} jobs run at once, and one runs at most ${limits.maxSeconds} seconds; then its process group is ended. Jobs keep running across the nightly switch, and their ends reach the next session.`,
+    parameters: Type.Object({
+      command: Type.String({ description: "The command, as bash -c takes it." }),
+      cwd: Type.Optional(Type.String({ description: "The working directory, which must exist; relative to your home. Left out, your home." })),
+      timeout_seconds: Type.Optional(Type.Integer({ description: `How long it may run, at most ${limits.maxSeconds} seconds, the default.` })),
+    }),
+    async execute(_id, params) {
+      return text(JSON.stringify(await jobs.start(params)));
+    },
+  });
+
+  const list = defineTool({
+    name: "job_list",
+    label: "List background jobs",
+    description: "List the background jobs that are running, as JSON: each one's id, command, working directory, start, time limit and output file.",
+    parameters: Type.Object({}),
+    async execute() {
+      return text(JSON.stringify(jobs.list()));
+    },
+  });
+
+  const stop = defineTool({
+    name: "job_stop",
+    label: "Stop a background job",
+    description:
+      "Stop a running background job: SIGTERM to its process group, then SIGKILL if it has not ended after a few seconds. It returns once the job has ended; its `job` event follows, as `stopped`.",
+    parameters: Type.Object({ id: Type.String({ description: "The job's id." }) }),
+    async execute(_id, params) {
+      await jobs.kill(params.id);
+      return text(`Stopped ${params.id}.`);
+    },
+  });
+
+  return [start, list, stop] as ToolDefinition[];
 }

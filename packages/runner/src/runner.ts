@@ -21,6 +21,7 @@ import type { Config } from "./config.ts";
 import { type Connector, readConnectors } from "./connectors.ts";
 import { FOLD_ASK, foldExtension, TURN_END } from "./fold.ts";
 import { inlineImages } from "./images.ts";
+import { Jobs } from "./jobs.ts";
 import {
   curatorManager,
   newSessionFile,
@@ -41,7 +42,7 @@ import {
   systemPrompt,
 } from "./prompts.ts";
 import { SubAgents } from "./subagents.ts";
-import { backendTools, subAgentTools } from "./tools.ts";
+import { backendTools, jobTools, subAgentTools } from "./tools.ts";
 import { formatEvents } from "./turn-input.ts";
 
 export interface RunnerOptions {
@@ -50,7 +51,7 @@ export interface RunnerOptions {
   modelRuntime: ModelRuntime;
   settings: () => SettingsManager;
   log?: (line: string) => void;
-  /** The first wait before a sub-agent's notice is sent again (ADR-0022). */
+  /** The first wait before a sub-agent's notice or a job's end is sent again (ADR-0022, ADR-0030). */
   retryMs?: number;
 }
 
@@ -84,6 +85,7 @@ export class Runner {
   private readonly log: (line: string) => void;
   private readonly places: Places;
   private readonly subAgents: SubAgents;
+  private readonly jobs: Jobs;
 
   private session: AgentSession | undefined;
   private state: SessionState | undefined;
@@ -113,9 +115,18 @@ export class Runner {
       log: this.log,
       retryMs: options.retryMs ?? 1000,
     });
+    // Only the main agent has jobs: their ends reach only it (ADR-0030).
+    this.jobs = new Jobs({
+      home: options.config.home,
+      dir: options.config.jobDir,
+      limits: options.config.jobs,
+      backend: options.backend,
+      log: this.log,
+      retryMs: options.retryMs ?? 1000,
+    });
     this.setup = {
       ...pi,
-      tools: [...backendTools(options.backend), ...subAgentTools(this.subAgents)],
+      tools: [...backendTools(options.backend), ...subAgentTools(this.subAgents), ...jobTools(this.jobs, options.config.jobs)],
       extensions: [
         foldExtension({
           folding: () => options.config.turnFold,
@@ -136,16 +147,19 @@ export class Runner {
   async run(signal: AbortSignal): Promise<void> {
     await this.open();
     await this.subAgents.restore();
+    await this.jobs.restore();
     signal.addEventListener("abort", () => {
       this.stopping = true;
       this.wake?.();
       void this.session?.abort();
       void this.subAgents.stop();
+      void this.jobs.stop();
     });
     try {
       await Promise.all([this.poll(signal), this.work(signal)]);
     } finally {
       await this.subAgents.stop();
+      await this.jobs.stop();
       this.session?.dispose();
     }
   }

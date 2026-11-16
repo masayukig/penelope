@@ -40,6 +40,20 @@ test("the system prompt says who she is and where", async () => {
   assert.match(prompt, /reply/);
 });
 
+test("the system prompt says commands can run in the background and their ends come as job events", async () => {
+  // Guards against: background jobs she is not told of, or an end that she does not know will arrive (ADR-0030).
+  const places = await memory({});
+  const prompt = systemPrompt(identity, places, []);
+  assert.ok(prompt.includes("job_start"));
+  assert.match(prompt, /source `job`/);
+});
+
+test("a sub-agent is not told of background jobs, which it does not have", async () => {
+  const places = await memory({});
+  const prompt = subAgentSystemPrompt(identity, places, { name: "a", purpose: "p", cwd: "/home/agent/agents/a" });
+  assert.ok(!prompt.includes("job_start"));
+});
+
 test("personality, always and handoff follow as they are, in that order", async () => {
   const places = await memory({
     "personality.md": "やさしく話す。",
