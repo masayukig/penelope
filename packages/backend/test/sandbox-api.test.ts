@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -22,14 +22,18 @@ import { ask, type Ask, FakeClock, tempDir } from "./support.ts";
 
 const TOKEN = "the-real-token";
 
-async function setup(t: { after: (fn: () => void | Promise<void>) => void }, token: string | undefined = TOKEN) {
+async function setup(
+  t: { after: (fn: () => void | Promise<void>) => void },
+  token: string | undefined = TOKEN,
+  options: { inline?: string[]; delivery?: Record<string, "now" | "batch"> } = {},
+) {
   const dir = tempDir(t);
   const clock = new FakeClock("2026-11-14T09:00:00Z");
   const db = openDatabase(path.join(dir, "backend.sqlite"));
   const queue = new Queue(db, new Sources(path.join(dir, "sources"), "UTC"), {
     now: Date.now,
-    inline: new Set(["ui", "control"]),
-    builtinDelivery: { self: "now" },
+    inline: new Set(options.inline ?? ["ui", "control"]),
+    builtinDelivery: { self: "now", ...options.delivery },
     batch: { quietMs: 300_000, maxMs: 1_800_000 },
     awake: new AwakeHours("00:00-00:00", "UTC"),
     redeliverMs: 300_000,
@@ -157,6 +161,53 @@ describe("the sandbox's API", () => {
     it("are refused without an id", async (t) => {
       const { call } = await setup(t);
       assert.equal((await call("/v1/self-events", { json: { agent: "main", summary: "x", payload: 1 } })).status, 400);
+    });
+  });
+
+  describe("the ends of her background jobs", () => {
+    const ended = (id: string, agent = "main") => ({
+      agent,
+      id,
+      summary: `[exit 0] make test`,
+      payload: { job: id, command: "make test", end: "exited", exit_code: 0, tail: "ok\n" },
+    });
+
+    it("are queued as `job` events with no stream, once per id", async (t) => {
+      // Guards against: the end of a job going in as a `self` event, which would make it share the inline setting of
+      // the sub-agents' notices (ADR-0030).
+      const { call, sourcesDir } = await setup(t, TOKEN, { inline: ["ui", "job", "control"], delivery: { job: "now" } });
+      assert.equal((await call("/v1/job-events", { json: ended("j-1") })).status, 202);
+      assert.equal((await call("/v1/job-events", { json: ended("j-1") })).status, 202);
+      const { events } = (await call("/v1/events?agent=main&wait=0")).json();
+      assert.equal(events.length, 1);
+      assert.equal(events[0].source, "job");
+      assert.equal(events[0].stream, undefined);
+      assert.equal(events[0].id, "j-1");
+      assert.equal(events[0].delivery, "now");
+      assert.equal(events[0].inline, true);
+      assert.deepEqual(events[0].payload, ended("j-1").payload);
+      const [file] = readdirSync(path.join(sourcesDir, "job"));
+      assert.match(file!, /^\d{4}-\d{2}-\d{2}\.jsonl$/);
+      const [line] = readFileSync(path.join(sourcesDir, "job", file!), "utf8")
+        .trim()
+        .split("\n")
+        .map((text) => JSON.parse(text));
+      assert.equal(line.source, "job");
+      assert.equal(line.id, "j-1");
+    });
+
+    it("are refused from a sub-agent, which has no jobs", async (t) => {
+      const { call } = await setup(t);
+      const answer = await call("/v1/job-events", { json: ended("j-1", "child") });
+      assert.equal(answer.status, 400);
+      assert.equal((await call("/v1/events?agent=main&wait=0")).json().events.length, 0);
+    });
+
+    it("are refused without an id, a summary or a payload", async (t) => {
+      const { call } = await setup(t);
+      assert.equal((await call("/v1/job-events", { json: { agent: "main", summary: "x", payload: 1 } })).status, 400);
+      assert.equal((await call("/v1/job-events", { json: { agent: "main", id: "j-1", payload: 1 } })).status, 400);
+      assert.equal((await call("/v1/job-events", { json: { agent: "main", id: "j-1", summary: "x" } })).status, 400);
     });
   });
 

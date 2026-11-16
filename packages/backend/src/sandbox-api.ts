@@ -81,6 +81,18 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         sendEmpty(response, 202);
         return;
       }
+      case "POST /v1/job-events": {
+        // The end of one of her background jobs (ADR-0030): a source of its own, so that its inline setting is its own.
+        const request = withAgent(await body());
+        mainOnly(request.agent, "has background jobs");
+        const { id, summary, payload } = request;
+        if (typeof id !== "string" || id === "") throw new HttpError(400, "id must be a non-empty string");
+        if (typeof summary !== "string") throw new HttpError(400, "summary must be a string");
+        if (!("payload" in request)) throw new HttpError(400, "payload is required");
+        queue.accept({ source: "job", id, occurred_at: iso(now()), summary, payload }, { builtin: true });
+        sendEmpty(response, 202);
+        return;
+      }
       case "POST /v1/replies": {
         const { agent, text, expression, in_reply_to } = withAgent(await body());
         mainOnly(agent, "replies to the owner");
@@ -177,7 +189,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
       sendEmpty(response, 204);
       return;
     }
-    const known = ["/v1/events/ack", "/v1/self-events", "/v1/agents", "/v1/replies", "/v1/a2a/replies", "/v1/activity", "/v1/turns/end", "/v1/schedules", "/v1/sessions/rotated"];
+    const known = ["/v1/events/ack", "/v1/self-events", "/v1/job-events", "/v1/agents", "/v1/replies", "/v1/a2a/replies", "/v1/activity", "/v1/turns/end", "/v1/schedules", "/v1/sessions/rotated"];
     if (known.includes(url.pathname)) throw new HttpError(405, "not this method");
     throw new HttpError(404, "no such path");
   };

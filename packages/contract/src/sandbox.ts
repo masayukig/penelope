@@ -81,6 +81,46 @@ export type AckRequest = FromAgent & { seqs: number[] };
 /** `POST /v1/self-events`: an event to herself (`source: "self"`). */
 export type SelfEventRequest = FromAgent & { id: string; summary: string; payload: unknown };
 
+/**
+ * How a background job ended (ADR-0030): it exited with a code, was ended by
+ * a signal it did not get from the runner, was stopped with `job_stop`, ran
+ * past its time limit, or was cut by the runner starting again.
+ */
+export type JobEndKind = "exited" | "signaled" | "stopped" | "timed-out" | "interrupted";
+
+/**
+ * The `payload` of the event to the main agent when a background job ends
+ * (`POST /v1/job-events`, `source: "job"`, `id` the job's id).
+ */
+export type JobEnd = {
+  /** The job's id, as `job_start` gave it. */
+  job: string;
+  command: string;
+  cwd: string;
+  end: JobEndKind;
+  /** For `exited`. */
+  exit_code?: number;
+  /** For `signaled`, and for `stopped` and `timed-out`: the signal that ended it. */
+  signal?: string;
+  /** RFC 3339. */
+  started_at: string;
+  /** RFC 3339. For `interrupted`, when the runner found it cut. */
+  ended_at: string;
+  /** Whole seconds from start to end. */
+  seconds: number;
+  /** The file with all of its standard output and standard error. */
+  output: string;
+  /** The size of that file, in bytes. */
+  output_bytes: number;
+  /** The end of the output, at most the runner's limit of characters. */
+  tail: string;
+  /** Whether the output is longer than `tail`. */
+  tail_truncated: boolean;
+};
+
+/** `POST /v1/job-events`: a background job of the main agent ended (`source: "job"`). */
+export type JobEventRequest = FromAgent & { id: string; summary: string; payload: JobEnd };
+
 /** `POST /v1/replies`: a reply to the owner. */
 export type ReplyRequest = FromAgent & {
   text: string;
