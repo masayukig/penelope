@@ -40,6 +40,7 @@ penelope は新しい形なので、最初から今のペネロペと同じに�
 
 - Related: ADR-0006 記憶は `/memory` の形を保ち、検査をやめ、コミットだけを sandbox の外で行う
 - Related: ADR-0010 人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる
+- Related: ADR-0026 なつみ・ミャオ・アキも 1 人 1 つの配置で penelope に移し、記憶は履歴ごと写して、戻し道は持たない（本 ADR はペネロペのための条件で、3 人には「並べて確かめる」「戻せる形を保つ」を当てはめない）
 
 ## References
 

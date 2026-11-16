@@ -92,8 +92,10 @@ receivers は Pod の 4 つ目のコンテナで、Slack・監視の警報・Git
 - 設定のファイルの形、待ち受けのアドレス、HTTP の応答と health の口の細部、プラグインの内側の契約、Alertmanager の `id`・`stream`・`summary` の作り方の細部（委譲先: [receivers の仕様書](../receivers.md)）
 - GitHub の webhook のプラグイン（委譲先: GitHub の webhook を受けるときの ADR。docs/receivers.md の「後に足すプラグイン」に挙げる）
 - Slack のプラグイン（委譲先: Slack を受けるときの ADR。docs/receivers.md の「後に足すプラグイン」に挙げる）
+  - 2026-11-16 追記: ADR-0028 で決めた。
 - 鳴り続けているアラートをエージェントに知らせるか（委譲先: 同上の「後に足すプラグイン」。要るとなったときに別の ADR にする）
 - オーナーへの知らせの仕組みと、Alertmanager にアラートを足す道との関係（委譲先: オーナーへの知らせの仕組みを決める ADR。docs/receivers.md の「後に足すプラグイン」に挙げる）
+  - 2026-11-16 追記: 返事の知らせは ADR-0027 で決めた（Web Push）。Alertmanager にアラートを足す道との関係は決めていない。
 - 個別の配置の設定（有効にするプラグイン、URL の名前、token の置き場所、印のラベルの値）（委譲先: 配置のリポジトリ）
 
 ## Consequences
@@ -123,6 +125,8 @@ receivers は Pod の 4 つ目のコンテナで、Slack・監視の警報・Git
 - Related: ADR-0013 出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す（`stream` と `summary`）
 - Related: ADR-0014 sandbox の loopback は sandbox に任せ、Pod の中の口は Unix socket だけで待ち受ける（receivers の TCP の口は外から呼ばれる口として確かめる）
 - Related: ADR-0020 コネクタは Sentinel の登録と使い方の文書の組にし、文書の一覧をシステムプロンプトに出す（自分で足すアラートの印の付け方はコネクタの文書に書く）
+- Related: ADR-0027 本人への返事はすべて Web Push で知らせ、購読は配置ごとに backend が持つ（オーナーへの知らせの仕組み）
+- Related: ADR-0028 Slack は receivers のプラグインが Socket Mode で受け、つなぎ直しのたびに最近の発言を取り直す（Slack のプラグイン、外へ接続を張る種類）
 - Related（natsumi、このリポジトリの外）: ADR 0091「webhook の受け口を 1 つにし、届いたものの読み方は型としてコードに持つ」（前の形の受け口。URL と token を引き継ぐ）
 
 ## References

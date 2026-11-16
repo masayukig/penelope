@@ -18,7 +18,7 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0012 | [なつみベースのペネロペからは、並べて立ち上げてから切り替え、戻せる形を保つ](0012-move-penelope-side-by-side-and-keep-a-way-back.md) | Accepted |
 | 0013 | [出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す](0013-event-contents-in-sources-and-summaries-in-turns.md) | Accepted |
 | 0014 | [sandbox の loopback は sandbox に任せ、Pod の中の口は Unix socket だけで待ち受ける](0014-sandbox-loopback-left-open-and-pod-ports-on-unix-sockets.md) | Accepted |
-| 0015 | [終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない](0015-fold-ended-turns-before-they-are-sent.md) | Accepted |
+| 0015 | [終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない](0015-fold-ended-turns-before-they-are-sent.md) | Accepted（一部を ADR-0031 で置き換え） |
 | 0016 | [最初の Web UI からアバターを表情ごとの絵で出し、アバターは 1 つの部品に閉じる](0016-show-the-avatar-and-expression-from-the-first-web-ui.md) | Accepted |
 | 0017 | [ターンの入力は 1 行 1 件の JSON を `<events>` で囲み、1 件の型を契約にする](0017-turn-input-as-json-lines-in-events.md) | Accepted |
 | 0018 | [A2A の依頼は backend が Task として持って出来事にし、送り手は差し替えられる確かめ方で確かめる](0018-a2a-tasks-in-the-backend-and-replaceable-sender-checks.md) | Accepted |
@@ -29,3 +29,10 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0023 | [receivers のプラグインはリポジトリの中に持って配置の設定で有効にし、最初に Alertmanager の webhook を受ける](0023-receivers-plugins-in-the-repository-and-alertmanager-first.md) | Accepted |
 | 0024 | [GitHub の webhook は状態を持たずに受け、レビューの依頼と取り消しの 2 つだけを出来事にする](0024-github-webhooks-pass-review-requests-and-dismissals-without-state.md) | Accepted |
 | 0025 | [Sentinel のホストの登録に、左端の 1 ラベルだけのワイルドカードを書ける](0025-wildcard-host-registrations-for-one-left-most-label.md) | Accepted |
+| 0026 | [なつみ・ミャオ・アキも 1 人 1 つの配置で penelope に移し、記憶は履歴ごと写して、戻し道は持たない](0026-move-natsumi-myao-and-aki-one-deployment-each-without-a-way-back.md) | Accepted |
+| 0027 | [本人への返事はすべて Web Push で知らせ、購読は配置ごとに backend が持つ](0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md) | Accepted |
+| 0028 | [Slack は receivers のプラグインが Socket Mode で受け、つなぎ直しのたびに最近の発言を取り直す](0028-slack-received-over-socket-mode-by-a-receivers-plugin.md) | Accepted |
+| 0029 | [Slack の出来事はターンに inline で載せ、前のターンからの変化をチャンネルとスレッドの形で描く](0029-slack-events-inline-drawn-as-channels-and-threads.md) | Accepted |
+| 0030 | [裏の仕事は runner が道具で起こし、終わったら出力の末尾を持つ出来事を本体に入れる](0030-background-jobs-run-by-the-runner-and-their-end-as-an-event.md) | Accepted |
+| 0031 | [起きている時間に何もない時間が続いたら、backend が heartbeat の出来事を入れる](0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md) | Accepted |
+| 0032 | [返事に sandbox の画像を添え、backend が写して Web UI で見せる](0032-images-attached-to-a-reply-copied-by-the-backend.md) | Accepted |
