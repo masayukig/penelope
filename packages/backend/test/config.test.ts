@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
 import { describe, it } from "node:test";
 
 import { ConfigError, loadConfig } from "../src/config.ts";
 
+const VAPID = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 const files: Record<string, string> = {
+  "/secrets/vapid.pem": VAPID,
+  "/secrets/not-a-key.pem": "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n",
   "/secrets/sandbox-token": "real-token\n",
   "/secrets/github-secret": "client-secret\n",
   "/avatars/iris/avatar.json": JSON.stringify({ id: "iris", name: "Iris", icons: { neutral: "icons/neutral.webp", happy: "icons/happy.webp" } }),
@@ -44,6 +48,7 @@ describe("the configuration", () => {
       agent: { name: "Agent", icons: {} },
       webDir: "/app/web",
       a2a: undefined,
+      webPush: undefined,
     });
   });
 
@@ -154,6 +159,24 @@ describe("the configuration", () => {
   it("refuses an empty secret", () => {
     files["/secrets/empty"] = "\n";
     assert.throws(() => loadConfig({ PENELOPE_SANDBOX_TOKEN_FILE: "/secrets/empty" }, read), ConfigError);
+  });
+
+  describe("Web Push", () => {
+    it("is set up with the VAPID key's file, and names the backend by its public URL", () => {
+      const config = loadConfig({ PENELOPE_PUBLIC_URL: "https://penelope.example.com/", PENELOPE_WEB_PUSH_VAPID_KEY_FILE: "/secrets/vapid.pem" }, read);
+      assert.deepEqual(config.webPush, { vapidKey: VAPID.trim(), subject: "https://penelope.example.com" });
+    });
+
+    it("does not start with a key it cannot use, or without the public URL", () => {
+      for (const env of [
+        { PENELOPE_PUBLIC_URL: "https://penelope.example.com", PENELOPE_WEB_PUSH_VAPID_KEY_FILE: "/secrets/missing.pem" },
+        { PENELOPE_PUBLIC_URL: "https://penelope.example.com", PENELOPE_WEB_PUSH_VAPID_KEY_FILE: "/secrets/not-a-key.pem" },
+        { PENELOPE_PUBLIC_URL: "https://penelope.example.com", PENELOPE_WEB_PUSH_VAPID_KEY_FILE: "/secrets/github-secret" },
+        { PENELOPE_WEB_PUSH_VAPID_KEY_FILE: "/secrets/vapid.pem" },
+      ]) {
+        assert.throws(() => loadConfig(env, read), ConfigError, JSON.stringify(env));
+      }
+    });
   });
 
   describe("the A2A way in", () => {

@@ -1,7 +1,7 @@
 // A stand-in for the backend's API for the UI (docs/ui-api.md), answered
 // through the fetch the App is given. The test writes to the stream as the
 // backend would, and drops the line when it wants.
-import type { AgentResponse, HistoryEntry, StreamEvent, SubAgent } from "@penelope/contract";
+import type { AgentResponse, HistoryEntry, PushSubscriptionRequest, StreamEvent, SubAgent } from "@penelope/contract";
 
 type Line = { write: (text: string) => void; end: () => void };
 
@@ -16,6 +16,10 @@ export class FakeBackend {
   /** While down, nothing can be reached. */
   down = false;
   readonly posted: Array<{ text: string; files: string[] }> = [];
+  /** The deployment's VAPID public key; without one, there is no Web Push. */
+  pushKey: string | undefined = undefined;
+  /** The subscriptions registered, by endpoint, as the backend keeps them. */
+  readonly subscriptions = new Map<string, PushSubscriptionRequest>();
   readonly streamHeaders: Headers[] = [];
   private lines: Line[] = [];
   private nextId = 1;
@@ -35,6 +39,17 @@ export class FakeBackend {
     if (method === "GET" && url.pathname === "/api/agents") {
       this.agentsRead++;
       return json(200, { agents: this.agents });
+    }
+    if (method === "GET" && url.pathname === "/api/push") return json(200, this.pushKey === undefined ? {} : { web_push: { public_key: this.pushKey } });
+    if (method === "POST" && url.pathname === "/api/push/subscriptions") {
+      if (this.pushKey === undefined) return json(503, { error: "web-push-not-configured" });
+      const subscription = JSON.parse(String(init.body)) as PushSubscriptionRequest;
+      this.subscriptions.set(subscription.endpoint, subscription);
+      return new Response(null, { status: 204 });
+    }
+    if (method === "POST" && url.pathname === "/api/push/subscriptions/delete") {
+      this.subscriptions.delete((JSON.parse(String(init.body)) as { endpoint: string }).endpoint);
+      return new Response(null, { status: 204 });
     }
     if (method === "POST" && url.pathname === "/api/messages") {
       let text = "";

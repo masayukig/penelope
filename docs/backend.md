@@ -51,6 +51,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_A2A_AUDIENCES` | なし | `tokenreview`: 送り手の token に求める audience（`,` で区切る） |
 | `PENELOPE_KUBERNETES_URL` | `https://<KUBERNETES_SERVICE_HOST>:<KUBERNETES_SERVICE_PORT>` | `tokenreview`: API server の URL |
 | `PENELOPE_KUBERNETES_TOKEN_FILE` | `/var/run/secrets/kubernetes.io/serviceaccount/token` | `tokenreview`: backend 自身の ServiceAccount の token。尋ねるたびに読み直す |
+| `PENELOPE_WEB_PUSH_VAPID_KEY_FILE` | なし | Web Push の VAPID の秘密鍵（P-256、PEM）。無ければ Web Push は無い（[ui-api.md](ui-api.md) の「知らせ」） |
 | `PENELOPE_KUBERNETES_CA_FILE` | `/var/run/secrets/kubernetes.io/serviceaccount/ca.crt` | `tokenreview`: API server の証明書を確かめる CA |
 
 - GitHub のログインは、`PENELOPE_GITHUB_CLIENT_ID`・`PENELOPE_GITHUB_CLIENT_SECRET_FILE`・`PENELOPE_OWNER_GITHUB_ID` の 3 つと `PENELOPE_PUBLIC_URL` が揃ったときだけ動く。3 つのどれも無ければ、ログインは無く、誰も入れない（[ADR-0010](adr/0010-github-oauth-for-people-tokenreview-for-a2a.md)）。一部だけあるときは、設定の誤りとして起動しない。
@@ -58,14 +59,16 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - A2A の受け口は、`PENELOPE_A2A_SENDERS` があるときだけ開く（[ADR-0018](adr/0018-a2a-tasks-in-the-backend-and-replaceable-sender-checks.md)）。そのときは `PENELOPE_PUBLIC_URL`（Agent Card の URL と、`gated-assertion` の `aud` に使う）と `PENELOPE_A2A_AUTH` が要り、選んだ確かめ方に要るものがすべて要る。`gated-assertion` には発行元と JWKS の URL、`tokenreview` には audience と API server と、読める token のファイルと CA のファイル。欠けていれば起動しない。
 - `tokenreview` に audience を必ず求めるのは、API server 自身の audience では、その ServiceAccount で動くどの Pod にも mount されている token が通ってしまうためである。
 - `PENELOPE_A2A_SENDERS` が無ければ、ほかの `PENELOPE_A2A_*` は読まない。
+- Web Push は `PENELOPE_WEB_PUSH_VAPID_KEY_FILE` があるときだけ動く（[ADR-0027](adr/0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md)）。そのときは `PENELOPE_PUBLIC_URL` が要る（VAPID の token の `sub`。Apple の push service に届くには https にする）。鍵が読めない、PEM の秘密鍵でない、P-256 でないときは起動しない。backend は鍵を作らない。
+- VAPID の鍵は配置の Secret として長く保つ。鍵を替えると、それまでの購読には届かなくなる（Web UI は、次に開いたときに購読を作り直す）。作るには `openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out vapid.pem`。
 - アバターのディレクトリは `avatar.json` を持つ。`avatar.json` は、名前（`name`）と、表情ごとのアイコンの画像の場所（`icons`、ディレクトリからの相対の場所）を持つ。画像の拡張子は `.png`・`.jpg`・`.jpeg`・`.gif`・`.webp`・`.svg` のどれかで、ディレクトリの外は指せない。読めないとき、形が違うときは起動しない。
 - `batch` の待ちは、N・M のほか、`now` の出来事を初めて渡すときにも終わる。そのとき待っている `batch` の出来事は、起きている時間の外でも、`now` の出来事と一緒に渡す（[events.md](events.md) の「いつ渡すか」）。
 
 ## 状態
 
-- 状態は `PENELOPE_DATABASE` の SQLite の 1 つのファイルに置く（[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)）。待ち行列、会話の履歴、途中経過の記録、予約、セッションの切り替えの記録、ログインのセッション、A2A の Task、サブエージェントごとに runner が最後に知らせたもの（目的と閉じたか）である。
+- 状態は `PENELOPE_DATABASE` の SQLite の 1 つのファイルに置く（[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)）。待ち行列、会話の履歴、途中経過の記録、予約、セッションの切り替えの記録、ログインのセッション、A2A の Task、サブエージェントごとに runner が最後に知らせたもの（目的と閉じたか）、知らせの購読である。
 - エージェントごとの今の状態（`thinking` か `waiting`）とその状態になった時刻は別に残さず、途中経過の記録の最後の `turn_start` か `turn_end` から引く（[sandbox-api.md](sandbox-api.md) の「途中経過」）。
-- schema は migration の列で進める。版は `PRAGMA user_version` で、その数の migration が当たっている。migration は足すだけで、書き換えない。backend より新しい版のファイルは開かずに止まる。版 2 は A2A の Task、版 3 はサブエージェント（`sub_agents`）と、途中経過の記録から最後の `turn_start`・`turn_end` を引く索引である。
+- schema は migration の列で進める。版は `PRAGMA user_version` で、その数の migration が当たっている。migration は足すだけで、書き換えない。backend より新しい版のファイルは開かずに止まる。版 2 は A2A の Task、版 3 はサブエージェント（`sub_agents`）と、途中経過の記録から最後の `turn_start`・`turn_end` を引く索引、版 4 は知らせの購読（`push_subscriptions`。`endpoint` ごとに 1 行、種類と、その種類の鍵の JSON）である。
 - 出来事・会話の履歴・途中経過・A2A の Task は消さない。いつまで残すかは、量が問題になったときに決める。
 - `/sources` の保存期間による削除はまだ無い。
 

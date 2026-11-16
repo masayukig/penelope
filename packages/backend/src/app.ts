@@ -22,6 +22,8 @@ import { intakeHandler } from "./intake.ts";
 import { type GitHubEndpoints, GitHubLogin } from "./login/github.ts";
 import { LoginSessions } from "./login/sessions.ts";
 import { Memory } from "./memory.ts";
+import { Notifier, PushSubscriptions } from "./push/notifier.ts";
+import { vapidKeyOf, type WebPushRequest, WebPushChannel } from "./push/web-push.ts";
 import { Queue } from "./queue.ts";
 import { sandboxHandler } from "./sandbox-api.ts";
 import { Scheduler, Schedules } from "./schedules.ts";
@@ -34,7 +36,12 @@ export type Backend = { port: number; close: () => Promise<void> };
 
 export async function startBackend(
   config: Config,
-  { log = console.error, now = Date.now, githubEndpoints }: { log?: (line: string) => void; now?: () => number; githubEndpoints?: GitHubEndpoints } = {},
+  {
+    log = console.error,
+    now = Date.now,
+    githubEndpoints,
+    sendWebPush,
+  }: { log?: (line: string) => void; now?: () => number; githubEndpoints?: GitHubEndpoints; sendWebPush?: (request: WebPushRequest) => Promise<number> } = {},
 ): Promise<Backend> {
   for (const dir of [path.dirname(config.databasePath), config.sourcesDir, config.memoryDir, path.dirname(config.intakeSocket), path.dirname(config.sandboxSocket)]) {
     mkdirSync(dir, { recursive: true });
@@ -58,6 +65,18 @@ export async function startBackend(
   const sessions = new LoginSessions(db, { now });
   const inbox = new Inbox(db, queue, { now, limits: config.a2a?.limits ?? { deadlineMs: 24 * 3_600_000, maxOpenTasks: 3 } });
   const login = new GitHubLogin({ settings: config.github, ...(githubEndpoints ? { endpoints: githubEndpoints } : {}), sessions, now, log });
+  const subscriptions = new PushSubscriptions(db, { now });
+  const vapid = config.webPush === undefined ? undefined : vapidKeyOf(config.webPush.vapidKey);
+  const notifier =
+    config.webPush === undefined || vapid === undefined
+      ? undefined
+      : new Notifier({
+          feed,
+          subscriptions,
+          agentName: config.agent.name,
+          channels: { "web-push": new WebPushChannel({ vapid, subject: config.webPush.subject, now, ...(sendWebPush ? { send: sendWebPush } : {}) }) },
+          log,
+        });
 
   // A start that fails part way closes what it had opened, and the database.
   const opened: http.Server[] = [];
@@ -92,6 +111,7 @@ export async function startBackend(
           agent: config.agent,
           web: webHandler({ dir: config.webDir, agent: config.agent }),
           ...(config.a2a === undefined ? {} : { a2a: a2aOf(config.a2a, config.agent.name, inbox, now, log) }),
+          ...(vapid === undefined ? {} : { push: { publicKey: vapid.publicKey, subscriptions } }),
           now,
         }),
         config.listen.host,
@@ -107,10 +127,12 @@ export async function startBackend(
   const stopScheduler = scheduler.start();
   const stopHeartbeat =
     config.heartbeatMs === undefined ? () => {} : new Heartbeat(queue, conversation, { now, quietMs: config.heartbeatMs, awake, log }).start();
+  const stopNotifier = notifier?.start() ?? (() => {});
 
   if (config.sandboxToken === undefined) log("backend: no PENELOPE_SANDBOX_TOKEN_FILE; the sandbox's API refuses every request");
   if (config.github === undefined) log("backend: no GitHub login set up; no one can sign in to the UI");
   if (config.a2a === undefined) log("backend: no A2A senders; /a2a/ is closed");
+  if (config.webPush === undefined) log("backend: no PENELOPE_WEB_PUSH_VAPID_KEY_FILE; no notices of the replies are sent");
   const port = (ui.address() as AddressInfo).port;
   log(`backend: intake on ${config.intakeSocket}, sandbox's API on ${config.sandboxSocket}, UI on ${config.listen.host}:${port}`);
 
@@ -119,6 +141,7 @@ export async function startBackend(
     close: async () => {
       stopScheduler();
       stopHeartbeat();
+      stopNotifier();
       await Promise.all([close(intake), close(sandbox), close(ui)]);
       db.close();
     },

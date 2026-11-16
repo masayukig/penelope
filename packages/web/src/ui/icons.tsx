@@ -69,3 +69,16 @@ export const LogoutIcon = (props: Props) => (
     <path d="M14 8l4 4-4 4M18 12H9" />
   </svg>
 );
+export const BellIcon = (props: Props) => (
+  <svg {...base} strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16z" />
+    <path d="M10 20.5a2 2 0 0 0 4 0" />
+  </svg>
+);
+export const BellOffIcon = (props: Props) => (
+  <svg {...base} strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16z" />
+    <path d="M10 20.5a2 2 0 0 0 4 0" />
+    <path d="M4 4l16 16" />
+  </svg>
+);

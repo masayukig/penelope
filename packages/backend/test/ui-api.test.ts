@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createECDH, createHash } from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { writeFileSync } from "node:fs";
@@ -13,6 +13,7 @@ import { Feed } from "../src/feed.ts";
 import { close, type Handler, listenTcp, sendJson } from "../src/http.ts";
 import { GitHubLogin, type GitHubSettings } from "../src/login/github.ts";
 import { LoginSessions } from "../src/login/sessions.ts";
+import { PushSubscriptions } from "../src/push/notifier.ts";
 import { Queue } from "../src/queue.ts";
 import { Sources } from "../src/sources.ts";
 import { AwakeHours } from "../src/time.ts";
@@ -67,6 +68,7 @@ async function setup(
     agent = { name: "Iris", icons: {} as Record<string, string> },
     a2a = undefined as Handler | undefined,
     web = undefined as Handler | undefined,
+    pushKey = undefined as string | undefined,
   } = {},
 ) {
   const dir = tempDir(t);
@@ -91,8 +93,24 @@ async function setup(
     ? { clientId: "client", clientSecret: "secret", ownerId: OWNER, callbackUrl: `${publicUrl}/auth/github/callback` }
     : undefined;
   const login = new GitHubLogin({ settings, endpoints: github.endpoints, sessions, now, log: () => {} });
+  const subscriptions = new PushSubscriptions(db, { now });
+  const push = pushKey === undefined ? undefined : { publicKey: pushKey, subscriptions };
   const server = await listenTcp(
-    uiHandler({ queue, conversation, agents, feed, login, sessions, ownerId: settings?.ownerId, publicUrl, agent, now, ...(a2a ? { a2a } : {}), ...(web ? { web } : {}) }),
+    uiHandler({
+      queue,
+      conversation,
+      agents,
+      feed,
+      login,
+      sessions,
+      ownerId: settings?.ownerId,
+      publicUrl,
+      agent,
+      now,
+      ...(a2a ? { a2a } : {}),
+      ...(web ? { web } : {}),
+      ...(push ? { push } : {}),
+    }),
     "127.0.0.1",
     0,
   );
@@ -106,7 +124,7 @@ async function setup(
   const signIn = () => cookieOf(sessions.create(OWNER).token);
   const call = (pathname: string, cookie: string | undefined, options: Ask = {}) =>
     ask(target, pathname, { ...options, headers: { ...(cookie ? { cookie } : {}), ...options.headers } });
-  return { queue, conversation, agents, feed, sessions, github, target, signIn, call, sourcesDir, clock };
+  return { queue, conversation, agents, feed, sessions, github, target, signIn, call, sourcesDir, clock, subscriptions };
 }
 
 /** A Set-Cookie line as its value and its attributes, in whatever order they came. */
@@ -496,6 +514,78 @@ describe("the UI's API", () => {
       const answer = await call("/a2a/.well-known/agent-card.json", undefined);
       assert.equal(answer.status, 404);
       assert.equal(typeof answer.json().error, "string");
+    });
+  });
+
+  describe("the subscriptions to notices", () => {
+    const KEY = "BPublicKeyOfTheDeployment";
+    const keys = () => {
+      const ecdh = createECDH("prime256v1");
+      ecdh.generateKeys();
+      return { p256dh: ecdh.getPublicKey().toString("base64url"), auth: Buffer.alloc(16, 1).toString("base64url") };
+    };
+    const subscribe = (env: Awaited<ReturnType<typeof setup>>, cookie: string | undefined, body: unknown) =>
+      env.call("/api/push/subscriptions", cookie, { method: "POST", json: body });
+
+    it("tells the UI the VAPID public key, or that there is no Web Push", async (t) => {
+      const on = await setup(t, { pushKey: KEY });
+      assert.deepEqual((await on.call("/api/push", on.signIn())).json(), { web_push: { public_key: KEY } });
+      const off = await setup(t);
+      const answer = await off.call("/api/push", off.signIn());
+      assert.equal(answer.status, 200);
+      assert.deepEqual(answer.json(), {});
+    });
+
+    it("registers and removes a browser's subscription for the owner's session only", async (t) => {
+      const env = await setup(t, { pushKey: KEY });
+      const subscription = { kind: "web-push", endpoint: "https://push.example.com/send/1", keys: keys() };
+      assert.equal((await subscribe(env, undefined, subscription)).status, 401);
+      assert.equal(env.subscriptions.all().length, 0);
+
+      const cookie = env.signIn();
+      assert.equal((await subscribe(env, cookie, subscription)).status, 204);
+      // The same browser again replaces what it had.
+      assert.equal((await subscribe(env, cookie, { ...subscription, keys: keys() })).status, 204);
+      assert.equal((await subscribe(env, cookie, { ...subscription, endpoint: "https://push.example.com/send/2" })).status, 204);
+      assert.deepEqual(
+        env.subscriptions.all().map((s) => s.endpoint),
+        ["https://push.example.com/send/1", "https://push.example.com/send/2"],
+      );
+
+      const remove = (who: string | undefined) =>
+        env.call("/api/push/subscriptions/delete", who, { method: "POST", json: { endpoint: "https://push.example.com/send/1" } });
+      assert.equal((await remove(undefined)).status, 401);
+      assert.equal((await remove(cookie)).status, 204);
+      // Removing what is not there is the same answer.
+      assert.equal((await remove(cookie)).status, 204);
+      assert.deepEqual(
+        env.subscriptions.all().map((s) => s.endpoint),
+        ["https://push.example.com/send/2"],
+      );
+    });
+
+    it("refuses a subscription it could not send to", async (t) => {
+      const env = await setup(t, { pushKey: KEY });
+      const cookie = env.signIn();
+      for (const body of [
+        { kind: "web-push", endpoint: "http://push.example.com/send/1", keys: keys() },
+        { kind: "web-push", endpoint: "https://push.example.com/send/1", keys: { p256dh: "AAAA", auth: "AAAA" } },
+        { kind: "apns", endpoint: "https://push.example.com/send/1", keys: keys() },
+        "not an object",
+      ]) {
+        const answer = await subscribe(env, cookie, body);
+        assert.equal(answer.status, 400, JSON.stringify(body));
+        assert.equal(typeof answer.json().error, "string");
+      }
+      assert.equal((await env.call("/api/push/subscriptions/delete", cookie, { method: "POST", json: { endpoint: 1 } })).status, 400);
+      assert.equal(env.subscriptions.all().length, 0);
+    });
+
+    it("takes no subscription when there is no Web Push", async (t) => {
+      const env = await setup(t);
+      const answer = await subscribe(env, env.signIn(), { kind: "web-push", endpoint: "https://push.example.com/send/1", keys: keys() });
+      assert.equal(answer.status, 503);
+      assert.equal(answer.json().error, "web-push-not-configured");
     });
   });
 });

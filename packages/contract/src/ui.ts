@@ -52,3 +52,43 @@ export type AgentResponse = {
   /** Where each face of her avatar is served, by expression, when an avatar is chosen. */
   icons?: Record<string, string>;
 };
+
+/**
+ * `GET /api/push`: the kinds of notice the backend can send, with what a
+ * browser needs to subscribe. A kind is missing when the deployment does not
+ * set it up (ADR-0027).
+ */
+export type PushResponse = {
+  /** Web Push: the VAPID public key, uncompressed P-256 in base64url. */
+  web_push?: { public_key: string };
+};
+
+/**
+ * `POST /api/push/subscriptions`: one place to send the notices to. The first
+ * kind is Web Push, the browser's `PushSubscription.toJSON()`; the same
+ * endpoint again replaces the keys it had.
+ */
+export type PushSubscriptionRequest = {
+  kind: "web-push";
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+};
+
+/** `POST /api/push/subscriptions/delete`: stop sending to this endpoint. */
+export type PushUnsubscribeRequest = { endpoint: string };
+
+/**
+ * What one notice of a reply carries, whatever the kind it is sent by: what
+ * the Web Push is, as JSON, after it is decrypted.
+ */
+export type Notice = {
+  /** The id of the reply, as in the history. */
+  id: string;
+  /** The agent's name, from the backend's settings. */
+  agent: string;
+  /** The head of the reply, cut short (docs/ui-api.md, "知らせ"). */
+  text: string;
+  expression?: string;
+  /** How many images the reply has, when it has any (ADR-0032). */
+  images?: number;
+};

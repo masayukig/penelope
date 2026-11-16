@@ -486,3 +486,15 @@ body {
   font-size: 28px;
   font-weight: 600;
 }
+
+/* The rail's footer: the switch of the notices, then the logout. Side by side
+   when the rail is open, one above the other when it is folded to its icons. */
+.rail-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.rail-footer-folded {
+  flex-direction: column;
+}

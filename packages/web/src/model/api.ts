@@ -1,6 +1,6 @@
 // The backend's API for the UI (docs/ui-api.md), over a fetch that the tests
 // replace.
-import type { AgentResponse, HistoryResponse, PostMessageResponse, SubAgentsResponse } from "@penelope/contract";
+import type { AgentResponse, HistoryResponse, PostMessageResponse, PushResponse, PushSubscriptionRequest, PushUnsubscribeRequest, SubAgentsResponse } from "@penelope/contract";
 
 export type Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -24,6 +24,10 @@ export type Api = {
   history(before?: string): Promise<HistoryResponse>;
   send(text: string, files: readonly File[]): Promise<PostMessageResponse>;
   logout(): Promise<void>;
+  /** The kinds of notice the deployment sends, with the key to subscribe with. */
+  push(): Promise<PushResponse>;
+  subscribePush(subscription: PushSubscriptionRequest): Promise<void>;
+  unsubscribePush(endpoint: string): Promise<void>;
 };
 
 export function createApi(fetch: Fetch): Api {
@@ -61,6 +65,14 @@ export function createApi(fetch: Fetch): Api {
     },
     logout: async () => {
       await call("/auth/logout", { method: "POST" });
+    },
+    push: async () => (await call("/api/push")).json() as Promise<PushResponse>,
+    subscribePush: async (subscription) => {
+      await call("/api/push/subscriptions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(subscription) });
+    },
+    unsubscribePush: async (endpoint) => {
+      const body: PushUnsubscribeRequest = { endpoint };
+      await call("/api/push/subscriptions/delete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     },
   };
 }

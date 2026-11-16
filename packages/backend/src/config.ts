@@ -11,6 +11,7 @@ import { CALLBACK_PATH, type GitHubSettings } from "./login/github.ts";
 import { audienceOf } from "./a2a/gated.ts";
 import { Senders } from "./a2a/senders.ts";
 import type { KubernetesSettings } from "./a2a/tokenreview.ts";
+import { vapidKeyOf } from "./push/web-push.ts";
 
 /** A setting that cannot be used. The backend does not start. */
 export class ConfigError extends Error {}
@@ -40,6 +41,8 @@ export type Config = {
   webDir: string;
   /** The A2A way in (docs/a2a.md); none when no sender is allowed. */
   a2a: A2ASettings | undefined;
+  /** Web Push (ADR-0027): the VAPID private key in PEM and the subject it names; none without the key. */
+  webPush: { vapidKey: string; subject: string } | undefined;
 };
 
 /** The A2A way in: who may send, how they are checked (one way or both), and the limits. */
@@ -199,7 +202,23 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
     agent: { name: get("PENELOPE_AGENT_NAME") ?? avatar?.name ?? "Agent", icons: avatar?.icons ?? {} },
     webDir: get("PENELOPE_WEB_DIR") ?? "/app/web",
     a2a: a2aOf(get, readFile, publicUrl),
+    webPush: webPushOf(secret("PENELOPE_WEB_PUSH_VAPID_KEY_FILE"), publicUrl),
   };
+}
+
+/**
+ * Web Push is there with the deployment's VAPID key, which names the backend
+ * by its public URL. A key it cannot use stops the start (ADR-0027).
+ */
+function webPushOf(vapidKey: string | undefined, publicUrl: string | undefined): Config["webPush"] {
+  if (vapidKey === undefined) return undefined;
+  try {
+    vapidKeyOf(vapidKey);
+  } catch (error) {
+    throw new ConfigError(`PENELOPE_WEB_PUSH_VAPID_KEY_FILE: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (publicUrl === undefined) throw new ConfigError("Web Push needs PENELOPE_PUBLIC_URL, the subject of its VAPID tokens");
+  return { vapidKey, subject: publicUrl };
 }
 
 /**

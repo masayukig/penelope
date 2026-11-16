@@ -45,6 +45,15 @@ export const words = {
   login: "GitHub でログイン",
   loginNote: "オーナーだけが入れます。",
   logout: "ログアウト",
+  push: {
+    off: "通知を受ける",
+    on: "通知を止める",
+    busy: "通知を設定しています",
+    failed: "通知を受けられませんでした。もう一度試す",
+    denied: "通知はブラウザで止められています",
+    unsupported: "このブラウザでは通知を受けられません（iPhone はホーム画面に置いてから）",
+    unavailable: "この配置では通知を使えません",
+  },
   today: "今日",
   yesterday: "昨日",
 } as const;

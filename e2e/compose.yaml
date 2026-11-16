@@ -140,10 +140,12 @@ services:
       PENELOPE_KUBERNETES_URL: https://kubernetes.example.com
       PENELOPE_KUBERNETES_TOKEN_FILE: /run/secrets/e2e/kube-token
       PENELOPE_KUBERNETES_CA_FILE: /run/secrets/e2e/outside-ca.crt
+      PENELOPE_WEB_PUSH_VAPID_KEY_FILE: /run/secrets/e2e/vapid.pem
     volumes:
       - *resolv
       - ./.run/backend-token:/run/secrets/e2e/backend-token:ro
       - ./.run/kube-token:/run/secrets/e2e/kube-token:ro
+      - ./.run/vapid.pem:/run/secrets/e2e/vapid.pem:ro
       - ./.run/github-client-secret:/run/secrets/e2e/github-client-secret:ro
       - ./.run/outside-ca.crt:/run/secrets/e2e/outside-ca.crt:ro
       - memory:/memory
