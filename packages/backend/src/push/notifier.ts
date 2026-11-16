@@ -73,7 +73,14 @@ export class PushSubscriptions {
 export function noticeOf(reply: Extract<HistoryEntry, { kind: "agent" }>, agentName: string, length = NOTICE_TEXT_LENGTH): Notice {
   const characters = Array.from(reply.text.trim());
   const text = characters.length > length ? `${characters.slice(0, length).join("")}…` : characters.join("");
-  return { id: reply.id, agent: agentName, text, ...(reply.expression === undefined ? {} : { expression: reply.expression }) };
+  const images = reply.images?.length ?? 0;
+  return {
+    id: reply.id,
+    agent: agentName,
+    text,
+    ...(reply.expression === undefined ? {} : { expression: reply.expression }),
+    ...(images === 0 ? {} : { images }),
+  };
 }
 
 /** The notice as JSON within `maxBytes`, its text cut shorter until it fits. */

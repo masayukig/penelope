@@ -16,6 +16,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | 変数 | 既定 | 中身 |
 | --- | --- | --- |
 | `PENELOPE_DATABASE` | `/var/lib/penelope/backend.sqlite` | SQLite のファイル（永続） |
+| `PENELOPE_ASSETS_DIR` | `PENELOPE_DATABASE` と同じディレクトリの `assets`（既定では `/var/lib/penelope/assets`） | エージェントが作ったものの写しの置き場（永続、下の「作ったものの写し」） |
 | `PENELOPE_SOURCES_DIR` | `/sources` | `/sources` の場所。sandbox から見える場所と同じにする |
 | `PENELOPE_MEMORY_DIR` | `/memory` | `/memory` の作業ツリー |
 | `PENELOPE_INTAKE_SOCKET` | `/run/penelope/intake/backend.sock` | 取り込み口の Unix socket |
@@ -68,9 +69,19 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 
 - 状態は `PENELOPE_DATABASE` の SQLite の 1 つのファイルに置く（[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)）。待ち行列、会話の履歴、途中経過の記録、予約、セッションの切り替えの記録、ログインのセッション、A2A の Task、サブエージェントごとに runner が最後に知らせたもの（目的と閉じたか）、知らせの購読である。
 - エージェントごとの今の状態（`thinking` か `waiting`）とその状態になった時刻は別に残さず、途中経過の記録の最後の `turn_start` か `turn_end` から引く（[sandbox-api.md](sandbox-api.md) の「途中経過」）。
-- schema は migration の列で進める。版は `PRAGMA user_version` で、その数の migration が当たっている。migration は足すだけで、書き換えない。backend より新しい版のファイルは開かずに止まる。版 2 は A2A の Task、版 3 はサブエージェント（`sub_agents`）と、途中経過の記録から最後の `turn_start`・`turn_end` を引く索引、版 4 は知らせの購読（`push_subscriptions`。`endpoint` ごとに 1 行、種類と、その種類の鍵の JSON）である。
+- schema は migration の列で進める。版は `PRAGMA user_version` で、その数の migration が当たっている。migration は足すだけで、書き換えない。backend より新しい版のファイルは開かずに止まる。版 2 は A2A の Task、版 3 はサブエージェント（`sub_agents`）と、途中経過の記録から最後の `turn_start`・`turn_end` を引く索引、版 4 は知らせの購読（`push_subscriptions`。`endpoint` ごとに 1 行、種類と、その種類の鍵の JSON）、版 5 は作ったものの写し（`assets`）である。
 - 出来事・会話の履歴・途中経過・A2A の Task は消さない。いつまで残すかは、量が問題になったときに決める。
 - `/sources` の保存期間による削除はまだ無い。
+
+## 作ったものの写し
+
+[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md) の「写しの置き場所」をここで決める。今あるのは返事の画像だけである。
+
+- 写しは `PENELOPE_ASSETS_DIR` の下の 1 つのファイル `<ID>.<拡張子>`（`png`・`jpg`・`gif`・`webp`）で、ID は UUID である。`/sources` とも `/memory` とも分ける。既定では SQLite と同じ永続の場所にあり、backend だけが mount する（[pod.md](pod.md) の「volume」）。
+- ファイルは `<ID>.<拡張子>.part` に書いてから名前を変える。書きかけの写しは置き場の名前で見えない。
+- SQLite の `assets` に 1 つの写しが 1 行で、ID・種類（`kind`、今は `image`）・MIME・大きさ・元のファイルの名前・置き場のファイルの名前・作ったエージェント・作った時刻・結び付いた返事（`reply_id`）と、その返事の中の順を持つ。行の順が作った順である。後で返事に結び付かない写しを足せるよう、`reply_id` は空でもよい。
+- 返事の行と写しの行は 1 つの transaction で残す。transaction が失敗したら、書いた写しのファイルを消す。
+- 写しは消さない。会話の履歴と同じく、いつまで残すかは量が問題になったときに決める。
 
 ## オーナーのログイン
 

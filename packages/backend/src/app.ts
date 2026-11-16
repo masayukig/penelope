@@ -12,6 +12,7 @@ import { Inbox } from "./a2a/inbox.ts";
 import { type SenderCheck, Senders } from "./a2a/senders.ts";
 import { TokenReview } from "./a2a/tokenreview.ts";
 import { SubAgents } from "./agents.ts";
+import { Assets } from "./assets.ts";
 import type { Config } from "./config.ts";
 import { Conversation } from "./conversation.ts";
 import { openDatabase } from "./db.ts";
@@ -43,7 +44,7 @@ export async function startBackend(
     sendWebPush,
   }: { log?: (line: string) => void; now?: () => number; githubEndpoints?: GitHubEndpoints; sendWebPush?: (request: WebPushRequest) => Promise<number> } = {},
 ): Promise<Backend> {
-  for (const dir of [path.dirname(config.databasePath), config.sourcesDir, config.memoryDir, path.dirname(config.intakeSocket), path.dirname(config.sandboxSocket)]) {
+  for (const dir of [path.dirname(config.databasePath), config.assetsDir, config.sourcesDir, config.memoryDir, path.dirname(config.intakeSocket), path.dirname(config.sandboxSocket)]) {
     mkdirSync(dir, { recursive: true });
   }
   const db = openDatabase(config.databasePath);
@@ -57,7 +58,8 @@ export async function startBackend(
     redeliverMs: config.redeliverMs,
   });
   const feed = new Feed();
-  const conversation = new Conversation(db, feed, { now });
+  const assets = new Assets(db, config.assetsDir, { now });
+  const conversation = new Conversation(db, feed, { now, assets });
   const agents = new SubAgents(db, feed, conversation, { now });
   const schedules = new Schedules(db, { now, timeZone: config.timeZone });
   const scheduler = new Scheduler(schedules, queue, { now, timeZone: config.timeZone, nightly: config.nightly, log });
@@ -102,6 +104,7 @@ export async function startBackend(
         uiHandler({
           queue,
           conversation,
+          assets,
           agents,
           schedules,
           feed,

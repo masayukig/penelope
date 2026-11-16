@@ -12,10 +12,34 @@ export type PostMessageResponse = { id: string };
 /** The event a reply answers: where it came from and its one line. Never its payload. */
 export type Trigger = { source: Source; summary: string };
 
+/**
+ * An image the backend copied when a reply carried it (ADR-0032). Its bytes are
+ * `GET /api/assets/<id>`, and never change.
+ */
+export type ReplyImage = {
+  id: string;
+  /** PNG, JPEG, GIF or WebP, from its first bytes. */
+  mime_type: string;
+  /** Bytes. */
+  size: number;
+  /** The name of the file it was copied from, without its directory. */
+  name: string;
+};
+
 /** One line of the conversation. */
 export type HistoryEntry =
   | { kind: "owner"; id: string; at: string; text: string; agent?: never }
-  | { kind: "agent"; id: string; at: string; text: string; agent: AgentId; expression?: string; trigger?: Trigger };
+  | {
+      kind: "agent";
+      id: string;
+      at: string;
+      text: string;
+      agent: AgentId;
+      expression?: string;
+      trigger?: Trigger;
+      /** The images it carries, in the order sent. Missing when there are none. */
+      images?: ReplyImage[];
+    };
 
 /** `GET /api/history?before=`: newest first. `before` is the cursor of the next, older page. */
 export type HistoryResponse = { entries: HistoryEntry[]; before?: string };

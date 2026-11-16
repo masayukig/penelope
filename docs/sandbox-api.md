@@ -31,7 +31,7 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 | `POST /v1/events/ack` | 済んだ出来事を知らせる |
 | `POST /v1/self-events` | 自分宛ての出来事を入れる |
 | `POST /v1/job-events` | 裏の仕事の終わりを入れる |
-| `POST /v1/replies` | オーナーへの返事 |
+| `POST /v1/replies` | オーナーへの返事（画像を添えられる） |
 | `POST /v1/a2a/replies` | A2A の Task に返す |
 | `POST /v1/activity` | 途中経過 |
 | `POST /v1/turns/end` | ターンの終わり |
@@ -161,10 +161,26 @@ runner は、本体のセッションにだけ、裏の仕事を扱う 3 つの�
 
 ## 返事
 
-- body は `{agent, text, expression?, in_reply_to?}`。
+- body は `{agent, text, expression?, in_reply_to?, images?}`。
   - `expression`: 表情。Web UI はアバターをこの表情の絵で出す（[ADR-0016](adr/0016-show-the-avatar-and-expression-from-the-first-web-ui.md)）。
   - `in_reply_to`: 答えている出来事の `seq`。ターンの `<events>` の行の `seq` である（`batch` のまとめなら `seqs` の 1 つ）。
+  - `images`: 返事に添える画像の並び（[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md)）。1 件は `{name, data}`（型は `ReplyImageUpload`）で、`name` はファイルの名前（ディレクトリを除く、1〜255 文字）、`data` はファイルの中身の base64（padding 付き）。
 - 応答は `201` と `{id}`。backend は会話の履歴に残し、UI の流れへ送る（[ui-api.md](ui-api.md)）。
+
+### 返事の画像
+
+- 上限は contract の `src/images.ts` が正で、runner と backend が同じものを使う。1 回 4 枚（`REPLY_IMAGES_MAX`）、1 枚 10 MiB（`REPLY_IMAGE_MAX_BYTES`、10,485,760 バイト）、種類は PNG・JPEG・GIF・WebP（`REPLY_IMAGE_TYPES`）。
+- 種類は中身の先頭の bytes で決める（取り込み口の添付と同じ見分け方、[events.md](events.md)）。名前の拡張子と送り手の言い分は見ない。
+- 1 枚でも合わなければ、文も含めて何も残さず `400` で断る。`error` は `not sent: ` に続けて、何番目のどのファイルが、なぜ合わないかを言う（枚数が多い、名前が無い、base64 でない、大きすぎる、PNG・JPEG・GIF・WebP でない）。
+- backend は確かめに通った画像を写しの置き場に書いてから、返事と写しの記録を 1 つの transaction で残す（[backend.md](backend.md) の「作ったものの写し」）。書けなければ、書きかけを消し、返事も残さずに `500`（`not sent: the images could not be kept`）で答える。
+- 画像の無い返事、`images` が空の返事は、履歴と流れに `images` の欄を持たない。
+
+### `reply` のツール（runner）
+
+- `images` に、sandbox の中の画像のファイルの場所を並べて渡す。相対の場所は HOME から引く。引数と説明の文は `packages/runner/src/tools.ts` が正である。
+- runner はファイルを読んで base64 にし、`name` をファイルの名前にして送る。backend は sandbox のファイルを読まない。
+- runner は、枚数が上限より多い、ファイルが無い・読めない・普通のファイルでない、大きさが上限より大きい（読む前に `stat` で見る）ときは、送らずにツールのエラーにする。種類は確かめず、backend に任せる。backend の断りは、その `error` をそのままツールのエラーにする。どちらも `Not sent` / `not sent` で始まり、返事は届いていない。
+- 畳んだターンにも `reply` の呼び出しは丸ごと残る（[ADR-0015](adr/0015-fold-ended-turns-before-they-are-sent.md)）。残るのはファイルの場所だけで、画像の中身はモデルへの入力に入らない。
 
 ## A2A の Task に返す
 
@@ -228,4 +244,4 @@ runner は、本体のセッションにだけ、裏の仕事を扱う 3 つの�
 
 ## 状態コード
 
-成功で body の無いもの（ack・途中経過・ターンの終わり・サブエージェントの状態・切り替えの知らせ）は `204`、形が違えば `400`、認証が通らなければ `401`、口の無い道は `404`、道はあるが method が違えば `405`、body が上限（16 MiB）より大きければ `413`。backend が本物の token を設定されていなければ、すべての要求を `401` で断る。
+成功で body の無いもの（ack・途中経過・ターンの終わり・サブエージェントの状態・切り替えの知らせ）は `204`、形が違えば `400`、認証が通らなければ `401`、口の無い道は `404`、道はあるが method が違えば `405`、body が上限（16 MiB。返事は画像を運ぶので 64 MiB で、4 枚の 10 MiB の base64 が収まる）より大きければ `413`。backend が本物の token を設定されていなければ、すべての要求を `401` で断る。

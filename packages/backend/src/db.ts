@@ -134,6 +134,26 @@ export const MIGRATIONS: readonly string[] = [
     updated_ms INTEGER NOT NULL
   );
   `,
+  `
+  -- What the agents made, copied by the backend (ADR-0032): for now the images
+  -- of the replies, each tied to its reply. The bytes are a file under the
+  -- assets directory, named by the file column. They are never removed.
+  CREATE TABLE assets (
+    row        INTEGER PRIMARY KEY AUTOINCREMENT,
+    id         TEXT NOT NULL UNIQUE,
+    kind       TEXT NOT NULL CHECK (kind IN ('image')),
+    mime_type  TEXT NOT NULL,
+    size       INTEGER NOT NULL,
+    name       TEXT NOT NULL,
+    file       TEXT NOT NULL,
+    agent      TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    -- The reply it was sent with, and its place among that reply's images.
+    reply_id   TEXT REFERENCES history (id),
+    position   INTEGER
+  );
+  CREATE INDEX assets_reply ON assets (reply_id, position) WHERE reply_id IS NOT NULL;
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

@@ -24,7 +24,7 @@
 | `/memory` の作業ツリー（永続） | 読み書き | 読み書き | — | — |
 | `/memory/.git`（同じ永続の場所） | 読み取りで重ねる | 読み書き | — | — |
 | `/home/agent`（永続） | 読み書き | — | — | — |
-| backend の SQLite（永続） | — | 読み書き | — | — |
+| backend の SQLite と、作ったものの写し（永続、既定では同じ場所。[backend.md](backend.md)） | — | 読み書き | — | — |
 | `/sources`（永続） | 読み取り | 読み書き | — | — |
 | 取り込み口の socket（emptyDir） | — | 読み書き | — | 読み書き |
 | backend の sandbox 向けの口の socket（emptyDir） | — | 読み書き | 読み書き | — |

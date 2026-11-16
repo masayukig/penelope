@@ -35,6 +35,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 | `GET /api/stream` | 返事・途中経過・状態の流れ（SSE） |
 | `GET /api/agent`・`GET /api/agent/icons/<表情>` | エージェントの名前と表情のアイコン（認証なし） |
 | `GET /api/agents` | 閉じていないサブエージェントの一覧 |
+| `GET /api/assets/<id>` | 返事に添えられた画像の写し |
 | `GET /api/push`・`POST /api/push/subscriptions`・`POST /api/push/subscriptions/delete` | 返事の知らせ（Web Push）の鍵と、購読の登録と解除 |
 | `GET /api/schedules`・`DELETE /api/schedules/<id>` | エージェントの予約の一覧と取り消し |
 | `GET /api/approvals`・`POST /api/approvals/<id>` | 承認（後の波） |
@@ -53,6 +54,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 - 返事とオーナーのメッセージを、新しい順に返す。応答は `{entries, before?}`。`before` は次の（より古い）ページを取るための不透明な cursor で、最後のページには無い。
 - 1 件は `kind`（`owner` か `agent`）・`id`・`at`・`text` を持つ。`agent` のものは、さらに `agent`（エージェントの ID）と `expression` を持つ。
 - `agent` のものは、答えている出来事（返事の `in_reply_to`）を backend が知っていれば、`trigger` として、その出来事の `source` と `summary` を持つ。出来事の `payload` は載せない。UI はこれを、エージェントが何をきっかけに話したかの札にする。
+- `agent` のものは、画像を添えた返事なら `images` として、送られた順の画像の一覧を持つ（型は `ReplyImage`、「画像」）。画像の無い返事には欄が無い。
 
 - 1 ページは 50 件。backend の渡していない `before` は `400`。
 - 途中経過は履歴に含めない。途中経過は流れだけで送る。過去の途中経過を見る画面は後の波。
@@ -166,9 +168,20 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 - 「取り消す」を押すと、取り消すかを確かめる（理由と、エージェントには知らせないことを添える）。確かめてから `DELETE` を送り、その行を消す。`404` のときは（エージェントが自分で消したか、1 回の予約が来たあと）一覧を読み直す。ほかの失敗は知らせを出し、行は残す。
 - 一覧はこの場所を開くたびに読む。流れでは直さない（予約の変化は流れに載らない）。
 
+## 画像
+
+返事に添えられた画像は、backend が返事を受けた時点で写したものである（[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md)、[sandbox-api.md](sandbox-api.md) の「返事の画像」）。
+
+- 履歴と流れの `reply` の `images` の 1 件は、`id`・`mime_type`（PNG・JPEG・GIF・WebP。中身の先頭の bytes から）・`size`（byte）・`name`（写した元のファイルの名前）を持つ。
+- `GET /api/assets/<id>` は、その写しの中身を `mime_type` の型で返す。ログインしたオーナーのセッションだけが読める（ほかは `401`）。無い ID、読めない写しは `404`。GET のほかの method は `405`。
+- 同じ ID の写しは変わらないので、`cache-control: private, max-age=31536000, immutable` を付ける。`x-content-type-options: nosniff` も付ける。
+- Web UI は返事の文の下に縮小して並べ、押すと大きく見せる（[docs/design](design/README.md) の「返事の画像」）。
+- 返事の知らせには画像を載せず、数だけを `images` に入れる（「知らせの中身」）。
+- 写しの一覧の口はまだ無い。写しは返事と別の表に、種類・作った時刻・作ったエージェントとともに持つので（[backend.md](backend.md) の「作ったものの写し」）、作ったものの一覧の画面を作るときに `GET /api/assets` のような口を足せる。
+
 ## これから足すもの
 
-- 返事に結び付いた画像の一覧と、画像を ID で取る口（[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md)）。
+- 作ったものの一覧の口と画面（[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md)）。
 - どの配置でも同じ形に保つ（[ADR-0026](adr/0026-move-natsumi-myao-and-aki-one-deployment-each-without-a-way-back.md)）。
 
 ## 承認（後の波）

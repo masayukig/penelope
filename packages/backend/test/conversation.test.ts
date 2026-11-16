@@ -3,10 +3,11 @@ import { describe, it } from "node:test";
 
 import type { Activity, StreamEvent } from "@penelope/contract";
 
+import { Assets } from "../src/assets.ts";
 import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
 import { Feed } from "../src/feed.ts";
-import { FakeClock } from "./support.ts";
+import { FakeClock, tempDir } from "./support.ts";
 
 function setup(t: { after: (fn: () => void) => void }) {
   const db = openDatabase(":memory:");
@@ -43,6 +44,28 @@ describe("the conversation", () => {
         { kind: "owner", id: "m-1", at: "2026-11-14T09:00:00.000Z", text: "hello" },
       ],
     });
+  });
+
+  it("gives each reply its own images on every page, in the order sent", (t) => {
+    // Guards against: a reply shown with another reply's images, or with its images out of order.
+    const db = openDatabase(":memory:");
+    t.after(() => db.close());
+    const clock = new FakeClock("2026-11-14T09:00:00Z");
+    const assets = new Assets(db, tempDir(t), { now: clock.now });
+    const conversation = new Conversation(db, new Feed(), { now: clock.now, assets });
+    const png = (n: number) => ({ name: `${n}.png`, mime_type: "image/png", data: new Uint8Array([0x89, 0x50, 0x4e, 0x47, n]) });
+    const first = conversation.reply({ agent: "main", text: "one" }, [png(1), png(2)]);
+    conversation.reply({ agent: "main", text: "none" });
+    const third = conversation.reply({ agent: "main", text: "three" }, [png(3)]);
+    const names = (entries: ReturnType<Conversation["page"]>["entries"]) =>
+      entries.map((entry) => [entry.id, entry.kind === "agent" ? entry.images?.map((image) => image.name) : undefined]);
+    const top = conversation.page(undefined, 2);
+    assert.deepEqual(names(top.entries).map(([, images]) => images), [["3.png"], undefined]);
+    assert.equal(top.entries[0]?.id, third.id);
+    const rest = conversation.page(top.before, 2);
+    assert.deepEqual(names(rest.entries), [[first.id, ["1.png", "2.png"]]]);
+    const [image] = top.entries[0]?.kind === "agent" ? (top.entries[0].images ?? []) : [];
+    assert.deepEqual(image && { mime_type: image.mime_type, size: image.size }, { mime_type: "image/png", size: 5 });
   });
 
   it("gives the history in pages, each with the cursor of the next until the last", (t) => {

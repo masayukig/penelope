@@ -11,6 +11,7 @@ import type { AgentResponse, PostMessageResponse, PushResponse, SchedulesRespons
 
 import { isA2APath } from "./a2a/endpoint.ts";
 import type { SubAgents } from "./agents.ts";
+import type { Assets } from "./assets.ts";
 import { type AgentSettings, ICON_TYPES } from "./config.ts";
 
 import type { Conversation } from "./conversation.ts";
@@ -27,6 +28,8 @@ import { iso } from "./time.ts";
 import { AGENT_ICONS_PATH } from "./web.ts";
 
 export const SESSION_COOKIE = "penelope_session";
+/** Where the copies the backend keeps of what the agents made are read, by id (ADR-0032). */
+export const ASSETS_PATH = "/api/assets/";
 /** A message with its files: 64 MiB in all by default. */
 export const DEFAULT_UI_BYTES = 64 * 1024 * 1024;
 const HEARTBEAT_MS = 25_000;
@@ -37,6 +40,8 @@ const PUSH_BYTES = 16 * 1024;
 export type UiOptions = {
   queue: Queue;
   conversation: Conversation;
+  /** The copies of the replies' images. */
+  assets: Assets;
   /** The sub-agents that are not closed, for `GET /api/agents`. */
   agents: SubAgents;
   /** Her schedules, listed and removed as her own tools do (docs/sandbox-api.md). */
@@ -61,7 +66,7 @@ export type UiOptions = {
 };
 
 export function uiHandler(options: UiOptions): Handler {
-  const { queue, conversation, agents, schedules, feed, login, sessions, ownerId, agent, now } = options;
+  const { queue, conversation, assets, agents, schedules, feed, login, sessions, ownerId, agent, now } = options;
   const maxBytes = options.maxBytes ?? DEFAULT_UI_BYTES;
   const secure = options.publicUrl?.startsWith("https:") ?? false;
   const web = options.web ?? notBuilt;
@@ -147,6 +152,11 @@ export function uiHandler(options: UiOptions): Handler {
     // Each use moves the session's end on; the cookie follows it.
     response.setHeader("set-cookie", cookie(session.token, session.expiresMs));
 
+    if (url.pathname.startsWith(ASSETS_PATH)) {
+      await sendAsset(assets, url.pathname.slice(ASSETS_PATH.length), request, response);
+      return;
+    }
+
     switch (route) {
       case "POST /api/messages": {
         const { text, attachments } = isMultipart(request)
@@ -217,6 +227,35 @@ export function uiHandler(options: UiOptions): Handler {
     }
     throw new HttpError(404, "no such path");
   };
+}
+
+/**
+ * The bytes of one copy, as its type. A copy never changes, so the browser
+ * may keep it as long as it likes; it is the owner's, so only her browser.
+ */
+async function sendAsset(assets: Assets, rest: string, request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  let id = "";
+  try {
+    id = decodeURIComponent(rest);
+  } catch {
+    // Not an id of any copy: answered as one that is not there.
+  }
+  const found = id === "" || id.includes("/") ? undefined : assets.get(id);
+  if (found === undefined) throw new HttpError(404, "no such asset");
+  if (request.method !== "GET") throw new HttpError(405, "only GET");
+  let body: Buffer;
+  try {
+    body = await readFile(found.file);
+  } catch {
+    throw new HttpError(404, "the asset cannot be read");
+  }
+  response.writeHead(200, {
+    "content-type": found.mime_type,
+    "content-length": body.length,
+    "cache-control": "private, max-age=31536000, immutable",
+    "x-content-type-options": "nosniff",
+  });
+  response.end(body);
 }
 
 /** Server-sent events until the browser goes away, a comment now and then to keep the line open. */
