@@ -35,6 +35,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 | `GET /api/stream` | 返事・途中経過・状態の流れ（SSE） |
 | `GET /api/agent`・`GET /api/agent/icons/<表情>` | エージェントの名前と表情のアイコン（認証なし） |
 | `GET /api/agents` | 閉じていないサブエージェントの一覧 |
+| `GET /api/push`・`POST /api/push/subscriptions`・`POST /api/push/subscriptions/delete` | 返事の知らせ（Web Push）の鍵と、購読の登録と解除 |
 | `GET /api/approvals`・`POST /api/approvals/<id>` | 承認（後の波） |
 
 ## メッセージを送る
@@ -96,6 +97,51 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 - UI はアバターを表情ごとの画像で出す（[ADR-0016](adr/0016-show-the-avatar-and-expression-from-the-first-web-ui.md)）。表情が無いとき、アバターに無い表情のときは `neutral` の画像を出し、それも無ければ build に含めた汎用のアイコンを出す。
 - `GET /api/agent/icons/<表情>` はその表情の画像を、拡張子の画像の型で返す。無い表情、読めない画像は `404`。
 
+## 知らせ
+
+エージェントの返事（`reply`）は、すべてオーナーの購読に知らせる（[ADR-0027](adr/0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md)）。最初の種類は Web Push だけである。オーナー自身のメッセージ、途中経過、A2A の Task への返事は知らせない。
+
+- `GET /api/push` は `{web_push?}`（型は `PushResponse`）。`web_push` は、配置が VAPID の鍵を渡しているとき（[backend.md](backend.md) の `PENELOPE_WEB_PUSH_VAPID_KEY_FILE`）だけあり、`public_key`（VAPID の公開鍵。非圧縮の P-256 を base64url で）を持つ。無ければ、Web UI は通知を使えないと示す。
+- `POST /api/push/subscriptions` は購読を 1 つ登録する。body は `{kind: "web-push", endpoint, keys: {p256dh, auth}}`（型は `PushSubscriptionRequest`。ブラウザの `PushSubscription.toJSON()` に `kind` を足したもの）。応答は `204`。同じ `endpoint` をもう一度登録すると、鍵を置き換える。購読の数に上限は置かない。
+  - `endpoint` は https の URL で 2048 文字まで、`p256dh` は P-256 の曲線上の非圧縮の点（65 バイト）、`auth` は 16 バイト。どれかが違えば `400`。
+  - VAPID の鍵が無ければ `503`（`web-push-not-configured`）。
+- `POST /api/push/subscriptions/delete` は body が `{endpoint}`（型は `PushUnsubscribeRequest`）で、その購読を消す。無くても `204`。
+- 購読は配置の backend の SQLite にあり、ログインのセッションとは結び付けない。ログアウトしても購読は残る（止めるのは Web UI の「通知を止める」）。
+
+### 知らせの中身
+
+- Web Push の中身は JSON の 1 つ（型は `Notice`）で、購読の鍵で暗号化する（RFC 8291 の aes128gcm、1 レコード）。
+  - `id`（返事の `id`）、`agent`（エージェントの名前。`GET /api/agent` の `name` と同じ）、`text`（返事の頭）、`expression`（返事にあれば）、`images`（返事に画像があるときの数、[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md)）。
+- `text` は返事の前後の空白を落とし、200 文字（Unicode の符号位置で数える）を超えれば切って `…` を付ける。JSON が平文の上限（3993 バイト）を超えるときは、収まるまで長さを半分にする。
+- 送るときの `TTL` は 24 時間、`Urgency` は `high`。VAPID の token は push service の origin に向けて 12 時間有効で、`sub` は `PENELOPE_PUBLIC_URL` である。
+- 送るのは 1 回だけで、redirect は追わない。`404`・`410` の購読は消す。ほかの失敗はログに残すだけで、送り直さない。ログには購読の番号と状態だけを書き、本文と `endpoint` は書かない。
+- backend は push service へ自分で送り、Sentinel を通さない。
+
+### service worker
+
+- Web UI の build は `/sw.js` に service worker を置き、scope は `/` である。
+- 知らせを受けると、題がエージェントの名前、本文が `text`（画像があれば次の行に「（画像 N 枚）」）、アイコンが `expression` の表情の画像（アバターに無ければ `neutral`、アバターが無ければ build の `icon.svg`）の通知を出す。表情の画像は `GET /api/agent` から引く。`tag` は返事の `id`。
+- 開いている画面があり、その画面が前に出ていても、通知は出す（出さない push が続くと、ブラウザが購読を止めることがある）。そのときは音を鳴らさない。
+- 通知を押すと、開いている画面があればそれを前に出し、無ければ会話（`/`）を開く。
+
+### Web UI の切り替え
+
+- 「通知を受ける」の切り替えは、PC は左のレールの下（ログアウトの隣、畳んでいるときはベルのアイコン）、スマートフォンはメニューの中（ログアウトの上）に小さく置く（[docs/design](design/README.md) の左の「場所」の並びの外に足すだけで、画面の割り当ては変えない）。
+- 押すと、ブラウザに通知の許可を求め、`/sw.js` を登録し、`public_key` で購読して、`POST /api/push/subscriptions` で登録する。もう一度押すと（「通知を止める」）、ブラウザの購読を止め、`POST /api/push/subscriptions/delete` で消す。
+- Web UI を開くたびに、ブラウザが購読を持っていれば登録し直す。購読の鍵が今の `public_key` と違えば、作り直してから登録する（鍵の替わった配置へは、前の購読では届かない）。
+- 押せないときは、その訳を出す: 配置に鍵が無い、ブラウザが Web Push を持たない、オーナーがブラウザで通知を断った。
+
+### iPhone で受けるには
+
+iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push を受けられる。Safari のタブのままでは受けられない。
+
+1. Safari で配置の URL を開き、ログインする。
+2. 共有ボタンから「ホーム画面に追加」を選ぶ。
+3. ホーム画面のアイコンから開き、もう一度ログインする（ホーム画面の Web アプリは Safari と cookie を分けて持つ）。
+4. メニューを開いて「通知を受ける」を押し、通知を許す。
+
+止めるときは、メニューの「通知を止める」か、iPhone の「設定」の「通知」でそのアプリを止める。配置ごと（エージェントごと）に、この手順で購読する。
+
 ## Web UI の配り方
 
 - `/api/`・`/auth/`・`/a2a/` のほかの道では、backend が `PENELOPE_WEB_DIR` にある Web UI の build（`packages/web` の `dist/`）を配る。`/` は `index.html` である。無いファイルは `404`。
@@ -112,7 +158,6 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 
 ## これから足すもの
 
-- Web Push の購読の登録と解除、VAPID の公開鍵を渡す道（[ADR-0027](adr/0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md)）。
 - 返事に結び付いた画像の一覧と、画像を ID で取る口（[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md)）。
 - どの配置でも同じ形に保つ（[ADR-0026](adr/0026-move-natsumi-myao-and-aki-one-deployment-each-without-a-way-back.md)）。
 
