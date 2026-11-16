@@ -200,12 +200,12 @@ describe("the changes since the last turn", () => {
     assert.doesNotMatch(drawn.text, /message number 0 /);
     assert.ok(drawn.omitted.length > 0);
     assert.deepEqual(drawn.omitted, changes.slice(0, drawn.omitted.length).map((item) => item.seq));
-    assert.match(drawn.text, new RegExp(`\\(${drawn.omitted.length} earlier changes left out; penelope-slack history work\\.dev\\)`));
+    assert.match(drawn.text, new RegExp(`\\(${drawn.omitted.length} earlier changes left out; slackctl history work\\.dev\\)`));
   });
 
   test("the hint names the source when it is not the default one", () => {
     const changes = Array.from({ length: 30 }, (_, index) => line(message(ts(`09:${String(index).padStart(2, "0")}`), "y".repeat(60)), { source: "slack-home" }));
-    assert.match(drawChanges(changes, changes, { ...UTC, maxChars: 500 }).text, /penelope-slack --source slack-home history work\.dev\)/);
+    assert.match(drawChanges(changes, changes, { ...UTC, maxChars: 500 }).text, /slackctl --source slack-home history work\.dev\)/);
   });
 
   test("a payload of another shape is not drawn, and is handed back", () => {

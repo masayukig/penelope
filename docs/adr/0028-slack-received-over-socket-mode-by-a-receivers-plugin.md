@@ -106,6 +106,7 @@ natsumi は Socket Mode で受け、起動のときとつなぎ直したとき�
 - Related: ADR-0023 receivers のプラグインはリポジトリの中に持って配置の設定で有効にし、最初に Alertmanager の webhook を受ける（プラグインの種類を足す。「本 ADR で決定しないこと」の Slack のプラグイン）
 - Related: ADR-0024 GitHub の webhook は状態を持たずに受け、レビューの依頼と取り消しの 2 つだけを出来事にする（`stream` の写し方）
 - Related: ADR-0029 Slack の出来事はターンに inline で載せ、前のターンからの変化をチャンネルとスレッドの形で描く
+- Related: ADR-0033 Slack への投稿は読み取りの CLI に足し、鍵はサロゲートのまま Sentinel を通す（エージェントの投稿）
 - Related（natsumi、このリポジトリの外）: ADR 0039「Slack は読むファイルとして受け取り、ポッポさんは問題点ごとの点数で判定する」
 
 ## References

@@ -1,6 +1,8 @@
 // Slack, for the receivers' Slack plugin (e2e/README.md): the Web API at
 // slack.com/api/, Socket Mode at wss-primary.slack.com/link/, and a file at
-// files.slack.com. The WebSocket is the least of RFC 6455 the plugin needs:
+// files.slack.com, where a post's images also go up (Slack's three steps:
+// files.getUploadURLExternal, the upload, files.completeUploadExternal).
+// The WebSocket is the least of RFC 6455 the plugin needs:
 // text frames, ping and pong, close. The test drives it through the control
 // API: what to answer conversations.history with, envelopes to send, and a
 // disconnect to ask for.
@@ -22,6 +24,10 @@ export function slack(tokens: { app: string; bot: string }) {
   const acks: string[] = [];
   const calls: { method: string; token: "app" | "bot" | "other"; args: Raw }[] = [];
   const downloads: { path: string; token: "bot" | "other" }[] = [];
+  /** The uploads to the URL files.getUploadURLExternal gave, and the token each carried ("none" is right). */
+  const uploads: { path: string; token: "bot" | "none" | "other"; length: number; png: boolean }[] = [];
+  const given = new Map<string, string>();
+  let posts = 0;
   let history: Raw[] = [];
   let connections = 0;
 
@@ -100,6 +106,23 @@ export function slack(tokens: { app: string; bot: string }) {
           return json({ ok: true, messages: args.channel === "C0DEV" ? history : [], has_more: false, response_metadata: { next_cursor: "" } });
         case "conversations.replies":
           return json({ ok: true, messages: [], has_more: false });
+        case "chat.postMessage": {
+          posts++;
+          const ts = `1794900000.${String(posts).padStart(6, "0")}`;
+          return json({ ok: true, channel: args.channel, ts, message: { type: "message", text: args.text, ts, bot_id: "B0E2E" } });
+        }
+        case "chat.getPermalink":
+          return json({ ok: true, channel: args.channel, permalink: `https://e2e.slack.com/archives/${String(args.channel)}/p${String(args.message_ts).replace(".", "")}` });
+        case "files.getUploadURLExternal": {
+          const id = `F0UP${given.size + 1}`;
+          given.set(`/upload/v1/${id}`, id);
+          return json({ ok: true, upload_url: `https://${SLACK_FILES}/upload/v1/${id}`, file_id: id });
+        }
+        case "files.completeUploadExternal": {
+          const files = JSON.parse(String(args.files ?? "[]")) as { id: string; title?: string }[];
+          if (!files.every((file) => uploads.some((upload) => upload.path === `/upload/v1/${file.id}`))) return json({ ok: false, error: "file_not_found" });
+          return json({ ok: true, files: files.map((file) => ({ id: file.id, title: file.title ?? "" })) });
+        }
         case "users.info":
           return json({ ok: true, user: { id: args.user, name: String(args.user).toLowerCase(), profile: { display_name: `E2E ${String(args.user)}` } } });
         default:
@@ -107,8 +130,14 @@ export function slack(tokens: { app: string; bot: string }) {
       }
     },
 
-    file(request: http.IncomingMessage, response: http.ServerResponse): void {
+    file(request: http.IncomingMessage, body: Buffer, response: http.ServerResponse): void {
       const path = (request.url ?? "").split("?")[0]!;
+      if (request.method === "POST" && given.has(path)) {
+        const token = request.headers.authorization === undefined ? "none" : tokenOf(request) === "bot" ? "bot" : "other";
+        uploads.push({ path, token, length: body.length, png: body.subarray(0, 4).equals(PIXEL.subarray(0, 4)) });
+        response.writeHead(200, { "content-type": "text/plain" });
+        return void response.end(`OK - ${body.length}`);
+      }
       const token = tokenOf(request) === "bot" ? "bot" : "other";
       downloads.push({ path, token });
       if (token !== "bot" || path !== "/files-pri/T0E2E-F0E2E/e2e.png") {
@@ -137,7 +166,7 @@ export function slack(tokens: { app: string; bot: string }) {
 
     /** The control API: `POST /slack/history`, `POST /slack/send`, `POST /slack/disconnect`, `GET /slack`. */
     control(method: string, path: string, body: string): { status: number; value: unknown } | undefined {
-      if (method === "GET" && path === "/slack") return { status: 200, value: { connections, open: sockets.length, acks, calls, downloads } };
+      if (method === "GET" && path === "/slack") return { status: 200, value: { connections, open: sockets.length, acks, calls, downloads, uploads } };
       if (method === "POST" && path === "/slack/history") {
         history = (JSON.parse(body) as { messages: Raw[] }).messages;
         return { status: 200, value: {} };

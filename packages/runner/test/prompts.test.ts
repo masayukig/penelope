@@ -251,6 +251,6 @@ test("with Slack's sources, the system prompt says how their events come and nam
   const places = await memory({});
   const prompt = systemPrompt(identity, places, [], { slackSources: ["slack", "slack-home"] });
   assert.ok(prompt.includes("`slack`") && prompt.includes("`slack-home`"), "the sources are named");
-  assert.ok(prompt.includes("penelope-slack"));
-  assert.ok(!systemPrompt(identity, places, []).includes("penelope-slack"), "nothing of Slack without its sources");
+  assert.ok(prompt.includes("slackctl"));
+  assert.ok(!systemPrompt(identity, places, []).includes("slackctl"), "nothing of Slack without its sources");
 });

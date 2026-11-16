@@ -155,7 +155,7 @@ test("over the limit, the oldest changes are left out with how to read them, and
   const [dev, ops] = out;
   assert.equal(dev!.count, 40, "every change is still counted");
   assert.deepEqual(dev!.seqs, busy.map((line) => line.seq));
-  assert.match(dev!.text as string, /earlier changes left out; penelope-slack history work\.dev/);
+  assert.match(dev!.text as string, /earlier changes left out; slackctl history work\.dev/);
   assert.match(dev!.text as string, /busy message number 40/, "the newest are kept");
   assert.match(ops!.text as string, /a quiet one/, "a quiet stream is drawn whole");
 });

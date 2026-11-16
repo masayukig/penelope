@@ -180,7 +180,7 @@ function outside(scheme: "https" | "http") {
       if (scheme === "https" && host === KUBERNETES) return fakeCluster.tokenReview(request, await body(request), response);
       if (scheme === "https" && host === GATED) return fakeCluster.gatedKeys(request, response);
       if (scheme === "https" && host === SLACK) return fakeSlack.api(request, await body(request), response);
-      if (scheme === "https" && host === SLACK_FILES) return fakeSlack.file(request, response);
+      if (scheme === "https" && host === SLACK_FILES) return fakeSlack.file(request, await bytes(request), response);
       if (scheme === "https" && host === PUSH) return pushService(request, response);
       if (scheme === "https" && host === APP) {
         await body(request);

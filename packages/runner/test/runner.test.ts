@@ -471,7 +471,7 @@ test("Slack's changes are drawn into the turn, and stay drawn once it is folded"
   assert.match(line!.text as string, /^work #dev \(channel C0DEV, stream work\.dev\)\n/);
   assert.match(line!.text as string, /\(earlier\): "the deploy failed"/, "what led up to it is drawn from /sources");
   assert.match(line!.text as string, /alice \[1794819660\.000100\]: can you look\?/);
-  assert.ok(next.systemPrompt.includes("penelope-slack"));
+  assert.ok(next.systemPrompt.includes("slackctl"));
 });
 
 test("no tool runs in the answer to the request before folding", async () => {

@@ -483,6 +483,26 @@ describe("the UI's API", () => {
       assert.equal((await env.call("/api/agent/icons/angry", undefined)).status, 404);
     });
 
+    // Slack takes the face as an icon_url, and an image's URL there ends in
+    // its extension (docs/ui-api.md, "エージェント").
+    it("gives each face's way with the extension of its image, and still serves it without one", async (t) => {
+      const dir = tempDir(t);
+      writeFileSync(path.join(dir, "happy.PNG"), "PNG-happy");
+      writeFileSync(path.join(dir, "odd.name.webp"), "RIFF-odd");
+      const env = await setup(t, { agent: { name: "Iris", icons: { happy: path.join(dir, "happy.PNG"), "odd.name": path.join(dir, "odd.name.webp") } } });
+      const agent = (await env.call("/api/agent", undefined)).json();
+      assert.deepEqual(agent.icons, { happy: "/api/agent/icons/happy.png", "odd.name": "/api/agent/icons/odd.name.webp" });
+      for (const way of ["/api/agent/icons/happy.png", "/api/agent/icons/happy"]) {
+        const answer = await env.call(way, undefined);
+        assert.equal(answer.status, 200, way);
+        assert.equal(answer.headers["content-type"], "image/png");
+        assert.equal(answer.text, "PNG-happy");
+      }
+      assert.equal((await env.call("/api/agent/icons/odd.name.webp", undefined)).text, "RIFF-odd");
+      assert.equal((await env.call("/api/agent/icons/odd.name", undefined)).text, "RIFF-odd");
+      assert.equal((await env.call("/api/agent/icons/happy.webp", undefined)).status, 404);
+    });
+
     it("gives nothing else away without a session", async (t) => {
       const env = await setup(t);
       assert.equal((await env.call("/api/agent/other", undefined)).status, 401);

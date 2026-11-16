@@ -144,7 +144,14 @@ export const outside = {
   reviews: async () => (await control<{ reviews: { caller: string; outcome: string }[] }>("/reviews")).reviews,
   /** What the fake Slack saw: its connections, the envelopes acknowledged, the Web API calls and the downloads. */
   slack: () =>
-    control<{ connections: number; open: number; acks: string[]; calls: { method: string; token: string }[]; downloads: { path: string; token: string }[] }>("/slack"),
+    control<{
+      connections: number;
+      open: number;
+      acks: string[];
+      calls: { method: string; token: string; args: Record<string, string> }[];
+      downloads: { path: string; token: string }[];
+      uploads: { path: string; token: string; length: number; png: boolean }[];
+    }>("/slack"),
   slackHistory: (messages: unknown[]) => control("/slack/history", { method: "POST", body: JSON.stringify({ messages }) }),
   slackSend: (envelope: unknown) => control("/slack/send", { method: "POST", body: JSON.stringify(envelope) }),
   slackDisconnect: () => control("/slack/disconnect", { method: "POST" }),
