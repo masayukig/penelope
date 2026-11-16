@@ -7,7 +7,7 @@ import type http from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import type { AgentResponse, PostMessageResponse, SubAgentsResponse } from "@penelope/contract";
+import type { AgentResponse, PostMessageResponse, PushResponse, SubAgentsResponse } from "@penelope/contract";
 
 import { isA2APath } from "./a2a/endpoint.ts";
 import type { SubAgents } from "./agents.ts";
@@ -18,6 +18,8 @@ import type { Feed } from "./feed.ts";
 import { type Handler, HttpError, isMultipart, readForm, readJson, sendEmpty, sendError, sendJson } from "./http.ts";
 import { CALLBACK_PATH, type GitHubLogin } from "./login/github.ts";
 import type { LoginSessions, Session } from "./login/sessions.ts";
+import type { PushSubscriptions } from "./push/notifier.ts";
+import { webPushSubscriptionOf } from "./push/web-push.ts";
 import type { Queue } from "./queue.ts";
 import type { Attachment } from "./sources.ts";
 import { iso } from "./time.ts";
@@ -28,6 +30,8 @@ export const SESSION_COOKIE = "penelope_session";
 export const DEFAULT_UI_BYTES = 64 * 1024 * 1024;
 const HEARTBEAT_MS = 25_000;
 const SUMMARY_LENGTH = 200;
+/** A subscription is a URL and two keys. */
+const PUSH_BYTES = 16 * 1024;
 
 export type UiOptions = {
   queue: Queue;
@@ -49,6 +53,8 @@ export type UiOptions = {
   web?: Handler;
   /** The A2A way in, under /a2a/, which checks its senders itself. Without it, /a2a/ is not found. */
   a2a?: Handler;
+  /** Web Push: the VAPID public key the browsers subscribe with, and where their subscriptions are kept. Without it, there is none. */
+  push?: { publicKey: string; subscriptions: PushSubscriptions };
 };
 
 export function uiHandler(options: UiOptions): Handler {
@@ -170,6 +176,24 @@ export function uiHandler(options: UiOptions): Handler {
       case "GET /api/stream":
         stream(feed, request, response);
         return;
+      case "GET /api/push":
+        sendJson(response, 200, (options.push === undefined ? {} : { web_push: { public_key: options.push.publicKey } }) satisfies PushResponse);
+        return;
+      case "POST /api/push/subscriptions": {
+        if (options.push === undefined) throw new HttpError(503, "web-push-not-configured");
+        const subscription = webPushSubscriptionOf(await readJson(request, PUSH_BYTES));
+        if (subscription === undefined) throw new HttpError(400, "not a Web Push subscription with an https endpoint and its keys");
+        options.push.subscriptions.save({ kind: "web-push", ...subscription });
+        sendEmpty(response, 204);
+        return;
+      }
+      case "POST /api/push/subscriptions/delete": {
+        const endpoint = ((await readJson(request, PUSH_BYTES)) as { endpoint?: unknown } | null)?.endpoint;
+        if (typeof endpoint !== "string") throw new HttpError(400, "endpoint must be a string");
+        options.push?.subscriptions.remove(endpoint);
+        sendEmpty(response, 204);
+        return;
+      }
     }
     throw new HttpError(404, "no such path");
   };

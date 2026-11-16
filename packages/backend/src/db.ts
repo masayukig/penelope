@@ -122,6 +122,18 @@ export const MIGRATIONS: readonly string[] = [
   -- An agent's state is its last turn_start or turn_end: found by this.
   CREATE INDEX activities_turns ON activities (agent, row) WHERE kind IN ('turn_start', 'turn_end');
   `,
+  `
+  -- Where the notices of the replies go (ADR-0027): one row per endpoint, the
+  -- keys of its kind as JSON. Times are milliseconds since the epoch.
+  CREATE TABLE push_subscriptions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind       TEXT NOT NULL CHECK (kind IN ('web-push')),
+    endpoint   TEXT NOT NULL UNIQUE,
+    keys       TEXT NOT NULL,
+    created_ms INTEGER NOT NULL,
+    updated_ms INTEGER NOT NULL
+  );
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

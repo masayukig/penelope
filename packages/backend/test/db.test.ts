@@ -23,9 +23,10 @@ describe("the database", () => {
     raw.prepare("INSERT INTO session_rotations (agent, at) VALUES ('main', 't')").run();
     raw.close();
     const db = openDatabase(file);
-    assert.equal(version(db), 3);
+    assert.equal(version(db), MIGRATIONS.length);
     assert.deepEqual(db.prepare("SELECT agent FROM session_rotations").all().map((row) => ({ ...row })), [{ agent: "main" }]);
     assert.deepEqual(db.prepare("SELECT * FROM sub_agents").all(), []);
+    assert.deepEqual(db.prepare("SELECT * FROM push_subscriptions").all(), []);
     db.close();
   });
 
