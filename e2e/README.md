@@ -23,18 +23,19 @@ make e2e
 | `outside` | Pod の外の偽物（下の「偽物」） |
 
 - volume と mount は pod.md の表のとおり。`/memory/.git` は別の volume で、sandbox には読み取りで重ねる。取り込み口と管理口の socket は sandbox に mount しない。
-- sandbox に置くのはサロゲートと Sentinel の CA の公開の証明書だけである。本物の鍵（モデルの鍵、backend の token、OAuth の client secret）は Sentinel・backend・偽物にだけ mount する。
+- sandbox に置くのはサロゲートと Sentinel の CA の公開の証明書だけである。本物の鍵（モデルの鍵、backend の token、OAuth の client secret、Web Push の VAPID の鍵）は Sentinel・backend・偽物にだけ mount する。
 - receivers は image のまま `serve` で動き、Alertmanager のプラグインを `/v1/webhooks/fraction` で、GitHub のプラグインを `/v1/webhooks/github` で、Slack のプラグインをワークスペース `work` で有効にする（`config/receivers.json`）。Alertmanager の token と GitHub の webhook の秘密は走らせるたびに作る `alertmanager-token` と `github-webhook-secret` で、receivers にだけ mount する。Slack の app-level token と bot の token（`slack-app-token`・`slack-bot-token`）は、receivers と偽物にだけ mount する。テストは同じコンテナで小さな送り手（`sender/send.ts`）も動かし、自分で作った封筒で取り込み口の socket を叩く。
 
 ## 偽物
 
 `outside` のコンテナ 1 つが、Pod の外を受け持つ（`outside/`）。
 
-- 名前解決: テストの名前（`model.example.com`・`backend.example.com`・`plain.example.net`・`github.com`・`api.github.com`・`kubernetes.example.com`・`auth.example.com`・`a.apps.example.com`・`slack.com`・`wss-primary.slack.com`・`files.slack.com`）を自分のアドレスで答え、ほかは無いと答える。Pod のすべてのコンテナの `resolv.conf` はこれを指す（クラスタの DNS に当たる）。テストはマシンの外に出ない。
+- 名前解決: テストの名前（`model.example.com`・`backend.example.com`・`plain.example.net`・`github.com`・`api.github.com`・`kubernetes.example.com`・`auth.example.com`・`a.apps.example.com`・`push.example.com`・`slack.com`・`wss-primary.slack.com`・`files.slack.com`）を自分のアドレスで答え、ほかは無いと答える。Pod のすべてのコンテナの `resolv.conf` はこれを指す（クラスタの DNS に当たる）。テストはマシンの外に出ない。
 - モデル: Pi の `openai-completions` が話す chat completions の偽物。テストの印（`E2E-TURN-1` など）を見て、決まった返事と道具の呼び出し（`write`・`bash`・`reply`）を返す。受けた入力をすべて覚え、`Authorization` が本物の鍵だったか（Sentinel が差し替えたか）を記録する。
 - GitHub の OAuth と API: token の交換（client secret と PKCE を確かめる）と `/user`。
 - 素通しの宛先: `plain.example.net`（HTTPS と平文の HTTP）。
 - アプリ（`a.apps.example.com`）: Sentinel のワイルドカードの登録（`*.apps.example.com`）に当たる名前。届いた `Authorization` が本物の鍵だったかを返す。
+- ブラウザの push service（`push.example.com`）: `/send/` の下への Web Push を受けて、暗号化された中身のまま覚える。`/send/gone-` の下は、終わった購読として `410` で答える。
 - クラスタの API server の TokenReview（`kubernetes.example.com`）: backend 自身の ServiceAccount の token（`kube-token`）で尋ねられたときだけ答える。A2A の送り手の token（`sender-token`、`system:serviceaccount:e2e:claude`）と、allow-list に無い ServiceAccount の token（`stranger-token`）を知っている。
 - gated（`auth.example.com`）: assertion に署名する鍵の JWKS を配り、テストが頼むと、その鍵で assertion に署名する（gated が token を落として assertion に置き換えた呼び出しの代わり）。
 - Slack（`outside/slack.ts`）: `slack.com/api/` の Web API（`auth.test`・`apps.connections.open`・`users.conversations`・`conversations.history` など）、`wss-primary.slack.com/link/` の Socket Mode（WebSocket。`hello` を送り、`envelope_id` の ack を覚える）、`files.slack.com` のファイル。app-level token と bot の token を、呼び出しごとに確かめる。テストは制御の口から、`conversations.history` の答え・送る封筒・`disconnect` を与える。
@@ -46,6 +47,7 @@ make e2e
 
 - **Slack の宛先**: receivers の Slack の宛先も設定で変えられない。GitHub と同じく、偽物の名前解決が Slack の名前を偽物に向け、receivers にだけ偽物の CA を `NODE_EXTRA_CA_CERTS` で信頼させる。
 - **GitHub の宛先**: backend の GitHub の宛先は設定で変えられない（`github.com` と `api.github.com` に決めてある）。テストのために設定を足さず、偽物の名前解決がこの 2 つの名前を偽物に向け、backend にだけ偽物の CA を `NODE_EXTRA_CA_CERTS` で信頼させる。backend の UID の外向きは向け直されないので、本番と同じ宛先のまま偽物に届く。sandbox も同じ名前解決を見るのが Pod とのずれである（このテストでは sandbox は GitHub を使わない）。
+- **push service**: 購読の `endpoint` はテストが決める（`https://push.example.com/send/…`）。backend は GitHub と同じく偽物の CA を信頼して、偽の push service に自分で送る。Sentinel は通らない。
 - **網**: `pod` と `outside` は Docker の既定の bridge に置き、アドレスは Docker が付ける。テストは `outside` を立ててから `resolv.conf` を書き、`pod` を立ててから backend の公開の URL を決め、残りを立てる。ユーザー定義の網は使わない（コンテナどうしが届かないマシンがあった）。IPv6 の向け直しの規則は入れるが、網は IPv4 だけである。
 - **volume の持ち主**: Pod は `fsGroup` で共有の volume を 1 つのグループに置く。ここでは `volumes` のコンテナが持ち主を UID ごとに決める。
 - **ServiceAccount の token と kubeconfig**: クラスタが無いので、どのコンテナにも無い。backend の TokenReview のための token は、偽の API server が知っている値（`kube-token`）を mount し、API server の名前と CA は設定で偽物に向ける。
@@ -61,14 +63,15 @@ make e2e
 1. GitHub の OAuth でログインする。backend が Web UI の build（ページ、script、styles）を配り、エージェントの名前（`/api/agent` と manifest）と、選んだアバターの表情の画像が設定から来る。メッセージを送る。sandbox の runner がターンを回し、返事が履歴と流れ（SSE）に届く。途中経過（`turn_start`・`tool_call`・`tool_result`・`message`・`turn_end`）と状態（`thinking`・`waiting`）が流れに乗る。モデルにはサロゲートではなく本物の鍵が届く。
 2. ターンの終わりに `/memory` がコミットされる（`Turn <turn_id>` と `Agent: main`）。sandbox は `/memory/.git` に書けず、履歴は読める。
 3. 2 つめのターンのモデルへの入力で、1 つめのターンが畳まれている（出来事・地の文・`reply` は残り、ほかの呼び出しは 1 行、道具の出力は無い）。
-4. sandbox の外向きが Sentinel を通り、記録に残る。素通し（`plain.example.net`）、開く宛先（モデルと backend と、ワイルドカードの登録に当たるアプリ）、名前解決、登録の無いホストへのサロゲート・リンクローカル・受け口へ直に届いた通信を断る。sandbox の loopback は向け直されず、記録にも残らない。
-5. sandbox に本物の鍵が無い。取り込み口の socket が見えない。backend の UI 向けの口に loopback で届いても、ログインを求められる。
-6. receivers から取り込み口へ出来事を入れ、`/sources` に追記される。重複は受けたことになり、`control` は断られる。`batch` は待ち、後から来た `now` が待っている `batch` を連れて 1 つのターンに届く。
-7. Alertmanager の形の POST を Pod の外から receivers の webhook に送る。token が違えば `401` で断られる。`critical` の鳴り始めは `/sources/alertmanager/kubepodcrashlooping/` に追記され、`now` として 1 つのターンに入る。同じ POST の送り直しは重複として落ち、印のラベル（`sender="penelope"`）のアラートは出来事にならない。
-8. GitHub の形の配送（`pull_request` の `review_requested`）を Pod の外から receivers の webhook に送る。署名が違えば `401` で断られ、`ping` と `authors` に無い作者の PR は出来事にならない。署名の合う依頼は `/sources/github/example-org.example-repo/` に `batch` として追記され、同じ `X-GitHub-Delivery` の送り直しは重複として落ちる。PR の本文は残らない。`batch` の待ちの後、その出来事だけで 1 つのターンに入る。
-9. receivers の Slack のプラグインが Socket Mode でつなぐ（app-level token で `apps.connections.open`、bot の token で `auth.test`）。Slack が求めたつなぎ直しの後に、離れていた間の発言が取り直されて `/sources/slack/work.dev/` に入る。画像の付いたメンションの封筒は、取り込み口が受けてから ack され、画像が bot の token で取られて添付になる。Slack の送り直しは重複として落ちる。メンションは `now` として、取り直した発言を連れて 1 つのターンに入る。sandbox の `penelope-slack history work.dev` が、そのチャンネルを今の姿で描く。
-10. ほかのエージェントが A2A で頼む。token なしで Agent Card が読める。allow-list に無い ServiceAccount は、TokenReview でも gated の assertion でも断られる。送り手が ServiceAccount の token で頼み（TokenReview）、ターンが `reply_to_agent` で聞き返し、送り手が gated の assertion で答え、ターンが閉じた答えを送り手が `GetTask` で読む。依頼と答えは `/sources/a2a/claude/` に追記され、API server には backend 自身の token で尋ねている。
-11. 本体がサブエージェントを起こす（`subagent_start`）。サブエージェントは自分のシステムプロンプトと作業の場所で、本体の道具（`reply`・`reply_to_agent`・`self_event`・`subagent_*`）を持たずに走り、`/memory` に書いて問いで止まる。その地の文が `self` の出来事として本体に届き（`/sources/self/<名前>/`）、本体が続きを送り（`subagent_send`）、同じセッションで続いたサブエージェントの結果を受けて閉じる（`subagent_close`）。サブエージェントの書いたものは、そのターンの終わりに `Agent: <名前>` でコミットされる。UI の流れには起こした・閉じたことと途中経過が乗り、閉じたサブエージェントは `/api/agents` に載らない。
-12. 本体が裏の仕事を起こす（`job_start`）。道具は仕事の ID と出力のファイルを返し、コマンドの出力は返さない。コマンドが終わると、終わり方・コマンド・出力の末尾が inline の `job` の出来事として新しいターンに入り（`/sources/job/`）、出力の全文は `~/jobs/<ID>/output.log` にある。
-13. heartbeat を 1 分で入れた backend に作り直すと、何もないまま 1 分たって heartbeat の出来事だけで 1 つのターンが始まる（`delivery` は `now`、中身は `/sources/heartbeat/` にある）。偽のモデルは地の文もツールも無しで終え、畳む前の頼みは送られない。そのターンが終わってから 1 分たって、次の heartbeat が入る。
-14. 夜の制御の出来事で、振り返り → 整理係 → 新しいセッションが回り、`handoff.md` と整理係の変えたものがコミットされる。新しいセッションのシステムプロンプトに `handoff.md` が入り、前の日の会話は無い。次の切り替えの後も、ターンは回り続ける。
+4. オーナーが 2 つのブラウザの購読を登録し（`GET /api/push` の公開鍵は配置の VAPID の鍵のもの）、返事が Web Push で偽の push service に届く。中身はブラウザの鍵で開け、エージェントの名前と返事の本文を持ち、VAPID の token は配置の鍵で push service の origin に署名されている。`410` と答えた購読は消え、次の返事は届いた方にだけ行く。backend のログに `endpoint` と本文は無く、Sentinel の記録に push service は無い。
+5. sandbox の外向きが Sentinel を通り、記録に残る。素通し（`plain.example.net`）、開く宛先（モデルと backend と、ワイルドカードの登録に当たるアプリ）、名前解決、登録の無いホストへのサロゲート・リンクローカル・受け口へ直に届いた通信を断る。sandbox の loopback は向け直されず、記録にも残らない。
+6. sandbox に本物の鍵が無い。取り込み口の socket が見えない。backend の UI 向けの口に loopback で届いても、ログインを求められる。
+7. receivers から取り込み口へ出来事を入れ、`/sources` に追記される。重複は受けたことになり、`control` は断られる。`batch` は待ち、後から来た `now` が待っている `batch` を連れて 1 つのターンに届く。
+8. Alertmanager の形の POST を Pod の外から receivers の webhook に送る。token が違えば `401` で断られる。`critical` の鳴り始めは `/sources/alertmanager/kubepodcrashlooping/` に追記され、`now` として 1 つのターンに入る。同じ POST の送り直しは重複として落ち、印のラベル（`sender="penelope"`）のアラートは出来事にならない。
+9. GitHub の形の配送（`pull_request` の `review_requested`）を Pod の外から receivers の webhook に送る。署名が違えば `401` で断られ、`ping` と `authors` に無い作者の PR は出来事にならない。署名の合う依頼は `/sources/github/example-org.example-repo/` に `batch` として追記され、同じ `X-GitHub-Delivery` の送り直しは重複として落ちる。PR の本文は残らない。`batch` の待ちの後、その出来事だけで 1 つのターンに入る。
+10. receivers の Slack のプラグインが Socket Mode でつなぐ（app-level token で `apps.connections.open`、bot の token で `auth.test`）。Slack が求めたつなぎ直しの後に、離れていた間の発言が取り直されて `/sources/slack/work.dev/` に入る。画像の付いたメンションの封筒は、取り込み口が受けてから ack され、画像が bot の token で取られて添付になる。Slack の送り直しは重複として落ちる。メンションは `now` として、取り直した発言を連れて 1 つのターンに入る。sandbox の `penelope-slack history work.dev` が、そのチャンネルを今の姿で描く。
+11. ほかのエージェントが A2A で頼む。token なしで Agent Card が読める。allow-list に無い ServiceAccount は、TokenReview でも gated の assertion でも断られる。送り手が ServiceAccount の token で頼み（TokenReview）、ターンが `reply_to_agent` で聞き返し、送り手が gated の assertion で答え、ターンが閉じた答えを送り手が `GetTask` で読む。依頼と答えは `/sources/a2a/claude/` に追記され、API server には backend 自身の token で尋ねている。
+12. 本体がサブエージェントを起こす（`subagent_start`）。サブエージェントは自分のシステムプロンプトと作業の場所で、本体の道具（`reply`・`reply_to_agent`・`self_event`・`subagent_*`）を持たずに走り、`/memory` に書いて問いで止まる。その地の文が `self` の出来事として本体に届き（`/sources/self/<名前>/`）、本体が続きを送り（`subagent_send`）、同じセッションで続いたサブエージェントの結果を受けて閉じる（`subagent_close`）。サブエージェントの書いたものは、そのターンの終わりに `Agent: <名前>` でコミットされる。UI の流れには起こした・閉じたことと途中経過が乗り、閉じたサブエージェントは `/api/agents` に載らない。
+13. 本体が裏の仕事を起こす（`job_start`）。道具は仕事の ID と出力のファイルを返し、コマンドの出力は返さない。コマンドが終わると、終わり方・コマンド・出力の末尾が inline の `job` の出来事として新しいターンに入り（`/sources/job/`）、出力の全文は `~/jobs/<ID>/output.log` にある。
+14. heartbeat を 1 分で入れた backend に作り直すと、何もないまま 1 分たって heartbeat の出来事だけで 1 つのターンが始まる（`delivery` は `now`、中身は `/sources/heartbeat/` にある）。偽のモデルは地の文もツールも無しで終え、畳む前の頼みは送られない。そのターンが終わってから 1 分たって、次の heartbeat が入る。
+15. 夜の制御の出来事で、振り返り → 整理係 → 新しいセッションが回り、`handoff.md` と整理係の変えたものがコミットされる。新しいセッションのシステムプロンプトに `handoff.md` が入り、前の日の会話は無い。次の切り替えの後も、ターンは回り続ける。

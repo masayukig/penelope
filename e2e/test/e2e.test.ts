@@ -7,7 +7,7 @@
 // before left it.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHmac, randomUUID } from "node:crypto";
+import { createDecipheriv, createECDH, createHmac, createPrivateKey, createPublicKey, hkdfSync, randomUUID, verify } from "node:crypto";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -248,6 +248,70 @@ describe("the Pod end to end", () => {
     assert.ok(!sent.includes("Successfully wrote"), "the output of write is folded away");
     const kept = first.messages.filter((message) => message.tool_calls?.some((call) => call.function.name === "reply"));
     assert.equal(kept.length, 1, "the reply is kept whole");
+  }));
+
+  it("sends a notice of her reply to the owner's push subscriptions, and drops one that is gone", track(async () => {
+    // Guards against: a reply the owner is not told of, a notice the push service could read, the VAPID key not the
+    // deployment's, a subscription kept after its push service said it is gone, or the notice sent through the Sentinel.
+    const { body: settings } = browser.json<{ web_push?: { public_key: string } }>("/api/push");
+    const { x, y } = createPublicKey(createPrivateKey(readFileSync(join(RUN_DIR, "vapid.pem"), "utf8"))).export({ format: "jwk" });
+    const vapidKey = Buffer.concat([Buffer.from([4]), Buffer.from(x!, "base64url"), Buffer.from(y!, "base64url")]);
+    assert.equal(settings.web_push?.public_key, vapidKey.toString("base64url"));
+
+    // Two browsers: one whose push service takes the notice, one whose push service has ended the subscription.
+    const phone = createECDH("prime256v1");
+    phone.generateKeys();
+    const auth = Buffer.alloc(16, 9);
+    const subscribe = (endpoint: string) =>
+      browser.request("/api/push/subscriptions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "web-push", endpoint, keys: { p256dh: phone.getPublicKey().toString("base64url"), auth: auth.toString("base64url") } }),
+      }).status;
+    assert.equal(subscribe("https://push.example.com/send/phone"), 204);
+    assert.equal(subscribe("https://push.example.com/send/gone-pc"), 204);
+
+    await send("E2E-TURN-3");
+    const reply = await replied("E2E-REPLY-3");
+    const pushes = await eventually("the notices at the push service", async () => {
+      const taken = (await outside.pushes()).filter((push) => push.path === "/send/phone" || push.path === "/send/gone-pc");
+      return taken.length >= 2 ? taken : undefined;
+    });
+    const push = pushes.find((taken) => taken.path === "/send/phone")!;
+    assert.equal(push.encoding, "aes128gcm");
+    assert.ok(Number(push.ttl) > 0);
+
+    // The browser opens it with its own key (RFC 8291); what is in it is the notice of ui-api.md.
+    const body = Buffer.from(push.body, "base64url");
+    const serverKey = body.subarray(21, 21 + body[20]!);
+    const record = body.subarray(21 + body[20]!);
+    const info = Buffer.concat([Buffer.from("WebPush: info\0"), phone.getPublicKey(), serverKey]);
+    const ikm = Buffer.from(hkdfSync("sha256", phone.computeSecret(serverKey), auth, info, 32));
+    const salt = body.subarray(0, 16);
+    const decipher = createDecipheriv("aes-128-gcm", Buffer.from(hkdfSync("sha256", ikm, salt, "Content-Encoding: aes128gcm\0", 16)), Buffer.from(hkdfSync("sha256", ikm, salt, "Content-Encoding: nonce\0", 12)));
+    decipher.setAuthTag(record.subarray(record.length - 16));
+    const plaintext = Buffer.concat([decipher.update(record.subarray(0, record.length - 16)), decipher.final()]).subarray(0, -1);
+    assert.deepEqual(JSON.parse(plaintext.toString("utf8")), { id: (reply.data as { id: string }).id, agent: "E2E Agent", text: "E2E-REPLY-3" });
+
+    // Named by the deployment's VAPID key, for the push service's origin (RFC 8292).
+    const vapid = /^vapid t=([^.]+)\.([^.]+)\.([^,]+), k=(.+)$/.exec(push.authorization);
+    assert.ok(vapid, push.authorization);
+    assert.equal(vapid[4], vapidKey.toString("base64url"));
+    assert.equal(JSON.parse(Buffer.from(vapid[2]!, "base64url").toString()).aud, "https://push.example.com");
+    const jwk = { kty: "EC", crv: "P-256", x: x!, y: y! };
+    assert.ok(verify("sha256", Buffer.from(`${vapid[1]}.${vapid[2]}`), { key: createPublicKey({ key: jwk, format: "jwk" }), dsaEncoding: "ieee-p1363" }, Buffer.from(vapid[3]!, "base64url")));
+
+    // The one that is gone is dropped: the next reply goes to the phone only. The log names neither text nor endpoint.
+    await send("E2E-TURN-6");
+    await replied("E2E-REPLY-6");
+    await eventually("the next notice", async () => ((await outside.pushes()).filter((taken) => taken.path === "/send/phone").length >= 2 ? true : undefined));
+    assert.equal((await outside.pushes()).filter((taken) => taken.path === "/send/gone-pc").length, 1);
+    const backendLog = compose(["logs", "--no-log-prefix", "--no-color", "backend"]).stdout;
+    assert.match(backendLog, /push: subscription \d+ \(web-push\): removed, its service answered 410/);
+    assert.ok(!/push: .*(push\.example\.com|E2E-REPLY)/.test(backendLog), "the push lines name no endpoint and no text");
+
+    // The backend sends it itself: the Sentinel has no record of the push service.
+    assert.ok(!sentinelRecords().some((entry) => JSON.stringify(entry).includes("push.example.com")));
   }));
 
   it("sends the sandbox's traffic through the Sentinel, and records it", track(async () => {

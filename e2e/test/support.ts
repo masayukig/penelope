@@ -137,6 +137,9 @@ export const outside = {
     control<{ code: string; state: string; redirect_uri: string }>("/authorize", { method: "POST", body: JSON.stringify({ query }) }),
   modelCalls: async () => (await control<{ calls: ModelCall[] }>("/model")).calls,
   seen: async () => (await control<{ seen: Seen[] }>("/seen")).seen,
+  /** The pushes the fake push service took, their bodies encrypted, in base64url. */
+  pushes: async () =>
+    (await control<{ pushes: { at: string; path: string; authorization: string; encoding: string; ttl: string; body: string }[] }>("/pushes")).pushes,
   /** The TokenReviews the fake API server answered. */
   reviews: async () => (await control<{ reviews: { caller: string; outcome: string }[] }>("/reviews")).reviews,
   /** What the fake Slack saw: its connections, the envelopes acknowledged, the Web API calls and the downloads. */
