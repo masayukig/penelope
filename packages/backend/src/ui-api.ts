@@ -7,7 +7,7 @@ import type http from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import type { AgentResponse, PostMessageResponse, PushResponse, SubAgentsResponse } from "@penelope/contract";
+import type { AgentResponse, PostMessageResponse, PushResponse, SchedulesResponse, SubAgentsResponse } from "@penelope/contract";
 
 import { isA2APath } from "./a2a/endpoint.ts";
 import type { SubAgents } from "./agents.ts";
@@ -21,6 +21,7 @@ import type { LoginSessions, Session } from "./login/sessions.ts";
 import type { PushSubscriptions } from "./push/notifier.ts";
 import { webPushSubscriptionOf } from "./push/web-push.ts";
 import type { Queue } from "./queue.ts";
+import type { Schedules } from "./schedules.ts";
 import type { Attachment } from "./sources.ts";
 import { iso } from "./time.ts";
 import { AGENT_ICONS_PATH } from "./web.ts";
@@ -38,6 +39,8 @@ export type UiOptions = {
   conversation: Conversation;
   /** The sub-agents that are not closed, for `GET /api/agents`. */
   agents: SubAgents;
+  /** Her schedules, listed and removed as her own tools do (docs/sandbox-api.md). */
+  schedules: Schedules;
   feed: Feed;
   login: GitHubLogin;
   sessions: LoginSessions;
@@ -58,7 +61,7 @@ export type UiOptions = {
 };
 
 export function uiHandler(options: UiOptions): Handler {
-  const { queue, conversation, agents, feed, login, sessions, ownerId, agent, now } = options;
+  const { queue, conversation, agents, schedules, feed, login, sessions, ownerId, agent, now } = options;
   const maxBytes = options.maxBytes ?? DEFAULT_UI_BYTES;
   const secure = options.publicUrl?.startsWith("https:") ?? false;
   const web = options.web ?? notBuilt;
@@ -176,6 +179,10 @@ export function uiHandler(options: UiOptions): Handler {
       case "GET /api/stream":
         stream(feed, request, response);
         return;
+      // Only the main agent has schedules. The UI adds none.
+      case "GET /api/schedules":
+        sendJson(response, 200, { schedules: schedules.entries("main") } satisfies SchedulesResponse);
+        return;
       case "GET /api/push":
         sendJson(response, 200, (options.push === undefined ? {} : { web_push: { public_key: options.push.publicKey } }) satisfies PushResponse);
         return;
@@ -194,6 +201,19 @@ export function uiHandler(options: UiOptions): Handler {
         sendEmpty(response, 204);
         return;
       }
+    }
+    // Removed as her schedule_remove removes it; she is not told, and finds out with schedule_list.
+    const scheduleId = /^\/api\/schedules\/([^/]+)$/.exec(url.pathname)?.[1];
+    if (request.method === "DELETE" && scheduleId !== undefined) {
+      let id: string;
+      try {
+        id = decodeURIComponent(scheduleId);
+      } catch {
+        throw new HttpError(404, "no such schedule");
+      }
+      if (!schedules.remove(id)) throw new HttpError(404, "no such schedule");
+      sendEmpty(response, 204);
+      return;
     }
     throw new HttpError(404, "no such path");
   };

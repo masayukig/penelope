@@ -103,6 +103,7 @@ export async function startBackend(
           queue,
           conversation,
           agents,
+          schedules,
           feed,
           login,
           sessions,
