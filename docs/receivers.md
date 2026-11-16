@@ -505,19 +505,19 @@ Slack の Socket Mode で、1 つ以上のワークスペースの発言・編�
 - 1 つのチャンネルは、見出しの行（`work #dev (channel C0DEV, stream work.dev)`、DM は `work DM with Alice (…)`）と、発言の行の並び。発言は `- <月-日 時:分> <話し手> [<ts>]: <本文>` で、エージェント自身なら話し手に `(you)`、ほかの bot なら `(bot)` を付ける。本文は記法を読める文にし、続きの行は字下げする。編集された発言は `(edited)` を付けて今の本文、削除された発言は `(deleted)` だけを出す。
 - 発言の下に、字下げして、リアクション（`reactions: :+1: Bob, Carol`）、ファイル（`file <名前>: <添付のパス>`、取らなかったものは `file <名前> (<種類>, <大きさ>): not fetched`）、スレッドの返信を並べる。
 - 親を読めなかった返信は `- thread of [<ts>] (not read)` の下に、読めなかった発言へのリアクションは `- message [<ts>] (not read)` の下に並ぶ。
-- ターンに載せる変化の描き方（変化だけを描き、返信の親とリアクションの付いた発言は `(earlier)` を付けて 60 文字までの 1 行にし、リアクションは `+ :名前: 人`・`- :名前: 人` の行で足し外しを出す。量の上限を超えたら古い変化を省き、`(<数> earlier changes left out; penelope-slack history <stream>)` を添える）も同じ package にある。ターンにどう入れるかは [events.md](events.md) の「ターンに入る形」の「Slack の出来事」にある。
+- ターンに載せる変化の描き方（変化だけを描き、返信の親とリアクションの付いた発言は `(earlier)` を付けて 60 文字までの 1 行にし、リアクションは `+ :名前: 人`・`- :名前: 人` の行で足し外しを出す。量の上限を超えたら古い変化を省き、`(<数> earlier changes left out; slackctl history <stream>)` を添える）も同じ package にある。ターンにどう入れるかは [events.md](events.md) の「ターンに入る形」の「Slack の出来事」にある。
 - 時刻は CLI では `TZ` の時間帯（無ければ UTC）で出す。
 
 Slack の出来事をターンに描いて載せるには、配置が、この有効化の `source` を backend の `PENELOPE_INLINE_SOURCES` と runner の `PENELOPE_SLACK_SOURCES` の両方に書く。runner は同じ image の中のこの package で描くので、描き方と CLI の版は揃う。
 
-読み取りの CLI `penelope-slack` は sandbox の image に入る。
+読み取りの CLI `slackctl` は sandbox の image に入る。
 
 | 書き方 | 出すもの |
 | --- | --- |
-| `penelope-slack workspaces` | 見えるワークスペースと、そのチャンネルの数 |
-| `penelope-slack channels` | `stream` ごとに、ワークスペースとチャンネルと、いちばん新しいファイルの日 |
-| `penelope-slack history <stream> [--limit N] [--days N]` | その `stream` の新しい方の `N` 日分（既定 7）のファイルを読み、最後の `N` 件（既定 30、返信は数えない）の発言を今の姿で |
-| `penelope-slack thread <stream> <ts>` | 発言 `<ts>` とその返信のすべてを今の姿で。親の日の前の日から後のファイルを読む |
+| `slackctl workspaces` | 見えるワークスペースと、そのチャンネルの数 |
+| `slackctl channels` | `stream` ごとに、ワークスペースとチャンネルと、いちばん新しいファイルの日 |
+| `slackctl history <stream> [--limit N] [--days N]` | その `stream` の新しい方の `N` 日分（既定 7）のファイルを読み、最後の `N` 件（既定 30、返信は数えない）の発言を今の姿で |
+| `slackctl thread <stream> <ts>` | 発言 `<ts>` とその返信のすべてを今の姿で。親の日の前の日から後のファイルを読む |
 
 - どれも `--sources <場所>`（既定 `/sources`）、`--source <名前>`（既定 `slack`。有効化の `source` を変えた配置で使う）、`--time-zone <時間帯>` を受ける。
 - 無い `stream` や `thread` は終了コード 1、書き方の誤りは 2 で、標準エラーに理由と使い方を書く。

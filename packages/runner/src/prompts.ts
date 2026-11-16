@@ -104,7 +104,7 @@ function slackSection(names: readonly string[] | undefined): string {
   if (!names || names.length === 0) return "";
   const listed = names.map((name) => `\`${name}\``).join(", ");
   const other = names.some((name) => name !== "slack") ? ` (\`--source\` names a source other than \`slack\`)` : "";
-  return `\n\nThe events of ${listed} come from Slack and carry \`text\`: what changed in Slack since the events handed to you before them, drawn channel by channel, with replies, reactions, edits and files under the message they belong to, and the message's \`ts\` in brackets. A message drawn with \`(earlier)\` was there before, shown for what is under it or before it. Their batched line carries the same drawing in \`text\`, beside \`appended\`; when the drawing is over its limit, the oldest changes are left out and it says so. \`penelope-slack\` draws a channel or a thread as it stands now, further back than the turns go${other}; \`penelope-slack --help\` says how.`;
+  return `\n\nThe events of ${listed} come from Slack and carry \`text\`: what changed in Slack since the events handed to you before them, drawn channel by channel, with replies, reactions, edits and files under the message they belong to, and the message's \`ts\` in brackets. A message drawn with \`(earlier)\` was there before, shown for what is under it or before it. Their batched line carries the same drawing in \`text\`, beside \`appended\`; when the drawing is over its limit, the oldest changes are left out and it says so. \`slackctl\` draws a channel or a thread as it stands now, further back than the turns go${other}; \`slackctl --help\` says how.`;
 }
 
 /** Her system prompt, made once for each session. */

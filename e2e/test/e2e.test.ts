@@ -651,7 +651,7 @@ describe("the Pod end to end", () => {
     assert.match(batch.text, /^work #dev [^\n]*\n- [^\n]*E2E U0ALICE \[[0-9.]+\]: E2E-SLACK-AWAY said while away\n$/);
 
     // The CLI in the sandbox draws the channel as it stands.
-    const drawn = exec("sandbox", "TZ=UTC penelope-slack history work.dev").stdout;
+    const drawn = exec("sandbox", "TZ=UTC slackctl history work.dev").stdout;
     assert.match(drawn, /^work #dev \(channel C0DEV, stream work\.dev\)\n/);
     assert.match(drawn, /E2E U0ALICE \[[0-9.]+\]: E2E-SLACK-AWAY said while away/);
     assert.match(drawn, /: @E2E U0E2E E2E-SLACK-MENTION what is this\?\n {2}file e2e\.png: \/sources\/slack\/files\/\d+-e2e\.png\n/);

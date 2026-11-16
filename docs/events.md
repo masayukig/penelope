@@ -128,7 +128,7 @@ Slack のプラグインは、起きたことを 1 件ずつ出来事にする�
 | 削除 | `type: message_deleted`、元の発言の `ts` |
 | 絵文字 | `type: reaction_added` か `reaction_removed`、付けた発言の `ts`、絵文字の名前 |
 
-`payload` の形そのものは Slack のプラグインが決める（[receivers.md](receivers.md) の「Slack のプラグイン」の「`payload`」、型は `packages/slack` の `src/payload.ts`）。読むための CLI `penelope-slack`（チャンネルの最近の流れやスレッドを今の姿に組み立てて出す）はプラグインの package が持ち、sandbox の image に入る（同じく「描き方と読み取りの CLI」）。
+`payload` の形そのものは Slack のプラグインが決める（[receivers.md](receivers.md) の「Slack のプラグイン」の「`payload`」、型は `packages/slack` の `src/payload.ts`）。読むための CLI `slackctl`（チャンネルの最近の流れやスレッドを今の姿に組み立てて出す）はプラグインの package が持ち、sandbox の image に入る（同じく「描き方と読み取りの CLI」）。
 
 ## ターンに入る形
 
@@ -186,14 +186,14 @@ Slack のプラグインの出来事は、runner が `packages/slack` の描き�
 - 同じ入力に `now` と `batch` が来たら、行はそれぞれの形で並ぶ。`batch` で描いた発言が、`now` の行に `(earlier)` で重ねて出ることがある。
 - 描くために、runner は変化の `stream` の `/sources` のファイルを、いちばん早い変化を受けた日（UTC）の前の日のものから読む。それより前の親やリアクションの付いた発言は `(not read)` と描く。
 - 時刻は runner の時間帯（`TZ`、無ければ UTC）で描く。
-- 量の上限を超えたら、上限を行に分ける。上限を行の数で等分した字数に収まる行はそのまま、残りの字数を長い行で分ける。行の中では古い変化から省き、`(<数> earlier changes left out; penelope-slack history <stream>)` を添える（`source` が `slack` でなければ `--source <source>` が入る）。1 つの変化だけでも収まらないときは、終わりを切って `…` にする。
+- 量の上限を超えたら、上限を行に分ける。上限を行の数で等分した字数に収まる行はそのまま、残りの字数を長い行で分ける。行の中では古い変化から省き、`(<数> earlier changes left out; slackctl history <stream>)` を添える（`source` が `slack` でなければ `--source <source>` が入る）。1 つの変化だけでも収まらないときは、終わりを切って `…` にする。
 - 描けないとき（`payload` が描き方の知らない形、`stream` が無い、`/sources` のその `stream` の場所が読めない）は、その出来事を、ふつうの inline の出来事の行（`payload` の `text`、無ければ JSON）にする。`batch` でもまとめずに 1 件 1 行になる。runner のログに `slack: event <seq> of <source>/<stream> is not drawn: <理由>` を書く（本文は書かない）。描く途中で失敗したときは、その入力の描く出来事をどれも描かずに入れる（`now` はふつうの inline の行、`batch` は `text` の無いまとめ）。ログには `seq` の一覧と理由を書く。
 - 添付の画像は、ほかの inline の出来事と同じく、画像としても載る（上の「ひとつの出来事」。`batch` の出来事の画像も、1 つの入力に 4 枚までのうちに入る）。
 
 ### 畳んだ後
 
 - 終わったターンを畳むとき（[ADR-0015](adr/0015-fold-ended-turns-before-they-are-sent.md)）も、出来事の入力はそのまま残る。畳んだ後のターンにも、同じ `<events>` の形で出来事がある。
-- Slack の描いた文も出来事の入力の一部なので、畳んだ後に残る。`penelope-slack` の出力はツールの出力なので残らない。
+- Slack の描いた文も出来事の入力の一部なので、畳んだ後に残る。`slackctl` の出力はツールの出力なので残らない。
 
 ### いつ渡すか
 

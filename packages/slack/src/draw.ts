@@ -13,7 +13,7 @@ import { readPayload, type SlackChannel, type SlackFile, type SlackPayload, type
 
 /** The default name of the Slack plugin's source, and of the CLI. */
 export const DEFAULT_SOURCE = "slack";
-export const CLI = "penelope-slack";
+export const CLI = "slackctl";
 
 /** How many characters of the changes a turn is given, by default. */
 export const DEFAULT_MAX_CHARS = 6000;

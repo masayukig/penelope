@@ -27,7 +27,7 @@ function sources(days: Record<string, Record<string, (SourcesLine | string)[]>>,
 
 const cli = (root: string, ...args: string[]) => run(["--sources", root, "--time-zone", "UTC", ...args], {});
 
-describe("penelope-slack", () => {
+describe("slackctl", () => {
   test("channels lists each stream with its workspace and channel", () => {
     const root = sources({
       "work.dev": { "2026-11-15": [line(message(ts("09:00"), "hi"))], "2026-11-16": [line(message(ts("09:01"), "hi again"))] },
@@ -95,7 +95,7 @@ describe("penelope-slack", () => {
   test("no command, or one it does not know, prints how to use it", () => {
     const result = run([], {});
     assert.equal(result.code, 2);
-    assert.match(result.stderr, /usage: penelope-slack/);
+    assert.match(result.stderr, /usage: slackctl/);
     assert.equal(run(["--help"], {}).code, 0);
     assert.equal(run(["what"], {}).code, 2);
   });

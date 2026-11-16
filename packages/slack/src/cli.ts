@@ -1,4 +1,4 @@
-// penelope-slack: reads the Slack plugin's lines of /sources and draws a
+// slackctl: reads the Slack plugin's lines of /sources and draws a
 // channel or a thread as it stands now (ADR-0013, ADR-0029). It is in the
 // sandbox's image; the turn is given only what changed, and this is how the
 // agent reads further back.
