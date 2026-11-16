@@ -14,6 +14,7 @@ import { after, before, describe, it } from "node:test";
 
 import type { TurnBatch, TurnEvent, TurnLine } from "@penelope/contract";
 
+import { E2E_PNG } from "../outside/model.ts";
 import {
   a2aCall,
   Browser,
@@ -312,6 +313,38 @@ describe("the Pod end to end", () => {
 
     // The backend sends it itself: the Sentinel has no record of the push service.
     assert.ok(!sentinelRecords().some((entry) => JSON.stringify(entry).includes("push.example.com")));
+  }));
+
+  it("shows the owner the image of a reply, copied by the backend, and refuses a reply whose image is none", track(async () => {
+    // Guards against: an image she sends not reaching the owner, reaching anyone without the owner's login, reaching
+    // them as other bytes, or a reply reaching the owner without the image it was sent with (ADR-0032).
+    await send("E2E-IMAGE draw");
+    const reply = await replied("E2E-REPLY-IMAGE");
+    const images = (reply.data as { images?: { id: string; mime_type: string; size: number; name: string }[] }).images ?? [];
+    const png = Buffer.from(E2E_PNG, "base64");
+    assert.deepEqual(images.map(({ mime_type, size, name }) => ({ mime_type, size, name })), [{ mime_type: "image/png", size: png.length, name: "e2e.png" }]);
+    const [image] = images;
+
+    // The reply whose file is no image did not reach the owner; the tool said why.
+    const history = await browser.json<{ entries: { text: string; images?: { id: string }[] }[] }>("/api/history");
+    assert.ok(!history.body.entries.some((entry) => entry.text === "E2E-REPLY-IMAGE-REFUSED"));
+    assert.deepEqual(history.body.entries.find((entry) => entry.text === "E2E-REPLY-IMAGE")?.images?.map((kept) => kept.id), [image!.id]);
+    const refused = streamed("activity", (data) => {
+      const activity = data.activity as { kind: string; is_error?: boolean; output?: string };
+      return activity.kind === "tool_result" && activity.is_error === true && (activity.output ?? "").includes("notes.png");
+    });
+    assert.ok(refused, "the refusal came back to the reply's call");
+
+    // The owner reads its bytes by its id; no one else does.
+    const asset = browser.request(`/api/assets/${image!.id}`);
+    assert.equal(asset.status, 200);
+    assert.equal(asset.headers["content-type"], "image/png");
+    assert.equal(asset.headers["content-length"], String(png.length));
+    assert.equal(new Browser().request(`/api/assets/${image!.id}`).status, 401);
+    // What the backend keeps is the sandbox's file as it was sent, in the backend's own place.
+    const sum = (service: string, file: string) => exec(service, `sha256sum ${file}`).stdout.split(" ")[0];
+    assert.equal(sum("backend", `/var/lib/penelope/assets/${image!.id}.png`), sum("sandbox", "/home/agent/draw/e2e.png"));
+    assert.equal(exec("sandbox", "ls /var/lib/penelope 2>&1", { check: false }).status === 0, false, "the sandbox does not see the copies");
   }));
 
   it("sends the sandbox's traffic through the Sentinel, and records it", track(async () => {

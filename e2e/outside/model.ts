@@ -37,7 +37,10 @@ export function where(messages: readonly ChatMessage[]): { system: string; input
 }
 
 const write = (path: string, content: string) => ({ name: "write", args: { path, content } });
-const reply = (text: string) => ({ name: "reply", args: { text } });
+const reply = (text: string, images?: string[]) => ({ name: "reply", args: { text, ...(images ? { images } : {}) } });
+
+/** A PNG of one pixel: the image of the turn that shows one (ADR-0032). */
+export const E2E_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 const subAgent = (name: string, args: Record<string, unknown>) => ({ name, args });
 
 /** The seq of the input's `a2a` event: what `reply_to_agent` names (docs/events.md, "ターンに入る形"). */
@@ -104,6 +107,15 @@ export function script(messages: readonly ChatMessage[]): Answer {
         { calls: [{ name: "bash", args: { command: "echo E2E-BASH-$((40 + 2))" } }] },
         { calls: [reply("E2E-REPLY-1")] },
         { text: "E2E-TEXT-1" },
+      ];
+    }
+    // An image drawn into HOME and shown with a reply; a file that is no image refuses the reply it is put on, text and all.
+    if (input.includes("E2E-IMAGE")) {
+      return [
+        { calls: [{ name: "bash", args: { command: `mkdir -p ~/draw && echo ${E2E_PNG} | base64 -d > ~/draw/e2e.png && echo no image > ~/draw/notes.png` } }] },
+        { calls: [reply("E2E-REPLY-IMAGE-REFUSED", ["draw/notes.png"])] },
+        { calls: [reply("E2E-REPLY-IMAGE", ["draw/e2e.png"])] },
+        { text: "Drew." },
       ];
     }
     if (input.includes("E2E-A2A-ASK")) return [{ calls: [replyToAgent(input, "input-required", "E2E-A2A-QUESTION")] }, { text: "Asked." }];
