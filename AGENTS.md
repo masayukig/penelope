@@ -58,6 +58,8 @@ The `Makefile` is the entry point for both languages, and CI only calls its targ
   toolchains: no cluster, no root, no outside service.
 - A test that needs more than that goes behind a make target and, in Go, a build tag of its own, so that `make test`
   never picks it up.
+- To run `make e2e` in several worktrees on one machine at once, give each its own `COMPOSE_PROJECT_NAME` and
+  `VERSION` ([e2e/README.md](e2e/README.md)).
 
 ### Versions
 

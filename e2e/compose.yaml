@@ -11,7 +11,9 @@
 # as the owner's browser would, so no port is published.
 #
 # The images of the repository are the ones `make images` builds, tagged
-# PENELOPE_E2E_TAG. The keys are made for each run under e2e/.run/.
+# PENELOPE_E2E_TAG. The test's own images are named after the project, so a
+# run under another COMPOSE_PROJECT_NAME builds its own (e2e/README.md). The
+# keys are made for each run under e2e/.run/.
 
 name: penelope-e2e
 
@@ -30,7 +32,7 @@ volumes:
 services:
   outside:
     build: { context: ., target: outside }
-    image: penelope-e2e-outside
+    image: ${COMPOSE_PROJECT_NAME}-outside
     network_mode: bridge
     environment:
       OUTSIDE_CERT_FILE: /run/secrets/e2e/outside.crt
@@ -51,14 +53,14 @@ services:
   # The Pod's network namespace.
   pod:
     build: { context: ., target: init }
-    image: penelope-e2e-init
+    image: ${COMPOSE_PROJECT_NAME}-init
     command: ["sleep", "infinity"]
     init: true
     network_mode: bridge
     volumes: [*resolv]
 
   init:
-    image: penelope-e2e-init
+    image: ${COMPOSE_PROJECT_NAME}-init
     command: ["/e2e/init/redirect.sh"]
     network_mode: service:pod
     cap_add: [NET_ADMIN]
@@ -68,7 +70,7 @@ services:
       pod: { condition: service_started }
 
   volumes:
-    image: penelope-e2e-init
+    image: ${COMPOSE_PROJECT_NAME}-init
     command: ["/e2e/init/volumes.sh"]
     network_mode: none
     depends_on:
