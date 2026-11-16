@@ -12,7 +12,7 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
-import type { TurnLine } from "@penelope/contract";
+import type { TurnBatch, TurnEvent, TurnLine } from "@penelope/contract";
 
 import {
   a2aCall,
@@ -534,7 +534,8 @@ describe("the Pod end to end", () => {
   it("receives Slack over Socket Mode, fills in after a reconnection, and acknowledges what the intake took", track(async () => {
     // Guards against: the receivers not reaching Slack under its own names, an envelope acknowledged before the intake
     // took it, a retry written twice, a file not sent beside its message, the fill-in after a reconnection missing
-    // what was said while away, or the reading CLI not drawing it in the sandbox.
+    // what was said while away, the turn given Slack's payloads rather than their drawing, or the reading CLI not
+    // drawing it in the sandbox.
     const connected = await eventually("the Slack connection", async () => {
       const seen = await outside.slack();
       return seen.open > 0 ? seen : undefined;
@@ -599,8 +600,22 @@ describe("the Pod end to end", () => {
     // The mention is now, and brings the fetched message with it.
     await replied("E2E-REPLY-SLACK");
     const [call] = await callsFor("E2E-SLACK-MENTION", 0);
-    const events = eventLines(where(call!).input);
-    assert.ok(events.some((line) => line.kind === undefined && line.source === "slack" && line.delivery === "now"), JSON.stringify(events));
+    // The mention is inline, so its image goes in as an image too; the scripted model takes no images, and Pi says so after the text.
+    const [input, omitted] = where(call!).input.split(/(?<=<\/events>)/);
+    assert.match(omitted ?? "", /image/, "the image goes in beside the text");
+    const events = eventLines(input!);
+    const mention = events.find((line): line is TurnEvent => line.kind === undefined && line.source === "slack" && line.delivery === "now");
+    assert.ok(mention?.text !== undefined, JSON.stringify(events));
+
+    // Both come drawn from /sources (ADR-0029): the mention with what led up to it, the fetched message in its batch line.
+    assert.equal(mention.appended, undefined, "an inline event carries its text");
+    assert.match(mention.text, /^work #dev \(channel C0DEV, stream work\.dev\)\n/);
+    assert.match(mention.text, /E2E U0ALICE \[[0-9.]+\] \(earlier\): "E2E-SLACK-AWAY said while away"/);
+    assert.match(mention.text, /: @E2E U0E2E E2E-SLACK-MENTION what is this\?\n {2}file e2e\.png: \/sources\/slack\/files\/\d+-e2e\.png\n/);
+    const batch = events.find((line): line is TurnBatch => line.kind === "batch" && line.source === "slack");
+    assert.ok(batch?.text !== undefined, JSON.stringify(events));
+    assert.equal(batch.count, 1);
+    assert.match(batch.text, /^work #dev [^\n]*\n- [^\n]*E2E U0ALICE \[[0-9.]+\]: E2E-SLACK-AWAY said while away\n$/);
 
     // The CLI in the sandbox draws the channel as it stands.
     const drawn = exec("sandbox", "TZ=UTC penelope-slack history work.dev").stdout;

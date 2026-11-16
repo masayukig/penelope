@@ -4,6 +4,7 @@
 import { join } from "node:path";
 
 import type { AgentId } from "@penelope/contract";
+import { DEFAULT_MAX_CHARS, SEGMENT } from "@penelope/slack";
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
@@ -48,6 +49,15 @@ export interface Config {
   pollWaitSeconds: number;
   /** Whether ended turns are folded before they are sent to the model (ADR-0015). */
   turnFold: boolean;
+  slack: SlackSettings;
+}
+
+/** The sources whose events are drawn with the Slack plugin's drawing (ADR-0029). */
+export interface SlackSettings {
+  /** The sources, as the deployment named them; none, and no event is drawn. */
+  sources: string[];
+  /** The most characters of drawn Slack text one input carries. */
+  maxChars: number;
 }
 
 /** The limits on background jobs (ADR-0030 Decision 3). */
@@ -117,6 +127,12 @@ export function readConfig(env: Env): Config {
   };
   const fold = env.PENELOPE_TURN_FOLD || "on";
   if (fold !== "on" && fold !== "off") problems.push("PENELOPE_TURN_FOLD must be on or off");
+  const slackSources = (env.PENELOPE_SLACK_SOURCES ?? "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name !== "");
+  for (const name of slackSources) if (!SEGMENT.test(name)) problems.push(`PENELOPE_SLACK_SOURCES: ${name} is not a source`);
+  const slackMaxChars = positiveInteger(env, "PENELOPE_SLACK_MAX_CHARS", DEFAULT_MAX_CHARS, problems);
   if (problems.length > 0) throw new ConfigError(problems.join("; "));
 
   const agentDir = env.PI_CODING_AGENT_DIR || join(home, ".pi", "agent");
@@ -140,5 +156,6 @@ export function readConfig(env: Env): Config {
     imageMaxBytes,
     pollWaitSeconds,
     turnFold: fold !== "off",
+    slack: { sources: slackSources, maxChars: slackMaxChars },
   };
 }

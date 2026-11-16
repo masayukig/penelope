@@ -178,6 +178,7 @@ export class Runner {
     const connectors = await this.connectors();
     return systemPrompt(this.config.identity, this.places, files, {
       folding: this.config.turnFold,
+      slackSources: this.config.slack.sources,
       ...(connectors ? { connectors } : {}),
     });
   }
@@ -243,7 +244,9 @@ export class Runner {
   /** The text of the events, and the images of the owner's messages among them. */
   private async input(events: DeliveredEvent[]): Promise<[string, ImageContent[] | undefined]> {
     const images = await inlineImages(events, this.config.imageMaxBytes);
-    return [formatEvents(events), images.length > 0 ? images : undefined];
+    const slack = this.config.slack;
+    const drawing = slack.sources.length > 0 ? { sources: new Set(slack.sources), sourcesDir: this.config.sourcesDir, maxChars: slack.maxChars, log: this.log } : undefined;
+    return [formatEvents(events, drawing), images.length > 0 ? images : undefined];
   }
 
   // ── Making turns ──

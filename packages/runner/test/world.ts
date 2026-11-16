@@ -31,7 +31,7 @@ export interface World {
   start(script: Script): Promise<() => Promise<void>>;
 }
 
-export async function world(options: { turnFold?: boolean; ownerSkills?: boolean; connectors?: boolean } = {}): Promise<World> {
+export async function world(options: { turnFold?: boolean; ownerSkills?: boolean; connectors?: boolean; slackSources?: string[] } = {}): Promise<World> {
   const root = await mkdtemp(join(tmpdir(), "runner-"));
   const home = join(root, "home");
   const memoryDir = join(root, "memory");
@@ -56,6 +56,7 @@ export async function world(options: { turnFold?: boolean; ownerSkills?: boolean
     imageMaxBytes: 1_000_000,
     pollWaitSeconds: 1,
     turnFold: options.turnFold ?? true,
+    slack: { sources: options.slackSources ?? [], maxChars: 6000 },
     ...(options.ownerSkills ? { ownerSkillsDir: join(root, "skills") } : {}),
     ...(options.connectors ? { connectorsDir: join(root, "connectors") } : {}),
   };

@@ -126,6 +126,8 @@ services:
       PENELOPE_NIGHTLY_CRON: ${PENELOPE_E2E_NIGHTLY_CRON:-0 4 1 1 *}
       # The shortest wait for a batch, so that GitHub's batch events reach a turn of their own in the test.
       PENELOPE_BATCH_QUIET_MINUTES: "1"
+      # Slack's events are inline, and the runner draws them (ADR-0029).
+      PENELOPE_INLINE_SOURCES: ui,job,slack
       # Off until the heartbeat's scenario makes the backend again with it.
       PENELOPE_HEARTBEAT_MINUTES: ${PENELOPE_E2E_HEARTBEAT_MINUTES:-}
       PENELOPE_AVATAR: penelope
@@ -173,6 +175,7 @@ services:
       PENELOPE_OWNER: the e2e owner
       PENELOPE_MODEL: e2e/scripted
       PENELOPE_POLL_WAIT_SECONDS: "10"
+      PENELOPE_SLACK_SOURCES: slack
     volumes:
       - *resolv
       - ./.run/sentinel-ca.crt:/etc/penelope/ca/sentinel.crt:ro

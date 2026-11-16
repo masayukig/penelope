@@ -34,7 +34,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_REDELIVER_MINUTES` | `5` | 渡して ack の無い出来事をもう一度渡すまでの分 |
 | `PENELOPE_HEARTBEAT_MINUTES` | なし | heartbeat の N（本体の最後のターンの終わりから待つ分）。無ければ heartbeat は無い（下の「heartbeat」） |
 | `PENELOPE_DELIVERY_UI`・`_CRON`・`_A2A`・`_SELF`・`_JOB` | `now` | backend の中の受信元の `delivery` の既定 |
-| `PENELOPE_INLINE_SOURCES` | `ui,job` | inline の受信元（`,` で区切る）。`control` は書かなくても常に inline。書くと既定を置き換えるので、裏の仕事の終わりを inline のままにするなら `job` も書く |
+| `PENELOPE_INLINE_SOURCES` | `ui,job` | inline の受信元（`,` で区切る）。`control` は書かなくても常に inline。書くと既定を置き換えるので、裏の仕事の終わりを inline のままにするなら `job` も書く。Slack のプラグインの出来事を描いて載せる配置は、その `source` も書く（[events.md](events.md) の「Slack の出来事」） |
 | `PENELOPE_GIT_AUTHOR_NAME` | `penelope-backend` | `/memory` のコミットの作者の名前 |
 | `PENELOPE_GIT_AUTHOR_EMAIL` | `backend@penelope.invalid` | 同じくメールアドレス |
 | `PENELOPE_AVATAR` | なし | UI に出すアバターの名前。`PENELOPE_AVATARS_DIR` の下の、この名前のディレクトリを読む（[ui-api.md](ui-api.md) の「エージェント」） |

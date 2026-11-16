@@ -195,7 +195,10 @@ COPY --from=ts-build /src/packages/runner/dist ./dist
 COPY --from=runner-deps /src/node_modules ./node_modules
 COPY --from=ts-build /src/packages/contract/package.json ./node_modules/@penelope/contract/
 COPY --from=ts-build /src/packages/contract/dist ./node_modules/@penelope/contract/dist
-# The Slack plugin's reading CLI (ADR-0029). It has no dependency at run time.
+# The Slack plugin's drawing, which the runner draws Slack's events with, and
+# its reading CLI (ADR-0029). It has no dependency at run time.
+COPY --from=ts-build /src/packages/slack/package.json ./node_modules/@penelope/slack/
+COPY --from=ts-build /src/packages/slack/dist ./node_modules/@penelope/slack/dist
 COPY --from=ts-build /src/packages/slack/package.json /opt/penelope/slack/
 COPY --from=ts-build /src/packages/slack/dist /opt/penelope/slack/dist
 COPY packages/slack/bin/penelope-slack /usr/local/bin/penelope-slack
