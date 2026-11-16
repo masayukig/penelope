@@ -117,6 +117,36 @@ describe("the Web UI", () => {
     await waitFor(() => within(timeline()).getByText("all pods are running"));
   });
 
+  // ADR-0032: the images of a reply are shown small under it, and large when pressed.
+  it("shows the images of a reply under it, each read by its id, and one large when it is pressed", async () => {
+    const backend = new FakeBackend();
+    const images = [
+      { id: "a-1", mime_type: "image/png", size: 10, name: "cat.png" },
+      { id: "a-2", mime_type: "image/webp", size: 20, name: "dog.webp" },
+    ];
+    backend.history = [{ kind: "agent", id: "r-1", at: new Date().toISOString(), text: "描いたよ", agent: "main", images }];
+    start(backend);
+    await backend.connected();
+    await waitFor(() => within(timeline()).getByText("描いたよ"));
+    const cat = within(timeline()).getByRole("button", { name: /^cat\.png .*開く$/ });
+    assert.ok(within(timeline()).getByRole("button", { name: /^dog\.webp .*開く$/ }));
+    assert.deepEqual(
+      [...timeline().querySelectorAll("img")].map((img) => img.getAttribute("src")).filter((src) => src?.startsWith("/api/assets/")),
+      ["/api/assets/a-1", "/api/assets/a-2"],
+    );
+    await act(async () => fireEvent.click(cat));
+    const dialog = await screen.findByRole("dialog");
+    assert.ok([...dialog.querySelectorAll("img")].some((img) => img.getAttribute("src") === "/api/assets/a-1"));
+  });
+
+  it("shows the images of a reply that comes down the stream", async () => {
+    const backend = start();
+    await backend.connected();
+    const images = [{ id: "a-9", mime_type: "image/jpeg", size: 5, name: "sky.jpg" }];
+    await act(async () => backend.send({ event: "reply", data: { kind: "agent", id: "r-9", at: new Date().toISOString(), text: "空", agent: "main", images } }));
+    await waitFor(() => within(timeline()).getByRole("button", { name: /^sky\.jpg .*開く$/ }));
+  });
+
   // The words of the states are the design's (docs/design/README.md, 5).
   it("follows what she does: thinking, using a tool, and waiting again", async () => {
     const backend = start();

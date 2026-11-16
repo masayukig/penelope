@@ -8,6 +8,7 @@ import { Markdown } from "@astryxdesign/core/Markdown";
 import { Thumbnail } from "@astryxdesign/core/Thumbnail";
 import { Fragment, useState } from "react";
 
+import { assetUrl } from "../model/api.ts";
 import type { AgentItem, LocalFile, OwnerItem, TimelineItem } from "../model/store.ts";
 import { AgentAvatar, useAgent } from "./agent.tsx";
 import { dayOf, faceWord, sourceWord, timeOf, words } from "./words.ts";
@@ -25,7 +26,9 @@ export function Timeline({
   topInset?: boolean;
   density?: "compact" | "spacious";
 }) {
-  const [shown, setShown] = useState<LocalFile | undefined>(undefined);
+  // The image shown large: one the owner sent, or one of her replies'.
+  const [shown, setShown] = useState<Shown | undefined>(undefined);
+  const openFile = (file: LocalFile) => (file.url ? setShown({ url: file.url, name: file.name }) : undefined);
   // On a narrow screen her replies take the whole width (docs/design/README.md, 4).
   const wide = density === "compact";
   let lastDay: string | undefined;
@@ -41,13 +44,13 @@ export function Timeline({
           return (
             <Fragment key={item.key}>
               {divider}
-              {item.kind === "agent" ? <Reply item={item} wide={wide} /> : <OwnerMessage item={item} onOpen={setShown} />}
+              {item.kind === "agent" ? <Reply item={item} wide={wide} onOpen={setShown} /> : <OwnerMessage item={item} onOpen={openFile} />}
             </Fragment>
           );
         })}
         {busy ? <Dots label={words.thinkingDots} /> : null}
       </ChatMessageList>
-      {shown?.url ? (
+      {shown ? (
         <Lightbox isOpen media={{ src: shown.url, alt: shown.name }} onOpenChange={(open) => (open ? undefined : setShown(undefined))} hasZoom />
       ) : null}
     </>
@@ -58,7 +61,24 @@ export function EmptyTimeline() {
   return <EmptyState title={words.emptyTitle} description={words.emptyBody} headingLevel={2} />;
 }
 
-function Reply({ item, wide }: { item: AgentItem; wide: boolean }) {
+type Shown = { url: string; name: string };
+
+/** The images of a reply, small under its text; each opens large. */
+function ReplyImages({ item, onOpen }: { item: AgentItem; onOpen: (shown: Shown) => void }) {
+  if (!item.images || item.images.length === 0) return null;
+  return (
+    <div className="reply-images">
+      {item.images.map((image) => {
+        const url = assetUrl(image.id);
+        return (
+          <Thumbnail key={image.id} src={url} alt={image.name} label={image.name} onClick={() => onOpen({ url, name: image.name })} className="reply-image" />
+        );
+      })}
+    </div>
+  );
+}
+
+function Reply({ item, wide, onOpen }: { item: AgentItem; wide: boolean; onOpen: (shown: Shown) => void }) {
   const agent = useAgent();
   // A reply to the owner's own message needs no word of what started it.
   const trigger = item.trigger !== undefined && item.trigger.source !== "ui" ? item.trigger : undefined;
@@ -76,6 +96,7 @@ function Reply({ item, wide }: { item: AgentItem; wide: boolean }) {
     return (
       <ChatMessage sender="assistant" name={name} metadata={metadata}>
         <Markdown>{item.text}</Markdown>
+        <ReplyImages item={item} onOpen={onOpen} />
       </ChatMessage>
     );
   }
@@ -83,6 +104,7 @@ function Reply({ item, wide }: { item: AgentItem; wide: boolean }) {
     <ChatMessage sender="assistant">
       <ChatMessageBubble variant="ghost" name={name} metadata={metadata}>
         <Markdown>{item.text}</Markdown>
+        <ReplyImages item={item} onOpen={onOpen} />
       </ChatMessageBubble>
     </ChatMessage>
   );

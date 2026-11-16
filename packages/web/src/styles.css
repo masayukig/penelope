@@ -366,6 +366,18 @@ body {
   width: 200px;
   height: 128px;
 }
+/* Her images under the reply's text (ADR-0032): as large as the owner's, wrapping on a narrow screen. */
+.reply-images {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.reply-image {
+  width: 200px;
+  height: 160px;
+  max-width: 100%;
+}
 .dots {
   display: inline-flex;
   gap: 5px;
