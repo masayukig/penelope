@@ -40,7 +40,7 @@ receivers の設定、HTTP の口、プラグインの内側の契約、Alertman
 | --- | --- | --- |
 | `name` | ○ | 有効化の名前。webhook のプラグインなら URL の `/v1/webhooks/<name>` になる。英小文字・数字・`-` で、1〜32 文字、`-` で始まらない。一覧の中で一意 |
 | `plugin` | ○ | プラグインの名前（下の「プラグインの一覧」）。知らない名前なら起動しない |
-| `source` | | 取り込み口に送る出来事の `source`。省けば `plugin` の名前。[events.md](events.md) の `source` の文字の制限を満たし、backend の中の受信元の名前（`ui`・`cron`・`a2a`・`self`・`control`）でないもの。一覧の中で一意 |
+| `source` | | 取り込み口に送る出来事の `source`。省けば `plugin` の名前。[events.md](events.md) の `source` の文字の制限を満たし、backend の中の受信元の名前（`ui`・`cron`・`a2a`・`self`・`control`・`heartbeat`）でないもの。一覧の中で一意 |
 | `settings` | | プラグインごとの設定（各プラグインの節）。省けば `{}` |
 
 - 1 つの配置に同じ送り手の種類が 2 つあるときは、同じ `plugin` を 2 つ有効にし、`name` と `source` を変える。`source` が重なる設定は起動しない。`id` は `source` の中だけで一意なので、送り手をまたいで ID が重なると、片方が重複として落ちるためである。

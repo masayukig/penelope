@@ -16,6 +16,7 @@ import type { Config } from "./config.ts";
 import { Conversation } from "./conversation.ts";
 import { openDatabase } from "./db.ts";
 import { Feed } from "./feed.ts";
+import { Heartbeat } from "./heartbeat.ts";
 import { close, listenTcp, listenUnix } from "./http.ts";
 import { intakeHandler } from "./intake.ts";
 import { type GitHubEndpoints, GitHubLogin } from "./login/github.ts";
@@ -39,12 +40,13 @@ export async function startBackend(
     mkdirSync(dir, { recursive: true });
   }
   const db = openDatabase(config.databasePath);
+  const awake = new AwakeHours(config.awakeHours, config.timeZone);
   const queue = new Queue(db, new Sources(config.sourcesDir, config.timeZone), {
     now,
     inline: config.inline,
     builtinDelivery: config.builtinDelivery,
     batch: config.batch,
-    awake: new AwakeHours(config.awakeHours, config.timeZone),
+    awake,
     redeliverMs: config.redeliverMs,
   });
   const feed = new Feed();
@@ -103,6 +105,8 @@ export async function startBackend(
     throw error;
   }
   const stopScheduler = scheduler.start();
+  const stopHeartbeat =
+    config.heartbeatMs === undefined ? () => {} : new Heartbeat(queue, conversation, { now, quietMs: config.heartbeatMs, awake, log }).start();
 
   if (config.sandboxToken === undefined) log("backend: no PENELOPE_SANDBOX_TOKEN_FILE; the sandbox's API refuses every request");
   if (config.github === undefined) log("backend: no GitHub login set up; no one can sign in to the UI");
@@ -114,6 +118,7 @@ export async function startBackend(
     port,
     close: async () => {
       stopScheduler();
+      stopHeartbeat();
       await Promise.all([close(intake), close(sandbox), close(ui)]);
       db.close();
     },

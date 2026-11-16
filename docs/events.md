@@ -14,7 +14,7 @@ receivers のプラグインが封筒を作る形は [receivers.md](receivers.md
 
 | 欄 | 必須 | 中身 |
 | --- | --- | --- |
-| `source` | ○ | 受信元の名前。`/sources` の最初のディレクトリにもなる。backend の中の受信元は `ui`・`cron`・`a2a`・`self`・`control` |
+| `source` | ○ | 受信元の名前。`/sources` の最初のディレクトリにもなる。backend の中の受信元は `ui`・`cron`・`a2a`・`self`・`control`・`heartbeat` |
 | `id` | ○ | 受信元が付ける。`source` と組で一意。重複を除くキー |
 | `occurred_at` | ○ | 起きた時刻（RFC 3339） |
 | `summary` | ○ | 1 行の要約。人とモデルが読む |
@@ -36,7 +36,7 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 - `now`: すぐにターンへ。ターンの最中なら割り込み（steer）、待っていれば新しいターン。起きている時間の外でも。
 - `batch`: `/sources` にはすぐ書くが、ターンへはまとめて後で渡す。`now` の出来事が来たら、それと一緒に渡す。いつ渡すかは backend が決める（下の「いつ渡すか」）。
 - **決めるのは受信元の側だけ**である。receivers のプラグインは自分の設定（例: Slack ならメンションと DM は `now`）に従って出来事ごとに付ける。backend はそれを上書きしない。
-- 封筒で省いたときの既定は、receivers のプラグインなら `batch`。backend の中の受信元（`ui`・`cron`・`a2a`・`self`）は backend の設定で決め、既定はどれも `now`。`control` は常に `now`。
+- 封筒で省いたときの既定は、receivers のプラグインなら `batch`。backend の中の受信元（`ui`・`cron`・`a2a`・`self`）は backend の設定で決め、既定はどれも `now`。`control` と `heartbeat` は常に `now`。
 
 ### `inline`
 
@@ -53,6 +53,15 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 
 - エージェントの予約（[sandbox-api.md](sandbox-api.md) の「予約」）の時刻が来ると、backend が `source` が `cron` の出来事を列に入れる。
 - `payload` は予約の ID（`schedule_id`）と理由（`reason`）。`summary` は理由。
+
+### heartbeat の出来事
+
+- 起きている時間に、本体の最後のターンの終わりから決めた時間がたつと、backend が `source` が `heartbeat` の出来事を 1 件入れる（[ADR-0031](adr/0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md)）。いつ入れるか、入れないかは [backend.md](backend.md) の「heartbeat」。
+- `id` は `heartbeat@<入れた時刻>`、`occurred_at` は入れた時刻、`stream` は無い。`delivery` はいつも `now` で、待っている `batch` の出来事を連れていく。
+- `summary` は `no turn for <N> minutes`（N が 1 なら `minute`）。
+- `payload` は `since`（数え始めた時刻。最後のターンの終わり、まだターンが無ければ backend が立ち上がった時刻）と `quiet_minutes`（N）（型は `HeartbeatPayload`）。何をすべきかは書かない。
+- inline ではない。ターンには要約と場所だけが入る。
+- この出来事だけで始まり、ツールを 1 つも呼ばずに終わったターンでは、runner は畳む前の頼みを送らない。途中でほかの出来事が入ったターン、ほかの出来事と一緒に渡されたターンは、ほかのターンと同じく頼む（[ADR-0015](adr/0015-fold-ended-turns-before-they-are-sent.md)）。
 
 ### A2A の出来事
 
@@ -72,7 +81,7 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 
 - multipart では、封筒は `event` の部分（文字の欄でも、JSON のファイルでもよい）、ファイルは `file` の部分を繰り返す。ファイルの名前は部分の filename である。
 - 大きさの上限は、封筒とファイルを合わせた body の全体で 64 MiB。
-- backend の中の受信元（`ui`・`cron`・`a2a`・`self`・`control`）の名前の出来事は、取り込み口では断る（`400`）。それらは取り込み口を通らない。receivers のプラグインが夜の切り替えなどを起こせないようにするためである。
+- backend の中の受信元（`ui`・`cron`・`a2a`・`self`・`control`・`heartbeat`）の名前の出来事は、取り込み口では断る（`400`）。それらは取り込み口を通らない。receivers のプラグインが夜の切り替えなどを起こせないようにするためである。
 
 | 応答 | 意味 |
 | --- | --- |

@@ -478,7 +478,7 @@ function heartbeat(seq: number): DeliveredEvent {
     id: `heartbeat@2026-11-14T10:00:00.000Z`,
     occurred_at: "2026-11-14T10:00:00.000Z",
     received_at: "2026-11-14T10:00:00.000Z",
-    summary: "60 minutes with no turn",
+    summary: "no turn for 60 minutes",
     delivery: "now",
     inline: false,
     appended: { path: "/sources/heartbeat/2026-11-14.jsonl", lines: [seq, seq] },

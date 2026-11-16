@@ -32,6 +32,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_BATCH_QUIET_MINUTES` | `5` | `batch` の N（最後の 1 件から待つ分） |
 | `PENELOPE_BATCH_MAX_MINUTES` | `30` | `batch` の M（最初の 1 件から待つ最長の分） |
 | `PENELOPE_REDELIVER_MINUTES` | `5` | 渡して ack の無い出来事をもう一度渡すまでの分 |
+| `PENELOPE_HEARTBEAT_MINUTES` | なし | heartbeat の N（本体の最後のターンの終わりから待つ分）。無ければ heartbeat は無い（下の「heartbeat」） |
 | `PENELOPE_DELIVERY_UI`・`_CRON`・`_A2A`・`_SELF` | `now` | backend の中の受信元の `delivery` の既定 |
 | `PENELOPE_INLINE_SOURCES` | `ui` | inline の受信元（`,` で区切る）。`control` は書かなくても常に inline |
 | `PENELOPE_GIT_AUTHOR_NAME` | `penelope-backend` | `/memory` のコミットの作者の名前 |
@@ -100,6 +101,25 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - backend は切り替えの段を数えない。制御の出来事も、ほかの出来事と同じく、ack が無ければ `PENELOPE_REDELIVER_MINUTES` の後にもう一度渡すだけである。
 - 切り替えの知らせ（`POST /v1/sessions/rotated`）は記録に残す。
 - 切り替えの途中で runner が止まったときにどこからやり直すか、整理係のターンが失敗したときにどうするかは、runner が決める。
+
+## heartbeat
+
+[ADR-0031](adr/0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md) の、backend が何もない時間に入れる出来事の細部を決める。形は [events.md](events.md) の「heartbeat の出来事」。
+
+- `PENELOPE_HEARTBEAT_MINUTES` があるときだけ動く。既定は無し（切ってある）。
+- backend は 15 秒ごとに確かめ、次のすべてが揃えば heartbeat の出来事を 1 件入れる。遅れは最大で 15 秒である。
+  - 今が起きている時間（`PENELOPE_AWAKE_HOURS`）の中である。
+  - 本体（`main`）が待っている。途中経過の記録の最後が `turn_end` か、まだ記録が無い（「状態」）。
+  - その `turn_end` の時刻から N 分以上たっている。まだターンが無ければ、backend が立ち上がった時刻から数える。
+  - 渡す時が来ていて ack の無い出来事が 1 つも無い。渡す前のもの、渡してターンがまだ終わっていないものの両方を含む。`batch` で待っている途中のものは数えない。
+- 最後の条件で、次のときには入れない。
+  - 前の heartbeat を runner がまだ取っていない、またはそのターンが終わっていない。heartbeat は積み重ならない。
+  - オーナーのメッセージなど、ターンを始める出来事が渡るのを待っている。
+  - 夜の切り替えの間。制御の出来事は、新しいセッションが始まってから ack されるので、振り返りと整理係のターンの合い間にも入らない。
+- サブエージェントのターンは数えない。本体の記録だけを見る。
+- heartbeat のターンが終わると、その `turn_end` からまた数える。何もない時間が続けば、N 分ごとに入る。
+- 起きている時間の外で N 分を過ぎたときは、次に起きている時間が始まった最初の確かめで入る。夜の切り替えのターンの終わりから数えるので、N が夜の切り替えから朝までより短ければ、朝いちばんに入る。
+- `/sources` に書けずに入れられなかったときは、次の 15 秒で入れ直す。
 
 ## 予約
 

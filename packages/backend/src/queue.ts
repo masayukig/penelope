@@ -60,7 +60,7 @@ export class Queue {
    * and its attachments are written to /sources; when they cannot be, this
    * throws and nothing of it is kept, so the source sends it again.
    *
-   * `builtin` marks the backend's own sources (ui, cron, a2a, self, control),
+   * `builtin` marks the backend's own sources (ui, cron, a2a, self, control, heartbeat),
    * whose delivery defaults to the backend's setting instead of batch.
    */
   accept(event: Event, { builtin = false, attachments = [] }: { builtin?: boolean; attachments?: readonly Attachment[] } = {}): Accepted {
@@ -166,6 +166,14 @@ export class Queue {
     return times.length === 0 ? undefined : Math.min(...times);
   }
 
+  /**
+   * Whether an event is due and not acked: one waiting to be handed over, or
+   * handed over and its turn not over yet. A batch still held is not.
+   */
+  hasUnacked(): boolean {
+    return this.db.prepare("SELECT 1 FROM events WHERE acked_ms IS NULL AND due_ms IS NOT NULL LIMIT 1").get() !== undefined;
+  }
+
   /** Calls `listener` whenever a new event is taken in. Returns the way to stop. */
   onChange(listener: () => void): () => void {
     this.listeners.add(listener);
@@ -177,7 +185,7 @@ export class Queue {
   }
 
   private deliveryOf(event: Event, builtin: boolean): Delivery {
-    if (builtin && event.source === "control") return "now";
+    if (builtin && (event.source === "control" || event.source === "heartbeat")) return "now";
     if (event.delivery !== undefined) return event.delivery;
     return builtin ? (this.options.builtinDelivery[event.source] ?? "now") : "batch";
   }

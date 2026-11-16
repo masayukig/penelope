@@ -30,6 +30,8 @@ export type Config = {
   nightly: string;
   batch: { quietMs: number; maxMs: number };
   redeliverMs: number;
+  /** The heartbeat's quiet time (ADR-0031); none when it is off. */
+  heartbeatMs: number | undefined;
   builtinDelivery: Record<"ui" | "cron" | "a2a" | "self", Delivery>;
   inline: Set<string>;
   gitAuthor: { name: string; email: string };
@@ -175,6 +177,7 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
     nightly,
     batch: { quietMs: minutes("PENELOPE_BATCH_QUIET_MINUTES", 5), maxMs: minutes("PENELOPE_BATCH_MAX_MINUTES", 30) },
     redeliverMs: minutes("PENELOPE_REDELIVER_MINUTES", 5),
+    heartbeatMs: get("PENELOPE_HEARTBEAT_MINUTES") === undefined ? undefined : minutes("PENELOPE_HEARTBEAT_MINUTES", 0),
     builtinDelivery: {
       ui: delivery("PENELOPE_DELIVERY_UI"),
       cron: delivery("PENELOPE_DELIVERY_CRON"),
