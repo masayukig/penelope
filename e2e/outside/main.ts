@@ -3,8 +3,8 @@
 //   :53/udp   a name server for the test's names, all of them this container
 //   :443      HTTPS, by Host: the model's API, GitHub's OAuth and API, the
 //             cluster's API server and gated's keys, an app under the
-//             Sentinel's wildcard registration, and a host the Sentinel
-//             passes through
+//             Sentinel's wildcard registration, a host the Sentinel
+//             passes through, and Slack's Web API, Socket Mode and files
 //   :80       plain HTTP for the host the Sentinel passes through
 //   :8081     the control API the test reads what came here from, on loopback
 //
@@ -21,6 +21,7 @@ import process from "node:process";
 import { cluster, GATED, KUBERNETES } from "./cluster.ts";
 import { serveDns, type Lookup } from "./dns.ts";
 import { chunks, completion, type ChatMessage, script } from "./model.ts";
+import { SLACK, SLACK_FILES, SLACK_SOCKET, slack } from "./slack.ts";
 
 const env = (name: string) => {
   const value = process.env[name];
@@ -46,7 +47,8 @@ const GITHUB_API = "api.github.com";
 const PLAIN = "plain.example.net";
 /** An app under the Sentinel's wildcard registration. */
 const APP = "a.apps.example.com";
-const NAMES = new Set([MODEL, GITHUB, GITHUB_API, PLAIN, KUBERNETES, GATED, APP, "backend.example.com"]);
+const NAMES = new Set([MODEL, GITHUB, GITHUB_API, PLAIN, KUBERNETES, GATED, APP, "backend.example.com", SLACK, SLACK_SOCKET, SLACK_FILES]);
+const fakeSlack = slack({ app: secret("OUTSIDE_SLACK_APP_TOKEN_FILE"), bot: secret("OUTSIDE_SLACK_BOT_TOKEN_FILE") });
 const fakeCluster = cluster({
   backend: secret("OUTSIDE_KUBE_TOKEN_FILE"),
   sender: secret("OUTSIDE_SENDER_TOKEN_FILE"),
@@ -148,6 +150,8 @@ function outside(scheme: "https" | "http") {
       if (scheme === "https" && host === GITHUB_API) return githubApi(request, response);
       if (scheme === "https" && host === KUBERNETES) return fakeCluster.tokenReview(request, await body(request), response);
       if (scheme === "https" && host === GATED) return fakeCluster.gatedKeys(request, response);
+      if (scheme === "https" && host === SLACK) return fakeSlack.api(request, await body(request), response);
+      if (scheme === "https" && host === SLACK_FILES) return fakeSlack.file(request, response);
       if (scheme === "https" && host === APP) {
         await body(request);
         response.writeHead(200, { "content-type": "text/plain" });
@@ -189,11 +193,19 @@ async function control(request: http.IncomingMessage, response: http.ServerRespo
     const { subject, host } = JSON.parse(await body(request)) as { subject: string; host: string };
     return json(response, 200, { assertion: fakeCluster.assertion(subject, host) });
   }
+  const slackAnswer = fakeSlack.control(request.method ?? "", url.pathname, request.method === "POST" ? await body(request) : "");
+  if (slackAnswer) return json(response, slackAnswer.status, slackAnswer.value);
   json(response, 404, { error: "not found" });
 }
 
 const tls = { cert: readFileSync(env("OUTSIDE_CERT_FILE")), key: readFileSync(env("OUTSIDE_KEY_FILE")) };
-https.createServer(tls, outside("https")).listen(443);
+https
+  .createServer(tls, outside("https"))
+  .on("upgrade", (request, socket) => {
+    if (hostOf(request) === SLACK_SOCKET) fakeSlack.upgrade(request, socket);
+    else socket.end("HTTP/1.1 404 Not Found\r\nconnection: close\r\n\r\n");
+  })
+  .listen(443);
 http.createServer(outside("http")).listen(80);
 http.createServer((request, response) => void control(request, response)).listen(8081, "127.0.0.1");
 serveDns(53, NAMES, ADDRESS, (lookup) => lookups.push(lookup));

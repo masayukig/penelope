@@ -43,6 +43,8 @@ services:
       OUTSIDE_KUBE_TOKEN_FILE: /run/secrets/e2e/kube-token
       OUTSIDE_SENDER_TOKEN_FILE: /run/secrets/e2e/sender-token
       OUTSIDE_STRANGER_TOKEN_FILE: /run/secrets/e2e/stranger-token
+      OUTSIDE_SLACK_APP_TOKEN_FILE: /run/secrets/e2e/slack-app-token
+      OUTSIDE_SLACK_BOT_TOKEN_FILE: /run/secrets/e2e/slack-bot-token
     volumes:
       - ./.run:/run/secrets/e2e:ro
 
@@ -178,7 +180,9 @@ services:
       - sources:/sources:ro
 
   # The receivers with the Alertmanager plugin on, at /v1/webhooks/fraction,
-  # and the GitHub plugin, at /v1/webhooks/github (config/receivers.json). The test also runs its small sender
+  # the GitHub plugin, at /v1/webhooks/github, and the Slack plugin, which
+  # connects to the fake Slack under Slack's own names and trusts the
+  # outside's CA (config/receivers.json). The test also runs its small sender
   # (sender/send.ts) in this container, to post envelopes of its own to the
   # intake socket.
   receivers:
@@ -188,10 +192,15 @@ services:
       init: { condition: service_completed_successfully }
       volumes: { condition: service_completed_successfully }
       backend: { condition: service_started }
+    environment:
+      NODE_EXTRA_CA_CERTS: /run/secrets/e2e/outside-ca.crt
     volumes:
       - *resolv
       - ./config/receivers.json:/etc/penelope/receivers/config.json:ro
       - ./.run/alertmanager-token:/run/secrets/e2e/alertmanager-token:ro
       - ./.run/github-webhook-secret:/run/secrets/e2e/github-webhook-secret:ro
+      - ./.run/slack-app-token:/run/secrets/e2e/slack-app-token:ro
+      - ./.run/slack-bot-token:/run/secrets/e2e/slack-bot-token:ro
+      - ./.run/outside-ca.crt:/run/secrets/e2e/outside-ca.crt:ro
       - ./sender:/e2e/sender:ro
       - intake:/run/penelope/intake

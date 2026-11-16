@@ -3,7 +3,7 @@
 // the start, so that a slip of the pen is never ignored.
 import type { BuiltinSource } from "@penelope/contract";
 
-import { isObject, type PluginEnv, SettingsError, type WebhookHandler } from "./plugin.ts";
+import { type Connection, isObject, type PluginEnv, SettingsError, type WebhookHandler } from "./plugin.ts";
 import { PLUGINS } from "./plugins/index.ts";
 
 export const DEFAULT_CONFIG_FILE = "/etc/penelope/receivers/config.json";
@@ -17,8 +17,11 @@ const SEGMENT = /^[a-z0-9_-][a-z0-9._-]{0,127}$/;
 /** An activation's name, which is part of the URL /v1/webhooks/<name>. */
 const NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
-/** One plugin turned on under a name, with its handler made from its settings. */
-export type Activation = { name: string; plugin: string; source: string; kind: "webhook"; handle: WebhookHandler };
+/** One plugin turned on under a name, with its handler or its connection made from its settings. */
+export type Activation = { name: string; plugin: string; source: string } & (
+  | { kind: "webhook"; handle: WebhookHandler }
+  | { kind: "connection"; connection: Connection }
+);
 
 export type Config = {
   listen: { host: string; port: number };
@@ -112,13 +115,12 @@ function activate(plugins: unknown[], env: PluginEnv): Activation[] {
 
     const settings = item.settings ?? {};
     if (!isObject(settings)) return fail(`${at}.settings`, "must be an object");
-    let handle: WebhookHandler;
     try {
-      handle = plugin.create(settings, env);
+      if (plugin.kind === "webhook") return { name, plugin: plugin.name, source, kind: plugin.kind, handle: plugin.create(settings, env) };
+      return { name, plugin: plugin.name, source, kind: plugin.kind, connection: plugin.create(settings, env) };
     } catch (error) {
       if (error instanceof SettingsError) return fail(`${at}.settings.${error.field}`, error.why);
       throw error;
     }
-    return { name, plugin: plugin.name, source, kind: plugin.kind, handle };
   });
 }

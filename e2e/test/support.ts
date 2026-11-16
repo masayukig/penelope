@@ -139,6 +139,12 @@ export const outside = {
   seen: async () => (await control<{ seen: Seen[] }>("/seen")).seen,
   /** The TokenReviews the fake API server answered. */
   reviews: async () => (await control<{ reviews: { caller: string; outcome: string }[] }>("/reviews")).reviews,
+  /** What the fake Slack saw: its connections, the envelopes acknowledged, the Web API calls and the downloads. */
+  slack: () =>
+    control<{ connections: number; open: number; acks: string[]; calls: { method: string; token: string }[]; downloads: { path: string; token: string }[] }>("/slack"),
+  slackHistory: (messages: unknown[]) => control("/slack/history", { method: "POST", body: JSON.stringify({ messages }) }),
+  slackSend: (envelope: unknown) => control("/slack/send", { method: "POST", body: JSON.stringify(envelope) }),
+  slackDisconnect: () => control("/slack/disconnect", { method: "POST" }),
   /** What the fake gated would put on a call of `subject` to `host`. */
   assertion: async (subject: string, host: string) =>
     (await control<{ assertion: string }>("/assertion", { method: "POST", body: JSON.stringify({ subject, host }) })).assertion,

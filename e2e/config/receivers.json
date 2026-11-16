@@ -3,15 +3,34 @@
     {
       "name": "fraction",
       "plugin": "alertmanager",
-      "settings": { "token_file": "/run/secrets/e2e/alertmanager-token" }
+      "settings": {
+        "token_file": "/run/secrets/e2e/alertmanager-token"
+      }
     },
     {
       "name": "github",
       "plugin": "github",
       "settings": {
         "secret_file": "/run/secrets/e2e/github-webhook-secret",
-        "authors": ["renovate[bot]"],
-        "reviewers": ["example-operator"]
+        "authors": [
+          "renovate[bot]"
+        ],
+        "reviewers": [
+          "example-operator"
+        ]
+      }
+    },
+    {
+      "name": "slack",
+      "plugin": "slack",
+      "settings": {
+        "workspaces": [
+          {
+            "name": "work",
+            "app_token_file": "/run/secrets/e2e/slack-app-token",
+            "bot_token_file": "/run/secrets/e2e/slack-bot-token"
+          }
+        ]
       }
     }
   ]

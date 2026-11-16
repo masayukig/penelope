@@ -127,7 +127,7 @@ Slack のプラグインは、起きたことを 1 件ずつ出来事にする�
 | 削除 | `type: message_deleted`、元の発言の `ts` |
 | 絵文字 | `type: reaction_added` か `reaction_removed`、付けた発言の `ts`、絵文字の名前 |
 
-`payload` の形そのものは Slack のプラグインが決め、プラグインの文書に書く。読むための CLI（チャンネルの最近の流れやスレッドを今の姿に組み立てて出す）はプラグインが持ち、sandbox の image に入る。
+`payload` の形そのものは Slack のプラグインが決める（[receivers.md](receivers.md) の「Slack のプラグイン」の「`payload`」、型は `packages/slack` の `src/payload.ts`）。読むための CLI `penelope-slack`（チャンネルの最近の流れやスレッドを今の姿に組み立てて出す）はプラグインの package が持ち、sandbox の image に入る（同じく「描き方と読み取りの CLI」）。
 
 ## ターンに入る形
 

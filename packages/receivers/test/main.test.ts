@@ -34,7 +34,7 @@ test("anything else prints the usage and exits with 2", () => {
 test("serve does not start on settings it cannot use, and says why in one line", () => {
   const config = join(dir, "bad.json");
   writeFileSync(config, JSON.stringify({ plugins: [{ name: "fraction", plugin: "alertmanager", settings: { token_file: join(dir, "missing") } }] }));
-  const result = spawnSync(process.execPath, [MAIN, "serve"], { env: { ...process.env, PENELOPE_RECEIVERS_CONFIG: config }, encoding: "utf8" });
+  const result = spawnSync(process.execPath, ["--conditions=penelope-source", MAIN, "serve"], { env: { ...process.env, PENELOPE_RECEIVERS_CONFIG: config }, encoding: "utf8" });
   assert.equal(result.status, 2);
   assert.match(result.stderr, /^receivers: plugins\[0\]\.settings\.token_file: [^\n]*\n$/);
 });
@@ -42,7 +42,7 @@ test("serve does not start on settings it cannot use, and says why in one line",
 test("serve answers /healthz and exits on SIGTERM", async () => {
   const config = join(dir, "good.json");
   writeFileSync(config, JSON.stringify({ listen: "127.0.0.1:0", intake: join(dir, "backend.sock") }));
-  const child = spawn(process.execPath, [MAIN, "serve"], { env: { ...process.env, PENELOPE_RECEIVERS_CONFIG: config }, stdio: ["ignore", "ignore", "pipe"] });
+  const child = spawn(process.execPath, ["--conditions=penelope-source", MAIN, "serve"], { env: { ...process.env, PENELOPE_RECEIVERS_CONFIG: config }, stdio: ["ignore", "ignore", "pipe"] });
   let stderr = "";
   const port = await new Promise<number>((resolve, reject) => {
     child.stderr.setEncoding("utf8");
