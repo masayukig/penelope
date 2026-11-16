@@ -124,7 +124,7 @@ RUN npm ci --omit=dev --ignore-scripts --workspace=@penelope/runner \
 # these ARGs from GitHub releases, preserving the fetch script's tag/asset format.
 FROM --platform=$BUILDPLATFORM golang:1.27.4-trixie AS sandbox-tools
 ARG TARGETARCH
-ARG KUBECTL_VERSION=v1.36.6
+ARG KUBECTL_VERSION=v1.37.2
 ARG HELM_VERSION=v4.3.2
 ARG KUSTOMIZE_VERSION=v5.8.3
 ARG SOPS_VERSION=v3.13.3
