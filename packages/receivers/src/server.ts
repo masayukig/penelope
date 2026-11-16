@@ -2,14 +2,17 @@
 // and each webhook activation under /v1/webhooks/<name>. It is called from
 // outside the Pod, so every webhook request goes through its plugin's check of
 // the sender. The sender is told of success only once the intake took every
-// event the request made (ADR-0023).
+// event the request made (ADR-0023). Beside it run the connection plugins,
+// which open connections of their own (ADR-0028); what they hand over goes to
+// the intake the same way.
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 
 import type { Event } from "@penelope/contract";
 
 import type { Activation, Config } from "./config.ts";
-import { type IntakeAnswer, sendEvent } from "./intake.ts";
+import { type IntakeAnswer, type IntakeFile, sendEvent } from "./intake.ts";
+import type { ConnectionEvent, ConnectionHandle, WebhookHandler } from "./plugin.ts";
 
 /** The body of one webhook request: 1 MiB at most. */
 export const MAX_BODY_BYTES = 1024 * 1024;
@@ -20,7 +23,7 @@ export type Receivers = { port: number; close: () => Promise<void> };
 
 export type Options = {
   log?: (line: string) => void;
-  send?: (socketPath: string, event: Event, timeoutMs: number) => Promise<IntakeAnswer>;
+  send?: (socketPath: string, event: Event, timeoutMs: number, files?: readonly IntakeFile[]) => Promise<IntakeAnswer>;
   now?: () => Date;
 };
 
@@ -28,7 +31,9 @@ export async function startReceivers(config: Config, options: Options = {}): Pro
   const log = options.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   const send = options.send ?? sendEvent;
   const now = options.now ?? (() => new Date());
-  const byName = new Map(config.activations.map((activation) => [activation.name, activation]));
+  const webhooks = new Map(
+    config.activations.flatMap((activation) => (activation.kind === "webhook" ? [[activation.name, { ...activation, handle: activation.handle }] as const] : [])),
+  );
   let closing = false;
 
   const server = http.createServer((request, response) => {
@@ -49,7 +54,7 @@ export async function startReceivers(config: Config, options: Options = {}): Pro
       response.end(request.method === "HEAD" ? undefined : "ok");
       return;
     }
-    const activation = byName.get(WEBHOOK.exec(path)?.[1] ?? "");
+    const activation = webhooks.get(WEBHOOK.exec(path)?.[1] ?? "");
     if (!activation) {
       log(line("-", 404));
       return answer(response, 404);
@@ -70,7 +75,7 @@ export async function startReceivers(config: Config, options: Options = {}): Pro
   }
 
   /** What the plugin makes of the request, sent to the intake one event at a time. */
-  async function take(activation: Activation, webhook: Parameters<Activation["handle"]>[0]): Promise<number> {
+  async function take(activation: Activation & { handle: WebhookHandler }, webhook: Parameters<WebhookHandler>[0]): Promise<number> {
     const outcome = activation.handle(webhook);
     if (outcome.kind === "refuse") {
       log(line(activation.name, outcome.status, 0, 0, outcome.status === 400 ? outcome.reason : undefined));
@@ -92,6 +97,19 @@ export async function startReceivers(config: Config, options: Options = {}): Pro
     return 200;
   }
 
+  /** A connection plugin's events, sent in order until the intake does not take one. */
+  async function deliver(activation: Activation, events: readonly ConnectionEvent[]): Promise<boolean> {
+    for (const { files, ...made } of events) {
+      const event: Event = { source: activation.source, ...made };
+      const answered = await send(config.intake, event, config.intakeTimeoutMs, files ?? []);
+      if (!answered.taken) {
+        log(`receivers: connection=${activation.name} intake did not take ${event.source}/${event.id}: ${answered.why}`);
+        return false;
+      }
+    }
+    return true;
+  }
+
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(config.listen.port, config.listen.host, () => {
@@ -100,14 +118,28 @@ export async function startReceivers(config: Config, options: Options = {}): Pro
     });
   });
 
+  const connections: ConnectionHandle[] = config.activations.flatMap((activation) =>
+    activation.kind === "connection"
+      ? [
+          activation.connection.start({
+            deliver: (events) => deliver(activation, events),
+            log: (line) => log(`receivers: connection=${activation.name} ${line}`),
+            now,
+          }),
+        ]
+      : [],
+  );
+
   return {
     port: (server.address() as AddressInfo).port,
-    close: () =>
-      new Promise<void>((resolve, reject) => {
-        closing = true;
+    close: async () => {
+      closing = true;
+      const closed = new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
         server.closeIdleConnections();
-      }),
+      });
+      await Promise.all([closed, ...connections.map((connection) => connection.stop())]);
+    },
   };
 }
 

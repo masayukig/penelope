@@ -1,17 +1,44 @@
 // Sending an event to the backend's intake: `POST /v1/events` on its Unix
 // socket (docs/events.md, "取り込み口"). Only a 202 is taken; anything else,
-// no connection, or no answer in time is not.
+// no connection, or no answer in time is not. An event with files goes as
+// multipart/form-data: the envelope in the `event` part, each file in a
+// `file` part.
+import { randomBytes } from "node:crypto";
 import http from "node:http";
 
 import type { Event } from "@penelope/contract";
 
 export type IntakeAnswer = { taken: true } | { taken: false; why: string };
 
+/** A file sent with an event, as one of its attachments. */
+export type IntakeFile = { name: string; type: string; data: Uint8Array };
+
 /** How much of a refusal's body is kept for the log. */
 const KEPT_BYTES = 1024;
 
-export function sendEvent(socketPath: string, event: Event, timeoutMs: number): Promise<IntakeAnswer> {
-  const body = Buffer.from(JSON.stringify(event), "utf8");
+/** The body and its type: JSON, or multipart/form-data when there are files. */
+function bodyOf(event: Event, files: readonly IntakeFile[]): { type: string; body: Buffer } {
+  const json = Buffer.from(JSON.stringify(event), "utf8");
+  if (files.length === 0) return { type: "application/json", body: json };
+  const boundary = `penelope-${randomBytes(16).toString("hex")}`;
+  // A quote, a backslash or a line break would end the header's value; the backend makes the name safe for /sources itself.
+  const quoted = (name: string) => name.replace(/[\u0000-\u001f"\\\u007f]/g, "_");
+  const parts: Buffer[] = [
+    Buffer.from(`--${boundary}\r\ncontent-disposition: form-data; name="event"\r\ncontent-type: application/json\r\n\r\n`),
+    json,
+  ];
+  for (const file of files) {
+    parts.push(
+      Buffer.from(`\r\n--${boundary}\r\ncontent-disposition: form-data; name="file"; filename="${quoted(file.name)}"\r\ncontent-type: ${file.type || "application/octet-stream"}\r\n\r\n`),
+      Buffer.from(file.data),
+    );
+  }
+  parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+  return { type: `multipart/form-data; boundary=${boundary}`, body: Buffer.concat(parts) };
+}
+
+export function sendEvent(socketPath: string, event: Event, timeoutMs: number, files: readonly IntakeFile[] = []): Promise<IntakeAnswer> {
+  const { type, body } = bodyOf(event, files);
   return new Promise((resolve) => {
     let settled = false;
     const settle = (answer: IntakeAnswer) => {
@@ -21,7 +48,7 @@ export function sendEvent(socketPath: string, event: Event, timeoutMs: number): 
       resolve(answer);
     };
     const request = http.request(
-      { socketPath, path: "/v1/events", method: "POST", headers: { "content-type": "application/json", "content-length": body.length } },
+      { socketPath, path: "/v1/events", method: "POST", headers: { "content-type": type, "content-length": body.length } },
       (response) => {
         const parts: Buffer[] = [];
         let kept = 0;

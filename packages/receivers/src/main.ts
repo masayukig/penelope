@@ -36,8 +36,12 @@ async function serve(): Promise<void> {
   }
   const receivers = await startReceivers(config);
   const host = config.listen.host.includes(":") ? `[${config.listen.host}]` : config.listen.host;
-  const names = config.activations.map((activation) => `${activation.name} (${activation.plugin}, source ${activation.source})`);
-  process.stderr.write(`receivers: listening on ${host}:${receivers.port}; webhooks: ${names.join(", ") || "none"}\n`);
+  const names = (kind: string) =>
+    config.activations
+      .filter((activation) => activation.kind === kind)
+      .map((activation) => `${activation.name} (${activation.plugin}, source ${activation.source})`)
+      .join(", ") || "none";
+  process.stderr.write(`receivers: listening on ${host}:${receivers.port}; webhooks: ${names("webhook")}; connections: ${names("connection")}\n`);
   const stop = () => {
     receivers.close().then(
       () => process.exit(0),

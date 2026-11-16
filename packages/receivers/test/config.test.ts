@@ -49,7 +49,7 @@ describe("the receivers' settings", () => {
     assert.equal(config.activations.length, 1);
     const [activation] = config.activations;
     assert.deepEqual([activation!.name, activation!.plugin, activation!.source, activation!.kind], ["fraction", "alertmanager", "alertmanager", "webhook"]);
-    assert.equal(typeof activation!.handle, "function");
+    assert.equal(activation!.kind === "webhook" && typeof activation!.handle, "function");
   });
 
   test("take the GitHub plugin of the example of docs/receivers.md beside Alertmanager", () => {
@@ -99,7 +99,7 @@ describe("the receivers do not start on settings", () => {
   });
 
   test("with a plugin they do not know", () => {
-    refused({ plugins: [{ ...fraction, plugin: "slack" }] }, /^plugins\[0\]\.plugin: /);
+    refused({ plugins: [{ ...fraction, plugin: "irc" }] }, /^plugins\[0\]\.plugin: /);
     refused({ plugins: [{ name: "fraction" }] }, /^plugins\[0\]\.plugin: /);
   });
 
