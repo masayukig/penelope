@@ -124,6 +124,8 @@ services:
       PENELOPE_NIGHTLY_CRON: ${PENELOPE_E2E_NIGHTLY_CRON:-0 4 1 1 *}
       # The shortest wait for a batch, so that GitHub's batch events reach a turn of their own in the test.
       PENELOPE_BATCH_QUIET_MINUTES: "1"
+      # Off until the heartbeat's scenario makes the backend again with it.
+      PENELOPE_HEARTBEAT_MINUTES: ${PENELOPE_E2E_HEARTBEAT_MINUTES:-}
       PENELOPE_AVATAR: penelope
       PENELOPE_AGENT_NAME: E2E Agent
       NODE_EXTRA_CA_CERTS: /run/secrets/e2e/outside-ca.crt

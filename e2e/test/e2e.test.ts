@@ -581,6 +581,45 @@ describe("the Pod end to end", () => {
     assert.match(log, /Turn [0-9a-f-]{36}\nAgent: e2e-sub\n+notes\/e2e-sub\.md\n/);
   }));
 
+  it("makes a turn of a heartbeat after the quiet minutes, and asks nothing before folding it", track(async () => {
+    // Guards against: no heartbeat after a quiet stretch (ADR-0031), a heartbeat that carries more than the fact,
+    // a second one queued before the first one's turn has ended, or a heartbeat's turn with no tool costing a
+    // second call for the request before folding.
+    // The backend is made again with a heartbeat after one quiet minute; the next scenario makes it again without.
+    composeEnv.PENELOPE_E2E_HEARTBEAT_MINUTES = "1";
+    try {
+      stream.close();
+      compose(["up", "--detach", "--no-deps", "backend"]);
+      await eventually("the backend's health", async () => ((await browser.request("/healthz")).status === 200 ? true : undefined));
+
+      // The second heartbeat comes only after the first one's turn has ended and a quiet minute has gone.
+      const isHeartbeat = (call: ModelCall) => where(call).input.includes('"source":"heartbeat"');
+      const [first, second] = await eventually(
+        "two heartbeats' turns",
+        async () => {
+          const calls = (await outside.modelCalls()).filter(isHeartbeat);
+          return calls.length >= 2 ? calls : undefined;
+        },
+        240_000,
+      );
+      assert.ok(Date.parse(second!.at) - Date.parse(first!.at) >= 60_000, "counted again from the end of the first one's turn");
+
+      const lines = eventLines(where(first!).input);
+      assert.equal(lines.length, 1, "the heartbeat alone");
+      const [line] = lines as (TurnLine & Record<string, unknown>)[];
+      assert.equal(line!.source, "heartbeat");
+      assert.equal(line!.delivery, "now");
+      assert.equal(line!.summary, "no turn for 1 minute");
+      assert.match(String((line!.appended as { path: string }).path), /^\/sources\/heartbeat\/\d{4}-\d{2}-\d{2}\.jsonl$/);
+      assert.ok(where(first!).system.includes("`heartbeat`"), "the system prompt says what a heartbeat is");
+
+      // No turn of the test is asked (outside/model.ts), so any request before folding is the heartbeat's.
+      assert.ok(!(await outside.modelCalls()).some((call) => where(call).input.includes("about to be folded")), "no request before folding");
+    } finally {
+      delete composeEnv.PENELOPE_E2E_HEARTBEAT_MINUTES;
+    }
+  }));
+
   // Last, as from here on a night comes every minute.
   it("switches the session at night: reflection, curator, a new session, and handoff.md committed", track(async () => {
     // Guards against: the nightly switch not running through, or the new session not starting from handoff.md.
