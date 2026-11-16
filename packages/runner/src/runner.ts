@@ -57,6 +57,8 @@ export interface RunnerOptions {
 interface Turn {
   session: AgentSession;
   seqs: number[];
+  /** Whether every event of the turn so far is a heartbeat (ADR-0031). */
+  heartbeat: boolean;
   /** The steers and follow-ups handed to Pi during the turn, until Pi has them. */
   queued: Promise<unknown>[];
 }
@@ -69,6 +71,8 @@ const sleep = (ms: number, signal: AbortSignal) =>
       resolve();
     });
   });
+
+const isHeartbeat = (event: DeliveredEvent) => event.source === "heartbeat";
 
 /** YYYY-MM-DD in the runner's time zone. */
 const today = () => new Date().toLocaleDateString("sv-SE");
@@ -213,6 +217,7 @@ export class Runner {
     // steer, so that the turn sees it with what led up to it. Batched events
     // alone follow the turn.
     turn.seqs.push(...events.map((event) => event.seq));
+    turn.heartbeat &&= events.every(isHeartbeat);
     const steer = events.some((event) => event.delivery === "now");
     turn.queued.push(
       this.input(events).then(([text, images]) =>
@@ -251,6 +256,7 @@ export class Runner {
         events.map((event) => event.seq),
         true,
         images,
+        events.every(isHeartbeat),
       );
     }
   }
@@ -270,7 +276,8 @@ export class Runner {
    * An ordinary turn is one of her day's session, made of events: events can
    * join it, and when it ends it is marked so that it is folded from then on
    * (ADR-0015). One that ended without any text of hers is first asked, once,
-   * for what she wants to keep. The nightly reflection and the curator's turn
+   * for what she wants to keep, unless it was a heartbeat's alone and called
+   * no tool, so that nothing happened in it (ADR-0031). The nightly reflection and the curator's turn
    * are not ordinary.
    */
   private async turnOf(
@@ -279,19 +286,23 @@ export class Runner {
     seqs: number[],
     ordinary = true,
     images?: ImageContent[],
+    heartbeat = false,
   ): Promise<void> {
     const recorder = new TurnRecorder(randomUUID(), () => new Date().toISOString(), (activity) => this.send(activity));
     let spoke = false;
+    let called = false;
     let compactions = 0;
     const unsubscribe = session.subscribe((event) => {
       recorder.handle(event);
       if (event.type === "message_update" && event.assistantMessageEvent.type === "text_end") {
         spoke ||= event.assistantMessageEvent.content.trim() !== "";
+      } else if (event.type === "message_update" && event.assistantMessageEvent.type === "toolcall_end") {
+        called = true;
       } else if (event.type === "compaction_end" && event.result && !event.aborted) {
         compactions++;
       }
     });
-    const turn: Turn = { session, seqs: [...seqs], queued: [] };
+    const turn: Turn = { session, seqs: [...seqs], heartbeat, queued: [] };
     if (ordinary) this.turn = turn;
     this.folded = 0;
     recorder.start();
@@ -321,7 +332,8 @@ export class Runner {
       if (ordinary) this.turn = undefined;
     }
     if (ordinary && !failed) {
-      if (this.config.turnFold && !spoke && !this.stopping) {
+      const idle = turn.heartbeat && !called;
+      if (this.config.turnFold && !spoke && !idle && !this.stopping) {
         asked = true;
         await this.ask(session, recorder.turnId);
       }

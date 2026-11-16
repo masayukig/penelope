@@ -122,6 +122,15 @@ test("the system prompt says that other agents ask over A2A and how they are ans
   assert.ok(prompt.includes("`reply_to_agent`"));
 });
 
+test("the system prompt says what a heartbeat event is, and nothing of what to do with it", async () => {
+  // Guards against: a \`heartbeat\` event she cannot tell from the others (ADR-0031).
+  const places = await memory({});
+  const prompt = systemPrompt(identity, places, await readPromptFiles(places.memory, 1000));
+  const lines = prompt.split("\n").filter((line) => line.includes("`heartbeat`"));
+  assert.equal(lines.length, 1);
+  assert.match(lines[0]!, /no turn/);
+});
+
 test("the owner's skills are named with their place, which she cannot change", async () => {
   // Guards against: skills she finds listed without knowing where they are, or taking them for hers to edit.
   const places = { ...(await memory({})), ownerSkills: "/skills" };
