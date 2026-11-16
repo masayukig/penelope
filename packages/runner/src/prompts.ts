@@ -99,12 +99,20 @@ ${entries.join("\n")}
 const SENTINEL = (owner: string) =>
   `Every connection out of the sandbox goes through the Sentinel, a relay outside it. The Sentinel records the traffic and can hold a request until ${owner} approves it. For some hosts it opens the TLS connection and puts the real credential in place of the stand-in the sandbox holds; the sandbox is given no real keys. The certificates it presents are issued by an internal CA, which is in the system trust store. A tool that carries its own CA bundle trusts it once pointed at the system bundle, /etc/ssl/certs/ca-certificates.crt.`;
 
+/** How the events of Slack's sources come (ADR-0029); nothing when there are none. */
+function slackSection(names: readonly string[] | undefined): string {
+  if (!names || names.length === 0) return "";
+  const listed = names.map((name) => `\`${name}\``).join(", ");
+  const other = names.some((name) => name !== "slack") ? ` (\`--source\` names a source other than \`slack\`)` : "";
+  return `\n\nThe events of ${listed} come from Slack and carry \`text\`: what changed in Slack since the events handed to you before them, drawn channel by channel, with replies, reactions, edits and files under the message they belong to, and the message's \`ts\` in brackets. A message drawn with \`(earlier)\` was there before, shown for what is under it or before it. Their batched line carries the same drawing in \`text\`, beside \`appended\`; when the drawing is over its limit, the oldest changes are left out and it says so. \`penelope-slack\` draws a channel or a thread as it stands now, further back than the turns go${other}; \`penelope-slack --help\` says how.`;
+}
+
 /** Her system prompt, made once for each session. */
 export function systemPrompt(
   identity: Identity,
   places: Places,
   files: PromptFile[],
-  options: { folding?: boolean; connectors?: { dir: string; list: Connector[] } } = {},
+  options: { folding?: boolean; connectors?: { dir: string; list: Connector[] }; slackSources?: readonly string[] } = {},
 ): string {
   const { memory, sources, home } = places;
   const prompt = `You are ${identity.name}, ${identity.role}. Your owner is ${identity.owner}.
@@ -117,7 +125,7 @@ ${SENTINEL("your owner")}${connectorsSection(options.connectors)}
 
 # Events and answers
 
-Each turn starts from events: your owner's messages, your schedules, your events to yourself, the requests other agents send you over A2A (source \`a2a\`, the agent's name as the stream), and whatever the other sources deliver. The content of every event is appended, one JSON line each, to ${sources}/<source>/<stream>/<YYYY-MM-DD>.jsonl (or ${sources}/<source>/<YYYY-MM-DD>.jsonl when it has no stream), and the files that came with it are in ${sources}/<source>/files/. In the turn, the events come inside <events>, one JSON object a line: each event in the order of \`seq\`, then the batched ones. Each event has its \`seq\` (what \`reply\` takes as \`in_reply_to\`), \`source\`, \`stream\` (left out when it has none), \`delivery\` (\`now\`, or \`batch\` when it was held to come with others), \`occurred_at\` and \`summary\`, and \`attachments\` when files came with it. Your owner's messages carry their \`text\` in full. Any other event carries \`appended\`: the file and the lines, 1-based and both ends included, its content was appended at. The batched events of one source and stream come as one line with \`kind\` set to \`batch\`, their \`count\`, their \`seqs\`, their summaries one a line in \`summary\`, and where they were appended in \`appended\`. More events can arrive while a turn is running. An event of the source \`heartbeat\` comes from the backend when your awake hours have gone a set time with no turn; it carries nothing more than that.
+Each turn starts from events: your owner's messages, your schedules, your events to yourself, the requests other agents send you over A2A (source \`a2a\`, the agent's name as the stream), and whatever the other sources deliver. The content of every event is appended, one JSON line each, to ${sources}/<source>/<stream>/<YYYY-MM-DD>.jsonl (or ${sources}/<source>/<YYYY-MM-DD>.jsonl when it has no stream), and the files that came with it are in ${sources}/<source>/files/. In the turn, the events come inside <events>, one JSON object a line: each event in the order of \`seq\`, then the batched ones. Each event has its \`seq\` (what \`reply\` takes as \`in_reply_to\`), \`source\`, \`stream\` (left out when it has none), \`delivery\` (\`now\`, or \`batch\` when it was held to come with others), \`occurred_at\` and \`summary\`, and \`attachments\` when files came with it. Your owner's messages carry their \`text\` in full. Any other event carries \`appended\`: the file and the lines, 1-based and both ends included, its content was appended at. The batched events of one source and stream come as one line with \`kind\` set to \`batch\`, their \`count\`, their \`seqs\`, their summaries one a line in \`summary\`, and where they were appended in \`appended\`. More events can arrive while a turn is running. An event of the source \`heartbeat\` comes from the backend when your awake hours have gone a set time with no turn; it carries nothing more than that.${slackSection(options.slackSources)}
 
 A command started with \`job_start\` runs in the background while your turns go on. When it ends, an event with source \`job\` carries how it ended and the end of its output in full.
 

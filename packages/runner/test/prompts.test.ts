@@ -245,3 +245,12 @@ test("a sub-agent's system prompt without a role's body is the fixed part alone"
   const prompt = subAgentSystemPrompt(identity, places, { name: "bare", purpose: "p", cwd: "/home/agent/agents/bare" });
   assert.ok(!prompt.includes("/memory/agents/"));
 });
+
+test("with Slack's sources, the system prompt says how their events come and names the CLI", async () => {
+  // Guards against: drawn Slack text she cannot tell from a payload, or a CLI she does not know is there (ADR-0029).
+  const places = await memory({});
+  const prompt = systemPrompt(identity, places, [], { slackSources: ["slack", "slack-home"] });
+  assert.ok(prompt.includes("`slack`") && prompt.includes("`slack-home`"), "the sources are named");
+  assert.ok(prompt.includes("penelope-slack"));
+  assert.ok(!systemPrompt(identity, places, []).includes("penelope-slack"), "nothing of Slack without its sources");
+});

@@ -30,6 +30,7 @@ test("the required settings and the defaults", () => {
     imageMaxBytes: 5242880,
     pollWaitSeconds: 30,
     turnFold: true,
+    slack: { sources: [], maxChars: 6000 },
   });
 });
 
@@ -103,4 +104,12 @@ test("numbers are positive integers", () => {
 test("folding is on or off", () => {
   assert.equal(readConfig({ ...required, PENELOPE_TURN_FOLD: "on" }).turnFold, true);
   assert.throws(() => readConfig({ ...required, PENELOPE_TURN_FOLD: "yes" }), ConfigError);
+});
+
+test("the sources drawn with Slack's drawing and the limit of their text", () => {
+  // Guards against: a deployment whose Slack source is named otherwise left undrawn, or a limit it cannot set (ADR-0029).
+  const config = readConfig({ ...required, PENELOPE_SLACK_SOURCES: "slack, slack-home", PENELOPE_SLACK_MAX_CHARS: "3000" });
+  assert.deepEqual(config.slack, { sources: ["slack", "slack-home"], maxChars: 3000 });
+  assert.throws(() => readConfig({ ...required, PENELOPE_SLACK_SOURCES: "slack,../x" }), ConfigError);
+  assert.throws(() => readConfig({ ...required, PENELOPE_SLACK_MAX_CHARS: "0" }), ConfigError);
 });

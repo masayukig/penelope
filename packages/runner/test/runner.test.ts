@@ -447,6 +447,33 @@ test("a turn that ends without her own text is asked once; then it is folded", a
   assert.ok(counts.every((line) => !line.includes("pods?") && !line.includes("pods-output")), "no text of the turns");
 });
 
+test("Slack's changes are drawn into the turn, and stay drawn once it is folded", async () => {
+  // Guards against: Slack's events reaching the turn as raw payloads, or the drawn text lost when the turn is folded (ADR-0029, ADR-0015).
+  const { fake, start, calls, config } = await world({ slackSources: ["slack"] });
+  const channel = { id: "C0DEV", name: "dev", type: "channel" };
+  const message = (ts: string, text: string) => ({ type: "message", workspace: "work", channel, ts, user: { id: "U0ALICE", name: "alice" }, own: false, mention: true, text });
+  const lines = [
+    { seq: 1, received_at: "2026-11-16T09:00:00Z", occurred_at: "2026-11-16T09:00:00Z", source: "slack", stream: "work.dev", id: "work/C0DEV/1", summary: "work #dev alice: the deploy failed", payload: message("1794819600.000100", "the deploy failed") },
+    { seq: 2, received_at: "2026-11-16T09:01:00Z", occurred_at: "2026-11-16T09:01:00Z", source: "slack", stream: "work.dev", id: "work/C0DEV/2", summary: "work #dev alice: can you look?", payload: message("1794819660.000100", "can you look?") },
+  ];
+  await mkdir(join(config.sourcesDir, "slack", "work.dev"), { recursive: true });
+  await writeFile(join(config.sourcesDir, "slack", "work.dev", "2026-11-16.jsonl"), lines.map((line) => `${JSON.stringify(line)}\n`).join(""));
+  await start(silent);
+  const mention = lines[1]!;
+  fake.push({ ...mention, delivery: "now", inline: true, appended: { path: join(config.sourcesDir, "slack/work.dev/2026-11-16.jsonl"), lines: [2, 2] } });
+  await until(() => acked(fake).includes(2));
+
+  fake.push(ui(3, "thanks"));
+  await until(() => acked(fake).includes(3));
+  const next = firstCallOf(calls, "thanks");
+  const [line] = events(next.userTexts[0]!);
+  assert.equal(line!.seq, 2);
+  assert.match(line!.text as string, /^work #dev \(channel C0DEV, stream work\.dev\)\n/);
+  assert.match(line!.text as string, /\(earlier\): "the deploy failed"/, "what led up to it is drawn from /sources");
+  assert.match(line!.text as string, /alice \[1794819660\.000100\]: can you look\?/);
+  assert.ok(next.systemPrompt.includes("penelope-slack"));
+});
+
 test("no tool runs in the answer to the request before folding", async () => {
   const { fake, start, calls, config } = await world();
   const touched = join(config.home, "touched");

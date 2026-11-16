@@ -44,6 +44,12 @@ export type TurnBatch = TurnLineBase & {
   summary: string;
   /** Where they were appended: per file, with touching ranges merged, in order. */
   appended: Appended[];
+  /**
+   * What they changed, drawn as text: only for a source drawn with Slack's
+   * drawing (ADR-0029). Changes left out to keep under the limit are named
+   * in it, and stay in `seqs` and `appended`.
+   */
+  text?: string;
 };
 
 /** One line inside `<events>`. */
