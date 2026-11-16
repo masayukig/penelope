@@ -299,7 +299,7 @@ describe("the Pod end to end", () => {
 
   it("has no real key in the sandbox, and only its surrogates", track(async () => {
     // Guards against: a real key, or the intake, becoming reachable from the sandbox.
-    const keys = ["model-key", "backend-token", "github-client-secret", "kube-token", "sender-token", "stranger-token", "alertmanager-token", "github-webhook-secret", "sentinel-ca.key", "outside-ca.key", "outside.key"]
+    const keys = ["model-key", "backend-token", "github-client-secret", "kube-token", "sender-token", "stranger-token", "alertmanager-token", "github-webhook-secret", "slack-app-token", "slack-bot-token", "sentinel-ca.key", "outside-ca.key", "outside.key"]
       .map((name) => readFileSync(join(RUN_DIR, name), "utf8").trim().split("\n").filter((line) => line && !line.startsWith("-----")))
       .flat();
     const found = exec(
@@ -465,6 +465,84 @@ describe("the Pod end to end", () => {
       [line.source, line.stream, line.count, line.summary, line.appended],
       ["github", "example-org.example-repo", 1, "[review requested] example-org/example-repo#7: E2E-GITHUB Update dependency example to v1.2.3", [{ path: file, lines: [1, 1] }]],
     );
+  }));
+
+  it("receives Slack over Socket Mode, fills in after a reconnection, and acknowledges what the intake took", track(async () => {
+    // Guards against: the receivers not reaching Slack under its own names, an envelope acknowledged before the intake
+    // took it, a retry written twice, a file not sent beside its message, the fill-in after a reconnection missing
+    // what was said while away, or the reading CLI not drawing it in the sandbox.
+    const connected = await eventually("the Slack connection", async () => {
+      const seen = await outside.slack();
+      return seen.open > 0 ? seen : undefined;
+    });
+    const tokenOf = (method: string) => connected.calls.find((call) => call.method === method)?.token;
+    assert.equal(tokenOf("apps.connections.open"), "app", "the connection is opened with the app-level token");
+    assert.equal(tokenOf("auth.test"), "bot", "the bot is asked who it is with the bot token");
+
+    // Said while the receivers were away: fetched again after the reconnection Slack asks for.
+    const now = Date.now() / 1000;
+    const away = `${Math.floor(now) - 120}.000100`;
+    await outside.slackHistory([{ type: "message", user: "U0ALICE", text: "E2E-SLACK-AWAY said while away", ts: away }]);
+    await outside.slackDisconnect();
+    await eventually("the second connection", async () => ((await outside.slack()).connections >= connected.connections + 1 ? true : undefined));
+
+    // A mention with an image, sent twice as Slack retries it.
+    const ts = `${Math.floor(now)}.000200`;
+    const envelope = {
+      envelope_id: "e2e-envelope-1",
+      type: "events_api",
+      accepts_response_payload: false,
+      retry_attempt: 0,
+      retry_reason: "",
+      payload: {
+        token: "e2e-verification-token",
+        team_id: "T0E2E",
+        api_app_id: "A0E2E",
+        type: "event_callback",
+        event_id: "Ev0E2E0001",
+        event_time: Math.floor(now),
+        event: {
+          type: "message",
+          subtype: "file_share",
+          channel: "C0DEV",
+          channel_type: "channel",
+          user: "U0ALICE",
+          text: "<@U0E2E> E2E-SLACK-MENTION what is this?",
+          ts,
+          files: [{ id: "F0E2E", name: "e2e.png", mimetype: "image/png", size: 70, url_private_download: "https://files.slack.com/files-pri/T0E2E-F0E2E/e2e.png" }],
+        },
+      },
+    };
+    await outside.slackSend(envelope);
+    await eventually("the ack", async () => ((await outside.slack()).acks.includes("e2e-envelope-1") ? true : undefined));
+    await outside.slackSend({ ...envelope, envelope_id: "e2e-envelope-2", retry_attempt: 1, retry_reason: "timeout" });
+    await eventually("the retry's ack", async () => ((await outside.slack()).acks.includes("e2e-envelope-2") ? true : undefined));
+    assert.ok((await outside.slack()).downloads.every((download) => download.token === "bot"), "the file is fetched with the bot token");
+
+    const file = `/sources/slack/work.dev/${new Date().toISOString().slice(0, 10)}.jsonl`;
+    const lines = exec("sandbox", `cat ${file}`).stdout.trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(
+      lines.map((line) => [line.id, line.payload.type, line.payload.fetched ?? false]),
+      [
+        [`work/C0DEV/${away}`, "message", true],
+        [`work/C0DEV/${ts}`, "message", false],
+      ],
+      "one line each: the retry is a duplicate",
+    );
+    assert.equal(lines[1].attachments.length, 1);
+    assert.equal(exec("sandbox", `head -c 8 ${lines[1].attachments[0]} | od -An -tx1`).stdout.trim(), "89 50 4e 47 0d 0a 1a 0a", "the image is beside it");
+
+    // The mention is now, and brings the fetched message with it.
+    await replied("E2E-REPLY-SLACK");
+    const [call] = await callsFor("E2E-SLACK-MENTION", 0);
+    const events = eventLines(where(call!).input);
+    assert.ok(events.some((line) => line.kind === undefined && line.source === "slack" && line.delivery === "now"), JSON.stringify(events));
+
+    // The CLI in the sandbox draws the channel as it stands.
+    const drawn = exec("sandbox", "TZ=UTC penelope-slack history work.dev").stdout;
+    assert.match(drawn, /^work #dev \(channel C0DEV, stream work\.dev\)\n/);
+    assert.match(drawn, /E2E U0ALICE \[[0-9.]+\]: E2E-SLACK-AWAY said while away/);
+    assert.match(drawn, /: @E2E U0E2E E2E-SLACK-MENTION what is this\?\n {2}file e2e\.png: \/sources\/slack\/files\/\d+-e2e\.png\n/);
   }));
 
   it("takes another agent's request over A2A, asks it back, and hands it her answer", track(async () => {
