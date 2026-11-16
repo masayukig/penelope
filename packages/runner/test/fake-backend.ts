@@ -7,7 +7,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import type { DeliveredEvent, Schedule, SelfEventRequest } from "@penelope/contract";
+import type { DeliveredEvent, JobEventRequest, Schedule, SelfEventRequest } from "@penelope/contract";
 
 export const TOKEN = "real-token-example";
 
@@ -35,6 +35,10 @@ export class FakeBackend {
   failSelfEvents = 0;
   /** The self-events the backend took, in order. */
   readonly selfEvents: SelfEventRequest[] = [];
+  /** How many of the next job events are refused with a 503. */
+  failJobEvents = 0;
+  /** The job events the backend took, in order; one sent again is there again. */
+  readonly jobEvents: JobEventRequest[] = [];
   private readonly schedules: Schedule[] = [];
   private waiters: (() => void)[] = [];
   private replies = 0;
@@ -166,6 +170,14 @@ export class FakeBackend {
       return answer(503, { error: "unavailable" });
     }
     if (key === "POST /v1/self-events") this.selfEvents.push(body as SelfEventRequest);
+    if (key === "POST /v1/job-events" && this.failJobEvents > 0) {
+      this.failJobEvents--;
+      return answer(503, { error: "unavailable" });
+    }
+    if (key === "POST /v1/job-events") {
+      this.jobEvents.push(body as JobEventRequest);
+      return answer(202);
+    }
     if (
       key === "POST /v1/agents" ||
       key === "POST /v1/activity" ||

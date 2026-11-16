@@ -32,7 +32,7 @@ export type Config = {
   redeliverMs: number;
   /** The heartbeat's quiet time (ADR-0031); none when it is off. */
   heartbeatMs: number | undefined;
-  builtinDelivery: Record<"ui" | "cron" | "a2a" | "self", Delivery>;
+  builtinDelivery: Record<"ui" | "cron" | "a2a" | "self" | "job", Delivery>;
   inline: Set<string>;
   gitAuthor: { name: string; email: string };
   agent: AgentSettings;
@@ -183,9 +183,10 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
       cron: delivery("PENELOPE_DELIVERY_CRON"),
       a2a: delivery("PENELOPE_DELIVERY_A2A"),
       self: delivery("PENELOPE_DELIVERY_SELF"),
+      job: delivery("PENELOPE_DELIVERY_JOB"),
     },
     inline: new Set([
-      ...(get("PENELOPE_INLINE_SOURCES") ?? "ui")
+      ...(get("PENELOPE_INLINE_SOURCES") ?? "ui,job")
         .split(",")
         .map((name) => name.trim())
         .filter((name) => name !== ""),

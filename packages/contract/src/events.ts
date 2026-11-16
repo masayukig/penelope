@@ -1,7 +1,7 @@
 // The event envelope and what the intake answers (docs/events.md).
 
 /** The sources the backend has itself. Plugins in receivers add their own names. */
-export type BuiltinSource = "ui" | "cron" | "a2a" | "self" | "control" | "heartbeat";
+export type BuiltinSource = "ui" | "cron" | "a2a" | "self" | "job" | "control" | "heartbeat";
 
 /** Where an event came from. Also the first directory under /sources. */
 export type Source = BuiltinSource | (string & {});

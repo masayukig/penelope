@@ -14,7 +14,7 @@ receivers のプラグインが封筒を作る形は [receivers.md](receivers.md
 
 | 欄 | 必須 | 中身 |
 | --- | --- | --- |
-| `source` | ○ | 受信元の名前。`/sources` の最初のディレクトリにもなる。backend の中の受信元は `ui`・`cron`・`a2a`・`self`・`control`・`heartbeat` |
+| `source` | ○ | 受信元の名前。`/sources` の最初のディレクトリにもなる。backend の中の受信元は `ui`・`cron`・`a2a`・`self`・`job`・`control`・`heartbeat` |
 | `id` | ○ | 受信元が付ける。`source` と組で一意。重複を除くキー |
 | `occurred_at` | ○ | 起きた時刻（RFC 3339） |
 | `summary` | ○ | 1 行の要約。人とモデルが読む |
@@ -36,12 +36,12 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 - `now`: すぐにターンへ。ターンの最中なら割り込み（steer）、待っていれば新しいターン。起きている時間の外でも。
 - `batch`: `/sources` にはすぐ書くが、ターンへはまとめて後で渡す。`now` の出来事が来たら、それと一緒に渡す。いつ渡すかは backend が決める（下の「いつ渡すか」）。
 - **決めるのは受信元の側だけ**である。receivers のプラグインは自分の設定（例: Slack ならメンションと DM は `now`）に従って出来事ごとに付ける。backend はそれを上書きしない。
-- 封筒で省いたときの既定は、receivers のプラグインなら `batch`。backend の中の受信元（`ui`・`cron`・`a2a`・`self`）は backend の設定で決め、既定はどれも `now`。`control` と `heartbeat` は常に `now`。
+- 封筒で省いたときの既定は、receivers のプラグインなら `batch`。backend の中の受信元（`ui`・`cron`・`a2a`・`self`・`job`）は backend の設定で決め、既定はどれも `now`。`control` と `heartbeat` は常に `now`。
 
 ### `inline`
 
 - 中身（`payload`）をそのままターンに載せる受信元。封筒の欄ではなく、backend の設定で受信元ごとに決める。
-- 最初は `ui`（オーナーのメッセージ）と `control`（制御の出来事）だけ。
+- 既定は `ui`（オーナーのメッセージ）・`job`（裏の仕事の終わり、[ADR-0030](adr/0030-background-jobs-run-by-the-runner-and-their-end-as-an-event.md)）・`control`（制御の出来事）。サブエージェントの知らせ（`self`）は inline でない。
 - inline の出来事も、ほかと同じく `/sources` に書く。
 
 ### 制御の出来事
@@ -70,6 +70,12 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 - `payload` は `kind`（新しい依頼なら `request`、聞き返しへの答えなら `answer`）・`task_id`・`context_id`・`message_id`・`text`（型は `A2APayload`）。
 - エージェントは、この出来事の `seq` を名指して Task に返す（[sandbox-api.md](sandbox-api.md) の「A2A の Task に返す」）。
 
+### 裏の仕事の終わり
+
+- 本体が裏で動かしたコマンド（[ADR-0030](adr/0030-background-jobs-run-by-the-runner-and-their-end-as-an-event.md)）が終わると、runner が `source` が `job` の出来事を入れる（[sandbox-api.md](sandbox-api.md) の「裏の仕事の終わり」）。`stream` は無く、中身は `/sources/job/<日付>.jsonl` に入る。
+- `id` は裏の仕事の ID、`summary` は終わり方とコマンドの 1 行目（`[exit 0] make test`・`[SIGKILL] …`・`[stopped] …`・`[timed out] …`・`[interrupted] …`）。
+- `payload` は `JobEnd`。`text` の欄を持たないので、inline のときターンの `text` は `payload` を JSON にした文字列である（「ターンに入る形」）。終わり方・コマンド・時間・出力の末尾がまとめてターンに入る。
+
 ## 取り込み口
 
 - Unix socket の上の HTTP。socket は backend と receivers だけが mount する volume に置く（[pod.md](pod.md)）。
@@ -81,7 +87,7 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 
 - multipart では、封筒は `event` の部分（文字の欄でも、JSON のファイルでもよい）、ファイルは `file` の部分を繰り返す。ファイルの名前は部分の filename である。
 - 大きさの上限は、封筒とファイルを合わせた body の全体で 64 MiB。
-- backend の中の受信元（`ui`・`cron`・`a2a`・`self`・`control`・`heartbeat`）の名前の出来事は、取り込み口では断る（`400`）。それらは取り込み口を通らない。receivers のプラグインが夜の切り替えなどを起こせないようにするためである。
+- backend の中の受信元（`ui`・`cron`・`a2a`・`self`・`job`・`control`・`heartbeat`）の名前の出来事は、取り込み口では断る（`400`）。それらは取り込み口を通らない。receivers のプラグインが夜の切り替えなどを起こせないようにするためである。
 
 | 応答 | 意味 |
 | --- | --- |

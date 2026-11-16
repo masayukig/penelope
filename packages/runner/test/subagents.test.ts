@@ -14,7 +14,7 @@ import type { Answer, Call, Script } from "./fake-model.ts";
 import { acked, activities, ui, world } from "./world.ts";
 
 const SUB_AGENT_TOOLS = ["subagent_close", "subagent_list", "subagent_send", "subagent_start"];
-const MAIN_ONLY_TOOLS = [...SUB_AGENT_TOOLS, "reply", "reply_to_agent", "schedule_add", "schedule_list", "schedule_remove", "self_event"];
+const MAIN_ONLY_TOOLS = [...SUB_AGENT_TOOLS, "reply", "reply_to_agent", "schedule_add", "schedule_list", "schedule_remove", "self_event", "job_start", "job_list", "job_stop"];
 
 const isMain = (call: Call) => call.tools.includes("subagent_start");
 
@@ -120,7 +120,7 @@ test("the sub-agent's tools are Pi's, without the main agent's own", async () =>
   const main = calls.find(isMain)!;
   const sub = subCalls(calls, "first")[0]!;
   // Guards against: a sub-agent that can reply to the owner, answer over A2A, schedule, or start sub-agents of its own.
-  for (const tool of SUB_AGENT_TOOLS) assert.ok(main.tools.includes(tool), `the main agent has ${tool}`);
+  for (const tool of MAIN_ONLY_TOOLS) assert.ok(main.tools.includes(tool), `the main agent has ${tool}`);
   for (const tool of MAIN_ONLY_TOOLS) assert.ok(!sub.tools.includes(tool), `the sub-agent has no ${tool}`);
   for (const tool of ["bash", "read", "write", "edit"]) assert.ok(sub.tools.includes(tool), `the sub-agent has ${tool}`);
 });

@@ -8,6 +8,7 @@ import type {
   Activity,
   AgentId,
   DeliveredEvent,
+  JobEventRequest,
   PollResponse,
   ReplyRequest,
   ReplyResponse,
@@ -80,6 +81,11 @@ export class Backend {
 
   async selfEvent(event: Without<SelfEventRequest>): Promise<void> {
     await this.post("/v1/self-events", event);
+  }
+
+  /** `POST /v1/job-events`: a background job of the main agent ended. */
+  async jobEvent(event: Without<JobEventRequest>): Promise<void> {
+    await this.post("/v1/job-events", event);
   }
 
   /** `POST /v1/agents`: this agent, a sub-agent, was started or closed. */

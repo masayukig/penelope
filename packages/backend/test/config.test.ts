@@ -38,8 +38,8 @@ describe("the configuration", () => {
       batch: { quietMs: 5 * 60_000, maxMs: 30 * 60_000 },
       redeliverMs: 5 * 60_000,
       heartbeatMs: undefined,
-      builtinDelivery: { ui: "now", cron: "now", a2a: "now", self: "now" },
-      inline: new Set(["ui", "control"]),
+      builtinDelivery: { ui: "now", cron: "now", a2a: "now", self: "now", job: "now" },
+      inline: new Set(["ui", "job", "control"]),
       gitAuthor: { name: "penelope-backend", email: "backend@penelope.invalid" },
       agent: { name: "Agent", icons: {} },
       webDir: "/app/web",
@@ -68,6 +68,7 @@ describe("the configuration", () => {
         PENELOPE_BATCH_MAX_MINUTES: "10",
         PENELOPE_REDELIVER_MINUTES: "3",
         PENELOPE_DELIVERY_CRON: "batch",
+        PENELOPE_DELIVERY_JOB: "batch",
         PENELOPE_INLINE_SOURCES: "ui, self",
         PENELOPE_GIT_AUTHOR_NAME: "backend",
         PENELOPE_GIT_AUTHOR_EMAIL: "backend@example.com",
@@ -91,6 +92,7 @@ describe("the configuration", () => {
     assert.deepEqual(config.batch, { quietMs: 2 * 60_000, maxMs: 10 * 60_000 });
     assert.equal(config.redeliverMs, 3 * 60_000);
     assert.equal(config.builtinDelivery.cron, "batch");
+    assert.equal(config.builtinDelivery.job, "batch");
     assert.equal(config.builtinDelivery.ui, "now");
     // control is always inline: the runner needs what it says.
     assert.deepEqual(config.inline, new Set(["ui", "self", "control"]));
