@@ -88,11 +88,22 @@ USER 1001:1001
 ENTRYPOINT ["node", "--disable-warning=ExperimentalWarning", "/app/dist/main.js"]
 CMD ["serve"]
 
+# The receivers' runtime dependencies (ws, for Slack's Socket Mode), as
+# for the backend. The Slack plugin's package is copied in place of its link.
+FROM --platform=$BUILDPLATFORM node:24.22.3-trixie-slim AS receivers-deps
+WORKDIR /src
+COPY package.json package-lock.json ./
+COPY packages ./packages
+RUN npm ci --omit=dev --ignore-scripts --workspace=@penelope/receivers && rm -rf node_modules/@penelope
+
 FROM node:24.22.3-trixie-slim AS receivers
 ARG VERSION
 ENV NODE_ENV=production PENELOPE_VERSION=${VERSION}
 WORKDIR /app
 COPY --from=ts-build /src/packages/receivers/package.json ./
+COPY --from=receivers-deps /src/node_modules ./node_modules
+COPY --from=ts-build /src/packages/slack/package.json ./node_modules/@penelope/slack/
+COPY --from=ts-build /src/packages/slack/dist ./node_modules/@penelope/slack/dist
 COPY --from=ts-build /src/packages/receivers/dist ./dist
 USER 1002:1002
 ENTRYPOINT ["node", "/app/dist/main.js"]
@@ -184,6 +195,10 @@ COPY --from=ts-build /src/packages/runner/dist ./dist
 COPY --from=runner-deps /src/node_modules ./node_modules
 COPY --from=ts-build /src/packages/contract/package.json ./node_modules/@penelope/contract/
 COPY --from=ts-build /src/packages/contract/dist ./node_modules/@penelope/contract/dist
+# The Slack plugin's reading CLI (ADR-0029). It has no dependency at run time.
+COPY --from=ts-build /src/packages/slack/package.json /opt/penelope/slack/
+COPY --from=ts-build /src/packages/slack/dist /opt/penelope/slack/dist
+COPY packages/slack/bin/penelope-slack /usr/local/bin/penelope-slack
 ENV NODE_ENV=production PENELOPE_VERSION=${VERSION} \
     HOME=/home/agent USER=agent \
     PATH=/home/agent/.local/bin:/home/agent/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
