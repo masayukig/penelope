@@ -14,6 +14,9 @@ const files: Record<string, string> = {
   "/avatars/escape/avatar.json": JSON.stringify({ name: "Out", icons: { neutral: "../../secrets/github-secret.webp" } }),
   "/avatars/text/avatar.json": JSON.stringify({ name: "Text", icons: { neutral: "icons/neutral.txt" } }),
   "/avatars/broken/avatar.json": "{",
+  "/avatars/png/avatar.json": JSON.stringify({ name: "Png", icons: { neutral: "icons/neutral.webp", happy: "icons/happy.webp" }, pngIcons: { neutral: "slack/neutral.png" } }),
+  "/avatars/png-webp/avatar.json": JSON.stringify({ name: "Png", icons: { neutral: "icons/neutral.webp" }, pngIcons: { neutral: "slack/neutral.webp" } }),
+  "/avatars/png-escape/avatar.json": JSON.stringify({ name: "Png", icons: { neutral: "icons/neutral.webp" }, pngIcons: { neutral: "../iris/slack/neutral.png" } }),
   "/sa/token": "backend-sa-token\n",
   "/sa/ca.crt": "-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n",
 };
@@ -117,6 +120,16 @@ describe("the configuration", () => {
     assert.equal(loadConfig({ PENELOPE_AGENT_NAME: "Kestrel" }, read).agent.name, "Kestrel");
   });
 
+  // Slack is given a PNG of the face, not the Web UI's WebP (docs/ui-api.md, "エージェント").
+  it("takes the PNG of each face the avatar has one of", () => {
+    const config = loadConfig({ PENELOPE_AVATARS_DIR: "/avatars", PENELOPE_AVATAR: "png" }, read);
+    assert.deepEqual(config.agent, {
+      name: "Png",
+      icons: { neutral: "/avatars/png/icons/neutral.webp", happy: "/avatars/png/icons/happy.webp" },
+      pngIcons: { neutral: "/avatars/png/slack/neutral.png" },
+    });
+  });
+
   it("takes the time zone from TZ when it has none of its own", () => {
     assert.equal(loadConfig({ TZ: "Europe/Paris" }, read).timeZone, "Europe/Paris");
   });
@@ -154,6 +167,9 @@ describe("the configuration", () => {
       { PENELOPE_AVATARS_DIR: "/avatars", PENELOPE_AVATAR: "escape" },
       { PENELOPE_AVATARS_DIR: "/avatars", PENELOPE_AVATAR: "text" },
       { PENELOPE_AVATARS_DIR: "/avatars", PENELOPE_AVATAR: "../secrets" },
+      // A face's PNG is a PNG inside the avatar's own directory.
+      { PENELOPE_AVATARS_DIR: "/avatars", PENELOPE_AVATAR: "png-webp" },
+      { PENELOPE_AVATARS_DIR: "/avatars", PENELOPE_AVATAR: "png-escape" },
     ]) {
       assert.throws(() => loadConfig(env, read), ConfigError, JSON.stringify(env));
     }

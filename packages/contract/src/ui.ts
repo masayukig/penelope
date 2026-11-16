@@ -84,6 +84,8 @@ export type AgentResponse = {
   name: string;
   /** Where each face of her avatar is served, by expression, when an avatar is chosen. */
   icons?: Record<string, string>;
+  /** Where the PNG of each face that has one is served, by expression: for Slack's icon_url. */
+  png_icons?: Record<string, string>;
 };
 
 /**

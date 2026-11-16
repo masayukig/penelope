@@ -118,8 +118,15 @@ export function uiHandler(options: UiOptions): Handler {
     // Read without a login: the login screen and the home screen show who
     // she is. Nothing else is here (docs/ui-api.md).
     if (route === "GET /api/agent") {
-      const icons = Object.fromEntries(Object.entries(agent.icons).map(([expression, file]) => [expression, `${AGENT_ICONS_PATH}${encodeURIComponent(expression)}${path.extname(file).toLowerCase()}`]));
-      sendJson(response, 200, { name: agent.name, ...(Object.keys(icons).length === 0 ? {} : { icons }) } satisfies AgentResponse);
+      const ways = (images: Readonly<Record<string, string>>) =>
+        Object.fromEntries(Object.entries(images).map(([expression, file]) => [expression, `${AGENT_ICONS_PATH}${encodeURIComponent(expression)}${path.extname(file).toLowerCase()}`]));
+      const icons = ways(agent.icons);
+      const pngIcons = ways(agent.pngIcons ?? {});
+      sendJson(response, 200, {
+        name: agent.name,
+        ...(Object.keys(icons).length === 0 ? {} : { icons }),
+        ...(Object.keys(pngIcons).length === 0 ? {} : { png_icons: pngIcons }),
+      } satisfies AgentResponse);
       return;
     }
     if (request.method === "GET" && url.pathname.startsWith(AGENT_ICONS_PATH)) {
@@ -129,7 +136,7 @@ export function uiHandler(options: UiOptions): Handler {
       } catch {
         // Not a name of any face: answered as one that is not there.
       }
-      const file = faceFile(agent.icons, expression);
+      const file = faceFile(agent, expression);
       if (file === undefined) throw new HttpError(404, "no such face");
       let body: Buffer;
       try {
@@ -332,12 +339,15 @@ const notBuilt: Handler = async (_request, response) => {
 
 /**
  * The image of a face, named as it is or with the extension of its image
- * after it (docs/ui-api.md): Slack wants an icon's URL to end in one.
+ * after it, and its PNG with .png after it (docs/ui-api.md): Slack wants an
+ * icon's URL to end in one.
  */
-function faceFile(icons: Readonly<Record<string, string>>, name: string): string | undefined {
+function faceFile(agent: AgentSettings, name: string): string | undefined {
+  const { icons } = agent;
   if (Object.hasOwn(icons, name)) return icons[name];
   const extension = path.extname(name);
   const face = name.slice(0, name.length - extension.length);
+  if (extension === ".png" && agent.pngIcons !== undefined && Object.hasOwn(agent.pngIcons, face)) return agent.pngIcons[face];
   if (extension === "" || !Object.hasOwn(icons, face)) return undefined;
   const file = icons[face]!;
   return path.extname(file).toLowerCase() === extension ? file : undefined;

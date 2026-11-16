@@ -8,6 +8,7 @@ import { describe, it } from "node:test";
 
 import { SubAgents } from "../src/agents.ts";
 import { Assets } from "../src/assets.ts";
+import type { AgentSettings } from "../src/config.ts";
 import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
 import { Feed } from "../src/feed.ts";
@@ -67,7 +68,7 @@ async function setup(
   {
     configured = true,
     publicUrl = "http://penelope.example.com",
-    agent = { name: "Iris", icons: {} as Record<string, string> },
+    agent = { name: "Iris", icons: {} } as AgentSettings,
     a2a = undefined as Handler | undefined,
     web = undefined as Handler | undefined,
     pushKey = undefined as string | undefined,
@@ -501,6 +502,31 @@ describe("the UI's API", () => {
       assert.equal((await env.call("/api/agent/icons/odd.name.webp", undefined)).text, "RIFF-odd");
       assert.equal((await env.call("/api/agent/icons/odd.name", undefined)).text, "RIFF-odd");
       assert.equal((await env.call("/api/agent/icons/happy.webp", undefined)).status, 404);
+    });
+
+    // Slack may not take a WebP as an icon, so a face's PNG has a way of its
+    // own, while the Web UI keeps the WebP (docs/ui-api.md, "エージェント").
+    it("serves the PNG of a face beside its image, at the way ending in .png", async (t) => {
+      const dir = tempDir(t);
+      writeFileSync(path.join(dir, "happy.webp"), "RIFF-happy");
+      writeFileSync(path.join(dir, "happy.png"), "PNG-happy");
+      writeFileSync(path.join(dir, "neutral.webp"), "RIFF-neutral");
+      const env = await setup(t, {
+        agent: { name: "Iris", icons: { happy: path.join(dir, "happy.webp"), neutral: path.join(dir, "neutral.webp") }, pngIcons: { happy: path.join(dir, "happy.png") } },
+      });
+      const agent = (await env.call("/api/agent", undefined)).json();
+      assert.deepEqual(agent.icons, { happy: "/api/agent/icons/happy.webp", neutral: "/api/agent/icons/neutral.webp" });
+      assert.deepEqual(agent.png_icons, { happy: "/api/agent/icons/happy.png" });
+      const png = await env.call(agent.png_icons.happy, undefined);
+      assert.equal(png.status, 200);
+      assert.equal(png.headers["content-type"], "image/png");
+      assert.equal(png.text, "PNG-happy");
+      for (const way of ["/api/agent/icons/happy.webp", "/api/agent/icons/happy"]) {
+        const answer = await env.call(way, undefined);
+        assert.equal(answer.headers["content-type"], "image/webp", way);
+        assert.equal(answer.text, "RIFF-happy", way);
+      }
+      assert.equal((await env.call("/api/agent/icons/neutral.png", undefined)).status, 404);
     });
 
     it("gives nothing else away without a session", async (t) => {
