@@ -535,7 +535,7 @@ Slack の出来事をターンに描いて載せるには、配置が、この�
 - `--channel` はチャンネルの ID（`C…`・`G…`・`D…`）か名前（`#` は付けても付けなくてもよい）。名前は `users.conversations` で、bot の入っている公開・非公開のチャンネルから探す。DM は ID で書く（読み取りの見出しの `channel <ID>`）。
 - `--thread` はスレッドの親の発言の `ts`。本文も画像もそのスレッドに入る。
 - `--image` は何度でも書ける。画像は Slack の 3 段で送る: `files.getUploadURLExternal`（`filename` と `length`）→ 返った `upload_url` へ中身を POST（`application/octet-stream`、`Authorization` を付けない）→ 全部を 1 回の `files.completeUploadExternal` で、本文と同じチャンネル（とスレッド）に共有する。本文があれば、画像は本文の後の別の投稿になる。
-- `--face` を書くと、表情の画像の URL を、本文の投稿と画像の共有の `icon_url` に入れる。URL は `PENELOPE_PUBLIC_URL` の `/api/agent`（ログインなし）が返す表情の道（[ui-api.md](ui-api.md) の「エージェント」、画像の拡張子で終わる）で、Slack はそれを外から取りにくる。投稿の名前は変えない。
+- `--face` を書くと、表情の画像の URL を、本文の投稿と画像の共有の `icon_url` に入れる。URL は `PENELOPE_PUBLIC_URL` の `/api/agent`（ログインなし）が返す表情の道（[ui-api.md](ui-api.md) の「エージェント」、画像の拡張子で終わる）で、Slack はそれを外から取りにくる。表情の PNG（`png_icons`）があればその道、無ければ Web UI と同じ画像の道（`icons`）を使う。投稿の名前は変えない。
 
 | 環境変数（sandbox） | 中身 |
 | --- | --- |
