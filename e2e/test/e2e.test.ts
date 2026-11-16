@@ -657,6 +657,45 @@ describe("the Pod end to end", () => {
     assert.match(drawn, /: @E2E U0E2E E2E-SLACK-MENTION what is this\?\n {2}file e2e\.png: \/sources\/slack\/files\/\d+-e2e\.png\n/);
   }));
 
+  it("posts to Slack from the sandbox with slackctl: the text, in a thread, with a face, and images in three steps", track(async () => {
+    // Guards against: a post not reaching Slack with the real bot token, its text changed on the way, the face's URL
+    // not being one the outside can fetch, or a token sent to where the images go up (ADR-0033).
+    const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    exec("sandbox", `echo ${pixel} | base64 -d > /home/agent/e2e-post.png`, { check: true });
+    const text = "E2E-SLACK-POST おはよう。\n今日の予定は *2 件*。";
+    const posted = exec("sandbox", "slackctl post --channel '#dev' --thread 1794821000.000200 --face happy --image /home/agent/e2e-post.png", { input: `${text}\n`, check: false });
+    assert.equal(posted.status, 0, posted.stderr);
+    const [message, file] = posted.stdout.trim().split("\n").map((line) => line.split("\t"));
+    assert.deepEqual(message!.slice(0, 2), ["message", "C0DEV"]);
+    assert.match(message![3] ?? "", /^https:\/\/e2e\.slack\.com\/archives\/C0DEV\/p\d+$/);
+    assert.deepEqual(file!.slice(0, 1).concat(file!.slice(2)), ["file", "e2e-post.png"]);
+
+    const slack = await outside.slack();
+    const calls = slack.calls.filter((call) => ["users.conversations", "chat.postMessage", "files.getUploadURLExternal", "files.completeUploadExternal"].includes(call.method) && call.token !== "app");
+    const post = calls.find((call) => call.method === "chat.postMessage");
+    assert.ok(post, JSON.stringify(slack.calls.map((call) => call.method)));
+    assert.equal(post.token, "bot", "the Sentinel put the real bot token in place of the surrogate");
+    assert.equal(post.args.text, text);
+    assert.equal(post.args.channel, "C0DEV");
+    assert.equal(post.args.thread_ts, "1794821000.000200");
+    const complete = calls.find((call) => call.method === "files.completeUploadExternal");
+    assert.equal(complete?.token, "bot");
+    assert.equal(complete.args.channel_id, "C0DEV");
+    assert.equal(complete.args.thread_ts, "1794821000.000200");
+    assert.equal(complete.args.icon_url, post.args.icon_url);
+    assert.equal(calls.find((call) => call.method === "files.getUploadURLExternal")?.args.filename, "e2e-post.png");
+    assert.deepEqual(slack.uploads.map(({ token, length, png }) => ({ token, length, png })), [{ token: "none", length: 70, png: true }]);
+
+    // The icon is the avatar's face at the public URL, which Slack fetches from the outside.
+    const icon = new URL(post.args.icon_url ?? "");
+    assert.equal(icon.origin, new URL(pod.url).origin);
+    assert.match(icon.pathname, /^\/api\/agent\/icons\/happy\.webp$/);
+    const face = new Browser().request(icon.pathname);
+    assert.equal(face.status, 200);
+    assert.equal(face.headers["content-type"], "image/webp");
+    assert.match(exec("sandbox", "slackctl faces").stdout, new RegExp(`^happy\\t${icon.href.replaceAll(".", "\\.")}$`, "m"));
+  }));
+
   it("takes another agent's request over A2A, asks it back, and hands it her answer", track(async () => {
     // Guards against: a request of an allowed ServiceAccount, checked by TokenReview or by gated's assertion, not reaching
     // a turn; her question or answer not reaching the sender's task; or a ServiceAccount not on the allow-list getting in.
