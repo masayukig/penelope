@@ -311,6 +311,6 @@ GitHub の webhook（GitHub App やリポジトリの webhook）の配送を受�
 ADR-0023・ADR-0024 が決めず、後の判断に回したもの。それぞれ、決めるときに ADR を書き、この文書に節を足す。
 
 - GitHub のほかのイベント（issue、コメント、`pull_request_review` の `submitted` など）を読むこと。
-- Slack（Socket Mode か Events API か。`delivery` の決め方。上の「プラグインの内側の契約」の未決）。
+- Slack: [ADR-0028](adr/0028-slack-received-over-socket-mode-by-a-receivers-plugin.md) で決めた（Socket Mode、外へ接続を張る種類のプラグイン）。ターンへの載せ方は [ADR-0029](adr/0029-slack-events-inline-drawn-as-channels-and-threads.md)。形は Slack のプラグインを作る作業単位がこの文書に節を足す。
 - 鳴り続けているアラートの知らせ（いまは鳴り始めと鳴り止みだけ）。
-- オーナーへの知らせの仕組みと、エージェントが Alertmanager にアラートを足す道（`drop_labels` の印）との関係。
+- エージェントが Alertmanager にアラートを足す道（`drop_labels` の印）と、返事の知らせ（[ADR-0027](adr/0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md) の Web Push）との関係。

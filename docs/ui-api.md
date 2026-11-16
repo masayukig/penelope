@@ -102,6 +102,20 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 - `/manifest.webmanifest` は backend がその場で作る。名前はエージェントの名前、アイコンはアバターの `neutral` の画像（無ければ build の `icon.svg`）である。ホーム画面に置いて開くため（PWA）。
 - `assets/` の下のファイルは中身で名前が決まるので、長く cache させる。ほかは毎回確かめさせる。
 
+## 予約（未実装）
+
+ダッシュボードを少しずつ足す最初の 1 歩として、エージェントの予約（[sandbox-api.md](sandbox-api.md) の「予約」）を Web UI から見て取り消せるようにする。作る作業単位が、口の形を決めてこの節を直す。
+
+- 一覧: 予約の ID・理由・cron の式か 1 回の時刻・次に来る時刻を返す。エージェントの `schedule_list` と同じものを見る。
+- 取り消し: ID を指して予約を消す。エージェントの `schedule_remove` と同じ結果になる。消したことはエージェントには知らせない（エージェントは `schedule_list` で知る）。
+- 予約を足す口は作らない。予約を足すのはエージェントである。
+
+## これから足すもの
+
+- Web Push の購読の登録と解除、VAPID の公開鍵を渡す道（[ADR-0027](adr/0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md)）。
+- 返事に結び付いた画像の一覧と、画像を ID で取る口（[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md)）。
+- どの配置でも同じ形に保つ（[ADR-0026](adr/0026-move-natsumi-myao-and-aki-one-deployment-each-without-a-way-back.md)）。
+
 ## 承認（後の波）
 
 形だけを置く。最初の版では作らない。
