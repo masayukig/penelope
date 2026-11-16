@@ -2,7 +2,7 @@
 // screens are agreed with the owner.
 
 import type { Source } from "./events.ts";
-import type { Activity, AgentId, SubAgentStatus } from "./sandbox.ts";
+import type { Activity, AgentId, ScheduleWhen, SubAgentStatus } from "./sandbox.ts";
 
 /** `POST /api/messages` (JSON, or multipart with files). */
 export type PostMessageRequest = { text: string };
@@ -44,6 +44,15 @@ export type SubAgent = {
 
 /** `GET /api/agents`: the sub-agents that are not closed. */
 export type SubAgentsResponse = { agents: SubAgent[] };
+
+/**
+ * One of her schedules, as `GET /api/schedules` lists it: what her
+ * `schedule_list` lists, and when it comes due next (RFC 3339).
+ */
+export type ScheduleEntry = { id: string; reason: string; next_at: string } & ScheduleWhen;
+
+/** `GET /api/schedules`: her schedules, in the order she made them. */
+export type SchedulesResponse = { schedules: ScheduleEntry[] };
 
 /** `GET /api/agent`, read without a login: what the UI shows of the agent. */
 export type AgentResponse = {

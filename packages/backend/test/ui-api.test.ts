@@ -15,6 +15,7 @@ import { GitHubLogin, type GitHubSettings } from "../src/login/github.ts";
 import { LoginSessions } from "../src/login/sessions.ts";
 import { PushSubscriptions } from "../src/push/notifier.ts";
 import { Queue } from "../src/queue.ts";
+import { Schedules } from "../src/schedules.ts";
 import { Sources } from "../src/sources.ts";
 import { AwakeHours } from "../src/time.ts";
 import { uiHandler } from "../src/ui-api.ts";
@@ -87,6 +88,7 @@ async function setup(
   const feed = new Feed();
   const conversation = new Conversation(db, feed, { now });
   const agents = new SubAgents(db, feed, conversation, { now });
+  const schedules = new Schedules(db, { now, timeZone: "Asia/Tokyo" });
   const github = await fakeGitHub(t);
   const sessions = new LoginSessions(db, { now });
   const settings: GitHubSettings | undefined = configured
@@ -100,6 +102,7 @@ async function setup(
       queue,
       conversation,
       agents,
+      schedules,
       feed,
       login,
       sessions,
@@ -124,7 +127,7 @@ async function setup(
   const signIn = () => cookieOf(sessions.create(OWNER).token);
   const call = (pathname: string, cookie: string | undefined, options: Ask = {}) =>
     ask(target, pathname, { ...options, headers: { ...(cookie ? { cookie } : {}), ...options.headers } });
-  return { queue, conversation, agents, feed, sessions, github, target, signIn, call, sourcesDir, clock, subscriptions };
+  return { queue, conversation, agents, schedules, feed, sessions, github, target, signIn, call, sourcesDir, clock, subscriptions };
 }
 
 /** A Set-Cookie line as its value and its attributes, in whatever order they came. */
@@ -304,6 +307,8 @@ describe("the UI's API", () => {
       ["/api/stream", {}],
       ["/api/messages", { json: { text: "hi" } }],
       ["/api/agents", {}],
+      ["/api/schedules", {}],
+      ["/api/schedules/s-1", { method: "DELETE" }],
     ] as const) {
       const answer = await env.call(pathname, undefined, options);
       assert.equal(answer.status, 401, pathname);
@@ -480,6 +485,47 @@ describe("the UI's API", () => {
           },
         ],
       });
+    });
+  });
+
+  // The same schedules as her schedule_list and schedule_remove (docs/sandbox-api.md), with when each comes due next.
+  describe("the schedules", () => {
+    it("are listed as she lists them, with when each comes due next", async (t) => {
+      const env = await setup(t);
+      assert.deepEqual((await env.call("/api/schedules", env.signIn())).json(), { schedules: [] });
+      // 09:00 in UTC is 18:00 in Tokyo, the backend's time zone here.
+      const morning = env.schedules.create({ agent: "main", reason: "every morning", cron: "0 9 * * *" });
+      env.clock.advance(1);
+      const once = env.schedules.create({ agent: "main", reason: "look at the PR", at: "2026-11-20T01:30:00Z" });
+      const answer = await env.call("/api/schedules", env.signIn());
+      assert.equal(answer.status, 200);
+      assert.deepEqual(answer.json(), {
+        schedules: [
+          { id: morning.id, reason: "every morning", cron: "0 9 * * *", next_at: "2026-11-15T00:00:00.000Z" },
+          { id: once.id, reason: "look at the PR", at: "2026-11-20T01:30:00Z", next_at: "2026-11-20T01:30:00.000Z" },
+        ],
+      });
+    });
+
+    it("are removed by their id, as she removes them, and she is not told", async (t) => {
+      const env = await setup(t);
+      const kept = env.schedules.create({ agent: "main", reason: "every morning", cron: "0 9 * * *" });
+      const gone = env.schedules.create({ agent: "main", reason: "every night", cron: "0 22 * * *" });
+      const removed = await env.call(`/api/schedules/${encodeURIComponent(gone.id)}`, env.signIn(), { method: "DELETE" });
+      assert.equal(removed.status, 204);
+      assert.deepEqual(env.schedules.list("main"), [kept], "what her schedule_list sees");
+      assert.deepEqual(env.queue.take({ after: 0 }), [], "no event of it");
+      assert.deepEqual((await env.call("/api/schedules", env.signIn())).json().schedules.map((s: { id: string }) => s.id), [kept.id]);
+      const again = await env.call(`/api/schedules/${encodeURIComponent(gone.id)}`, env.signIn(), { method: "DELETE" });
+      assert.equal(again.status, 404);
+      assert.equal(typeof again.json().error, "string");
+    });
+
+    it("cannot be added from the UI", async (t) => {
+      const env = await setup(t);
+      const answer = await env.call("/api/schedules", env.signIn(), { json: { reason: "x", cron: "0 9 * * *" } });
+      assert.equal(answer.status, 404);
+      assert.deepEqual(env.schedules.list("main"), []);
     });
   });
 

@@ -36,6 +36,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 | `GET /api/agent`・`GET /api/agent/icons/<表情>` | エージェントの名前と表情のアイコン（認証なし） |
 | `GET /api/agents` | 閉じていないサブエージェントの一覧 |
 | `GET /api/push`・`POST /api/push/subscriptions`・`POST /api/push/subscriptions/delete` | 返事の知らせ（Web Push）の鍵と、購読の登録と解除 |
+| `GET /api/schedules`・`DELETE /api/schedules/<id>` | エージェントの予約の一覧と取り消し |
 | `GET /api/approvals`・`POST /api/approvals/<id>` | 承認（後の波） |
 
 ## メッセージを送る
@@ -148,13 +149,22 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 - `/manifest.webmanifest` は backend がその場で作る。名前はエージェントの名前、アイコンはアバターの `neutral` の画像（無ければ build の `icon.svg`）である。ホーム画面に置いて開くため（PWA）。
 - `assets/` の下のファイルは中身で名前が決まるので、長く cache させる。ほかは毎回確かめさせる。
 
-## 予約（未実装）
+## 予約
 
-ダッシュボードを少しずつ足す最初の 1 歩として、エージェントの予約（[sandbox-api.md](sandbox-api.md) の「予約」）を Web UI から見て取り消せるようにする。作る作業単位が、口の形を決めてこの節を直す。
+ダッシュボードを少しずつ足す最初の 1 歩として、エージェントの予約（[sandbox-api.md](sandbox-api.md) の「予約」）を Web UI から見て取り消せるようにする。
 
-- 一覧: 予約の ID・理由・cron の式か 1 回の時刻・次に来る時刻を返す。エージェントの `schedule_list` と同じものを見る。
-- 取り消し: ID を指して予約を消す。エージェントの `schedule_remove` と同じ結果になる。消したことはエージェントには知らせない（エージェントは `schedule_list` で知る）。
+- `GET /api/schedules` は `{schedules: [...]}`（型は `SchedulesResponse`、1 件は `ScheduleEntry`）。エージェントの `schedule_list`（`GET /v1/schedules?agent=main`）と同じ予約を、同じ順（作った順）で返す。予約を持つのは本体だけなので、`agent` は載せない。
+- 1 件は `id`・`reason`・`cron` か `at` のどちらか一方（予約を作ったときの値のまま）・`next_at` を持つ。`next_at` は次に来る時刻（RFC 3339、UTC）で、backend が出来事にする時刻である。cron の予約は backend の設定の時間帯で数えた次の回、1 回の予約は `at` と同じ時刻になる。
+- `DELETE /api/schedules/<id>` は予約を消す。エージェントの `schedule_remove`（`DELETE /v1/schedules/<id>`）と同じ結果になる。消したら `204`、その予約が無ければ `404`（`{error}`）。
+- 消したことはエージェントには知らせない（出来事を入れない）。エージェントは `schedule_list` で知る。
 - 予約を足す口は作らない。予約を足すのはエージェントである。
+
+### Web UI の予約
+
+- 左の「場所」の「出来事」に置く。予約は時刻が来るとエージェントへの出来事（`cron`）になるためで、出来事の画面のほかの中身は後の波で足す。PC もスマートフォンも同じ中身で、幅は会話と同じく 720px までで中央に寄せる。スマートフォンでは、浮いたアバターの分だけ上を空ける。
+- 1 件を 1 行にし、理由、cron の式（等幅）と次の時刻、または「1 回」と時刻、右端に「取り消す」のボタンを出す。時刻は「今日」「明日」か日付と、時分で書く。無いときは「予約はありません」。
+- 「取り消す」を押すと、取り消すかを確かめる（理由と、エージェントには知らせないことを添える）。確かめてから `DELETE` を送り、その行を消す。`404` のときは（エージェントが自分で消したか、1 回の予約が来たあと）一覧を読み直す。ほかの失敗は知らせを出し、行は残す。
+- 一覧はこの場所を開くたびに読む。流れでは直さない（予約の変化は流れに載らない）。
 
 ## これから足すもの
 

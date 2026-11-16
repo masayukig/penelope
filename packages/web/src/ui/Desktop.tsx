@@ -8,12 +8,14 @@ import { Layout, LayoutPanel } from "@astryxdesign/core/Layout";
 import { SideNav } from "@astryxdesign/core/SideNav";
 import { useState } from "react";
 
+import type { Api } from "../model/api.ts";
 import type { FlowItem, Status, SubAgentView } from "../model/store.ts";
 import { AgentAvatar, useAgent } from "./agent.tsx";
 import { StatusLabel } from "./Now.tsx";
 import { LogoutIcon } from "./icons.tsx";
 import { type Notices, NoticesButton } from "./Notices.tsx";
 import { AgentNow } from "./Panel.tsx";
+import { Schedules } from "./Schedules.tsx";
 import { SubAgentCount } from "./SubAgents.tsx";
 import { type Place, PlaceItems, Placeholder } from "./places.tsx";
 import { Talk, type TalkProps } from "./Talk.tsx";
@@ -26,6 +28,9 @@ export type ScreenProps = TalkProps & {
   expression: string | undefined;
   notices: Notices;
   onLogout: () => void;
+  /** For the places that read the backend themselves. */
+  api: Api;
+  onUnauthorized: () => void;
 };
 
 export function Desktop(props: ScreenProps) {
@@ -61,7 +66,13 @@ export function Desktop(props: ScreenProps) {
           <AgentAvatar size={36} expression={props.expression} />
         </button>
       </header>
-      {place === "talk" ? <Talk {...props} /> : <Placeholder place={place} />}
+      {place === "talk" ? (
+        <Talk {...props} />
+      ) : place === "events" ? (
+        <Schedules api={props.api} onUnauthorized={props.onUnauthorized} />
+      ) : (
+        <Placeholder place={place} />
+      )}
     </div>
   );
   return (

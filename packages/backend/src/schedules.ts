@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-import type { AgentId, ControlPayload, CronPayload, Schedule, ScheduleWhen } from "@penelope/contract";
+import type { AgentId, ControlPayload, CronPayload, Schedule, ScheduleEntry, ScheduleWhen } from "@penelope/contract";
 import { Cron } from "croner";
 
 import { isTime } from "./envelope.ts";
@@ -54,10 +54,21 @@ export class Schedules {
   }
 
   list(agent: AgentId): Schedule[] {
-    const rows = this.db
+    return this.rows(agent).map(schedule);
+  }
+
+  /** The same schedules as `list`, each with when it comes due next, for the UI. */
+  entries(agent: AgentId): ScheduleEntry[] {
+    return this.rows(agent).map((row) => {
+      const { agent: _agent, ...rest } = schedule(row);
+      return { ...rest, next_at: iso(row.next_ms) };
+    });
+  }
+
+  private rows(agent: AgentId): Row[] {
+    return this.db
       .prepare("SELECT id, agent, reason, cron, at, next_ms FROM schedules WHERE agent = ? ORDER BY created_at, id")
       .all(agent) as Row[];
-    return rows.map(schedule);
   }
 
   remove(id: string): boolean {

@@ -54,8 +54,20 @@ export const words = {
     unsupported: "このブラウザでは通知を受けられません（iPhone はホーム画面に置いてから）",
     unavailable: "この配置では通知を使えません",
   },
+  schedules: "予約",
+  schedulesNone: "予約はありません",
+  schedulesNoneBody: "エージェントが予約を足すと、ここに並びます。",
+  schedulesFailed: "予約を読めませんでした。",
+  scheduleOnce: "1 回",
+  scheduleNext: "次は",
+  scheduleRemove: "取り消す",
+  scheduleKeep: "やめる",
+  scheduleConfirm: "この予約を取り消しますか？",
+  scheduleConfirmBody: (reason: string) => `「${reason}」の予約を消します。エージェントには知らせません。`,
+  scheduleRemoveFailed: "取り消せませんでした。もう一度試してください。",
   today: "今日",
   yesterday: "昨日",
+  tomorrow: "明日",
 } as const;
 
 export function statusWord(status: Status): string {
@@ -125,6 +137,15 @@ export function dayOf(at: string, now: number = Date.now()): string {
   if (diff === 0) return words.today;
   if (diff === 1) return words.yesterday;
   return day.toLocaleDateString("ja-JP", { year: day.getFullYear() === today.getFullYear() ? undefined : "numeric", month: "long", day: "numeric", weekday: "short" });
+}
+
+/** When a schedule comes due: today, tomorrow or its date, and the time. */
+export function dueOf(at: string, now: number = Date.now()): string {
+  const day = new Date(at);
+  const today = new Date(now);
+  const startOf = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const label = Math.round((startOf(day) - startOf(today)) / 86_400_000) === 1 ? words.tomorrow : dayOf(at, now);
+  return `${label} ${timeOf(at)}`;
 }
 
 export function sizeOf(bytes: number): string {

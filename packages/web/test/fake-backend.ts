@@ -1,7 +1,7 @@
 // A stand-in for the backend's API for the UI (docs/ui-api.md), answered
 // through the fetch the App is given. The test writes to the stream as the
 // backend would, and drops the line when it wants.
-import type { AgentResponse, HistoryEntry, PushSubscriptionRequest, StreamEvent, SubAgent } from "@penelope/contract";
+import type { AgentResponse, HistoryEntry, PushSubscriptionRequest, ScheduleEntry, StreamEvent, SubAgent } from "@penelope/contract";
 
 type Line = { write: (text: string) => void; end: () => void };
 
@@ -12,6 +12,12 @@ export class FakeBackend {
   agents: SubAgent[] = [];
   /** How many times GET /api/agents was read. */
   agentsRead = 0;
+  /** Her schedules, as GET /api/schedules lists them. */
+  schedules: ScheduleEntry[] = [];
+  /** The ids DELETE /api/schedules/<id> was asked for, removed or not. */
+  readonly scheduleRemovals: string[] = [];
+  /** While set, DELETE /api/schedules/<id> answers 500. */
+  failRemovals = false;
   signedIn = true;
   /** While down, nothing can be reached. */
   down = false;
@@ -39,6 +45,16 @@ export class FakeBackend {
     if (method === "GET" && url.pathname === "/api/agents") {
       this.agentsRead++;
       return json(200, { agents: this.agents });
+    }
+    if (method === "GET" && url.pathname === "/api/schedules") return json(200, { schedules: this.schedules });
+    const scheduleId = /^\/api\/schedules\/([^/]+)$/.exec(url.pathname)?.[1];
+    if (method === "DELETE" && scheduleId !== undefined) {
+      const id = decodeURIComponent(scheduleId);
+      this.scheduleRemovals.push(id);
+      if (this.failRemovals) return json(500, { error: "broken" });
+      const before = this.schedules.length;
+      this.schedules = this.schedules.filter((schedule) => schedule.id !== id);
+      return this.schedules.length < before ? new Response(null, { status: 204 }) : json(404, { error: "no such schedule" });
     }
     if (method === "GET" && url.pathname === "/api/push") return json(200, this.pushKey === undefined ? {} : { web_push: { public_key: this.pushKey } });
     if (method === "POST" && url.pathname === "/api/push/subscriptions") {

@@ -108,6 +108,9 @@ export function App({ fetch, sleep, push }: AppProps) {
     [api, before],
   );
 
+  // Kept the same across renders: a place that reads the backend does not read it again for each render.
+  const onUnauthorized = useCallback(() => dispatch({ type: "unauthorized" }), []);
+
   // Read the clock again while the face shown would go back to neutral.
   const now = useClock(faceOf(state, Date.now()) === undefined ? undefined : FACE_RESET_MS);
   const status = statusOf(state);
@@ -126,6 +129,8 @@ export function App({ fetch, sleep, push }: AppProps) {
     onLogout: () => {
       void api.logout().finally(() => dispatch({ type: "unauthorized" }));
     },
+    api,
+    onUnauthorized,
   };
 
   return (
