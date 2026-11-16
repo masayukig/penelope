@@ -12,6 +12,7 @@ import { callText } from "../model/store.ts";
 import { AgentAvatar, useAgent } from "./agent.tsx";
 import type { ScreenProps } from "./Desktop.tsx";
 import { ChevronUpIcon, MenuIcon } from "./icons.tsx";
+import { NoticesButton } from "./Notices.tsx";
 import { StatusLabel } from "./Now.tsx";
 import { AgentNow } from "./Panel.tsx";
 import { SubAgentCount } from "./SubAgents.tsx";
@@ -56,6 +57,7 @@ export function Phone(props: ScreenProps) {
             setMenu(false);
           }}
         />
+        <NoticesButton notices={props.notices} />
         <Button label={words.logout} variant="ghost" onClick={props.onLogout} />
       </MobileNav>
       <BottomSheet isOpen={sheet} onOpenChange={setSheet} label={words.panel} height="tall" snapPoints={[0.5]}>

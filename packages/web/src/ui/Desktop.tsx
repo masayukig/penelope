@@ -12,13 +12,21 @@ import type { FlowItem, Status, SubAgentView } from "../model/store.ts";
 import { AgentAvatar, useAgent } from "./agent.tsx";
 import { StatusLabel } from "./Now.tsx";
 import { LogoutIcon } from "./icons.tsx";
+import { type Notices, NoticesButton } from "./Notices.tsx";
 import { AgentNow } from "./Panel.tsx";
 import { SubAgentCount } from "./SubAgents.tsx";
 import { type Place, PlaceItems, Placeholder } from "./places.tsx";
 import { Talk, type TalkProps } from "./Talk.tsx";
 import { words } from "./words.ts";
 
-export type ScreenProps = TalkProps & { status: Status; flow: FlowItem[]; subAgents: SubAgentView[]; expression: string | undefined; onLogout: () => void };
+export type ScreenProps = TalkProps & {
+  status: Status;
+  flow: FlowItem[];
+  subAgents: SubAgentView[];
+  expression: string | undefined;
+  notices: Notices;
+  onLogout: () => void;
+};
 
 export function Desktop(props: ScreenProps) {
   const agent = useAgent();
@@ -31,8 +39,14 @@ export function Desktop(props: ScreenProps) {
   ) : (
     <Button label={words.logout} variant="ghost" size="sm" onClick={props.onLogout} />
   );
+  const footer = (
+    <div className={folded ? "rail-footer rail-footer-folded" : "rail-footer"}>
+      <NoticesButton notices={props.notices} compact={folded} />
+      {logout}
+    </div>
+  );
   const nav = (
-    <SideNav aria-label="場所" collapsible={{ isCollapsed: folded, onCollapsedChange: setFolded }} footer={logout}>
+    <SideNav aria-label="場所" collapsible={{ isCollapsed: folded, onCollapsedChange: setFolded }} footer={footer}>
       <PlaceItems place={place} onChange={setPlace} />
     </SideNav>
   );

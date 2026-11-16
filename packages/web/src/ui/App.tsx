@@ -10,11 +10,13 @@ import type { AgentResponse } from "@penelope/contract";
 
 import { type Api, createApi, type Fetch, Unauthorized } from "../model/api.ts";
 import { Outbox } from "../model/outbox.ts";
+import { browserPush, type PushPlatform } from "../model/push.ts";
 import { currentFlow, FACE_RESET_MS, faceOf, initialState, reduce, statusOf, subAgentsOf } from "../model/store.ts";
 import { openStream } from "../model/stream.ts";
 import { AgentContext } from "./agent.tsx";
 import { Desktop } from "./Desktop.tsx";
 import { Login } from "./Login.tsx";
+import { useNotices } from "./Notices.tsx";
 import { Phone } from "./Phone.tsx";
 
 /** Below this width the phone's screen is shown. */
@@ -24,9 +26,11 @@ export type AppProps = {
   fetch: Fetch;
   /** Waits between tries of the stream. The tests do not wait. */
   sleep?: (ms: number) => Promise<void>;
+  /** The browser's service worker and Push API, for the notices. The tests give their own. */
+  push?: PushPlatform;
 };
 
-export function App({ fetch, sleep }: AppProps) {
+export function App({ fetch, sleep, push }: AppProps) {
   const api = useMemo<Api>(() => createApi(fetch), [fetch]);
   const [state, dispatch] = useReducer(reduce, initialState);
   const [agent, setAgent] = useState<AgentResponse>({ name: "" });
@@ -68,6 +72,8 @@ export function App({ fetch, sleep }: AppProps) {
   }, [readHistory]);
 
   const signedIn = state.signedIn === true;
+  const platform = useMemo(() => push ?? browserPush(), [push]);
+  const notices = useNotices(api, platform, signedIn);
   useEffect(() => {
     if (!signedIn) return;
     const stream = openStream({
@@ -116,6 +122,7 @@ export function App({ fetch, sleep }: AppProps) {
     flow: currentFlow(state),
     subAgents: subAgentsOf(state),
     expression: faceOf(state, now),
+    notices,
     onLogout: () => {
       void api.logout().finally(() => dispatch({ type: "unauthorized" }));
     },
