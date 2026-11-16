@@ -1,7 +1,7 @@
 # sandbox 向けの口の仕様
 
 sandbox の中の runner と道具が backend を呼ぶ口を決める。方針は
-[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)・[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)・[ADR-0007](adr/0007-one-session-switched-nightly-with-a-one-turn-curator.md)・[ADR-0013](adr/0013-event-contents-in-sources-and-summaries-in-turns.md)・[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md) にある。
+[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)・[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)・[ADR-0007](adr/0007-one-session-switched-nightly-with-a-one-turn-curator.md)・[ADR-0013](adr/0013-event-contents-in-sources-and-summaries-in-turns.md)・[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)・[ADR-0030](adr/0030-background-jobs-run-by-the-runner-and-their-end-as-an-event.md) にある。
 型は `packages/contract` の `src/sandbox.ts` が正である。サブエージェントの名前の形を確かめる関数は `src/agents.ts` にあり、runner と backend が同じものを使う。出来事の封筒と `/sources` は [events.md](events.md) にある。
 
 「未決」と書いた点は、実装の作業単位が決めて、この文書を直す。
@@ -21,7 +21,7 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 - 同じ UID で動くエージェントを、backend と UI が見分けるための欄である。確かめはしない（sandbox の中の名乗り）。
 
 - サブエージェントは出来事を取らない。本体からサブエージェントへの頼みは runner の中で直接渡り、backend はサブエージェントの列を持たない（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)）。`agent` が `main` でない `GET /v1/events` は `400` で断る。
-- サブエージェントには返事・A2A の返事・予約の道具が無い。`agent` が `main` でない `POST /v1/replies`・`POST /v1/a2a/replies`・予約の口（`GET`・`POST`・`DELETE`）は `400` で断る。取り違えを防ぐためで、守りではない。
+- サブエージェントには返事・A2A の返事・予約・裏の仕事の道具が無い。`agent` が `main` でない `POST /v1/replies`・`POST /v1/a2a/replies`・`POST /v1/job-events`・予約の口（`GET`・`POST`・`DELETE`）は `400` で断る。取り違えを防ぐためで、守りではない。
 
 ## 口の一覧
 
@@ -30,6 +30,7 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 | `GET /v1/events?agent=&after=&wait=` | 出来事を取る（long-poll） |
 | `POST /v1/events/ack` | 済んだ出来事を知らせる |
 | `POST /v1/self-events` | 自分宛ての出来事を入れる |
+| `POST /v1/job-events` | 裏の仕事の終わりを入れる |
 | `POST /v1/replies` | オーナーへの返事 |
 | `POST /v1/a2a/replies` | A2A の Task に返す |
 | `POST /v1/activity` | 途中経過 |
@@ -102,6 +103,53 @@ runner は、サブエージェントごとに `<Pi のディレクトリ>/sessi
 - `subagent_start` と `subagent_send` は、実行を始めたところで返る。
 - `subagent_list` は、閉じていないサブエージェントの `name`・`state`（`running` か `waiting`）・`purpose`・`cwd` の JSON の配列を返す。
 - `subagent_close` は、走っていれば実行を取り消してから閉じる。取り消した実行の知らせは送らない（ターンの終わりは送る）。
+
+## 裏の仕事の終わり
+
+本体が裏で動かしたコマンドが終わるたびに、runner が送る（[ADR-0030](adr/0030-background-jobs-run-by-the-runner-and-their-end-as-an-event.md)）。
+
+- body は `{agent, id, summary, payload}`（型は `JobEventRequest`）。backend は `source` が `job` の出来事として列に入れる。`stream` は無い。`delivery` は backend の設定（既定 `now`）、inline も backend の設定で、既定では inline である（[events.md](events.md) の「裏の仕事の終わり」）。
+- 受信元を `self` と分けるのは、inline を受信元ごとに選ぶためである。サブエージェントの知らせは要約と場所のまま、裏の仕事の終わりは中身ごとターンに入る。
+- `agent` は `main` だけ。ほかは `400`。`id`（空でない文字列）・`summary`（文字列）・`payload` が無ければ `400`。
+- `id` は裏の仕事の ID。1 つの仕事の終わりは 1 件なので、送り直しても同じ `id` で、重複として落ちる。応答は `202` で、body は無い。
+- `payload` は次の欄を持つ（型は `JobEnd`）。
+
+| 欄 | 中身 |
+| --- | --- |
+| `job` | 裏の仕事の ID |
+| `command`・`cwd` | コマンドと作業の場所 |
+| `end` | 終わり方。`exited`（自分で終わった）・`signaled`（runner の送ったのでないシグナルで終わった）・`stopped`（`job_stop` で止めた）・`timed-out`（長さの上限で止めた）・`interrupted`（runner が立ち上がり直したときに走っていた） |
+| `exit_code` | 終わりの code。プロセスが code で終わったときだけ |
+| `signal` | 終わらせたシグナルの名前（`SIGTERM` など）。`signaled` のとき、`stopped`・`timed-out` では runner が最後に送ったシグナル |
+| `started_at`・`ended_at` | 始まりと終わり（RFC 3339）。`interrupted` の `ended_at` は、runner が切れたのを見つけた時刻 |
+| `seconds` | 始まりから終わりまでの秒（整数） |
+| `output`・`output_bytes` | 出力のファイルの場所と大きさ（byte） |
+| `tail`・`tail_truncated` | 出力の末尾（上限の字数まで）と、出力がそれより長いか |
+
+### 裏の仕事（runner）
+
+runner は、本体のセッションにだけ、裏の仕事を扱う 3 つのツールを渡す。サブエージェントには渡さない。引数と説明の文は `packages/runner/src/tools.ts` が正である。断るときは、理由の文をツールのエラーとして返す。
+
+| ツール | 中身 | 断るとき |
+| --- | --- | --- |
+| `job_start` | `command`、任意の `cwd`・`timeout_seconds` を取る。コマンドが走り出したら、ID・コマンド・作業の場所・始まり・長さの上限・出力のファイルの JSON を返す | 作業の場所が無いか、ディレクトリでない。`timeout_seconds` が 1 から上限の秒の整数でない。走っている数が上限に達している（走っている仕事の一覧を添える） |
+| `job_list` | 引数を取らない。走っている仕事の、`job_start` が返すのと同じ形の JSON の配列を返す | なし |
+| `job_stop` | `id` を取る。仕事のプロセスのまとまりに `SIGTERM` を送り、終わらなければ 5 秒後に `SIGKILL` を送る。終わってから返る。終わりの出来事は `stopped` で送る | その ID の仕事が走っていない |
+
+- コマンドは `bash -c` で、自分のプロセスのまとまり（process group）の長として、エージェントと同じユーザー・同じ環境で走る。相対の作業の場所は HOME から引き、省けば HOME。
+- 仕事ごとに `~/jobs/<ID>/` を作り（`PENELOPE_JOBS` で場所を変えられる）、標準出力と標準エラー出力を 1 つのファイル `output.log` に書き、記録を `job.json` に置く。HOME の下なので永続する。ID は 8 桁の 16 進数である。
+- `job.json` は、ID・コマンド・作業の場所・プロセスのまとまりの長の pid・始まり・長さの上限と、backend がまだ受けていない終わり（`pending`）か、受けた印（`done`）を持つ。消さない。
+- 終わったら、終わりを記録に足してから送る。backend が受けたら（`202`）記録で受けた印にする。受けなければ同じ `id` で送り直す（1 秒から倍にして 30 秒まで間を空ける）。
+- 長さの上限に達したら、`job_stop` と同じくプロセスのまとまりを止め、`timed-out` で知らせる。コマンドの長が自分で終わっても、そのまとまりに残った子は止めない。
+- 夜の切り替えは裏の仕事に触らない。終わりの出来事は、そのとき走っている本体のセッションに届く。
+- runner が止まるときは、走っている仕事のまとまりを `SIGKILL` で止め、知らせは送らない。記録は走っているままにする。runner が立ち上がったら、走っているままの記録のまとまりに `SIGKILL` を送り（残っていれば）、`interrupted` の終わりを送る。送れていない終わりも送る。pid が別のまとまりに使い回されていれば、それを止めてしまう。sandbox の中のプロセスはエージェントのものだけなので、受け入れる。
+
+| 設定（runner の環境変数） | 既定 | 中身 |
+| --- | --- | --- |
+| `PENELOPE_JOBS` | `$HOME/jobs` | 裏の仕事の記録と出力の置き場所 |
+| `PENELOPE_JOBS_MAX` | `5` | 同時に走る数の上限 |
+| `PENELOPE_JOB_MAX_SECONDS` | `86400`（24 時間） | 1 つの仕事の長さの上限。`timeout_seconds` を省いたときの長さ |
+| `PENELOPE_JOB_TAIL_CHARS` | `4000` | 終わりの出来事の `tail` の字数の上限 |
 
 ## サブエージェントの状態
 

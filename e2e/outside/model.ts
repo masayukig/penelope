@@ -76,6 +76,11 @@ export function script(messages: readonly ChatMessage[]): Answer {
     if (input.includes("E2E-SUB-RESULT")) {
       return [{ calls: [subAgent("subagent_close", { name: "e2e-sub" })] }, { calls: [reply("E2E-REPLY-SUB")] }, { text: "Closed it." }];
     }
+    // A background job: started in one turn, its end, with the tail of its output, starting another (ADR-0030).
+    if (input.includes("E2E-JOB-START")) {
+      return [{ calls: [{ name: "job_start", args: { command: "sleep 2; echo E2E-JOB-$((6 * 7))" } }] }, { text: "Started the job." }];
+    }
+    if (input.includes("E2E-JOB-42")) return [{ calls: [reply("E2E-REPLY-JOB")] }, { text: "The job ended." }];
     if (system.includes("You are the curator")) {
       return [{ calls: [write("/memory/INDEX.md", "# Index\n\n- notes/e2e.md: the end-to-end test's notes.\n")] }, { text: "Tidied." }];
     }

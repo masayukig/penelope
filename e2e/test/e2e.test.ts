@@ -581,6 +581,43 @@ describe("the Pod end to end", () => {
     assert.match(log, /Turn [0-9a-f-]{36}\nAgent: e2e-sub\n+notes\/e2e-sub\.md\n/);
   }));
 
+  it("runs a background job and brings its end, with the tail of its output, into a turn", track(async () => {
+    // Guards against: a job_start that holds the turn until the command ends, or an end that does not reach the main
+    // agent inline with how it ended and its output (ADR-0030).
+    await send("E2E-JOB-START");
+    await replied("E2E-REPLY-JOB", 180_000);
+
+    // job_start answered with the job and its file, not with what the command printed.
+    const [started] = await callsFor("E2E-JOB-START", 1);
+    assert.ok(started, "the turn that started the job");
+    const result = JSON.stringify(started.messages.filter((message) => message.role === "tool"));
+    assert.match(result, /\/home\/agent\/jobs\/[0-9a-f]+\/output\.log/);
+    assert.ok(!result.includes("E2E-JOB-42"));
+
+    // The end came as an inline `job` event: its payload, tail and all, is in the turn.
+    const [ended] = await callsFor("E2E-JOB-42", 0);
+    assert.ok(ended, "a turn from the job's end");
+    const line = eventLines(where(ended).input).find((entry) => entry.kind === undefined && entry.source === "job");
+    assert.ok(line && line.kind === undefined && line.text !== undefined, where(ended).input);
+    assert.equal(line.delivery, "now");
+    assert.equal(line.appended, undefined, "inline, so no place to read it from");
+    const payload = JSON.parse(line.text) as Record<string, unknown>;
+    assert.deepEqual(
+      [payload.end, payload.exit_code, payload.command, payload.tail, payload.tail_truncated],
+      ["exited", 0, "sleep 2; echo E2E-JOB-$((6 * 7))", "E2E-JOB-42\n", false],
+    );
+    assert.match(String(payload.output), /^\/home\/agent\/jobs\/[0-9a-f]+\/output\.log$/);
+    assert.equal(exec("sandbox", `cat ${payload.output}`).stdout, "E2E-JOB-42\n");
+
+    // And it was appended to /sources/job/ like any other event.
+    const day = new Date().toISOString().slice(0, 10);
+    const lines = exec("sandbox", `cat /sources/job/${day}.jsonl`).stdout.trim().split("\n").map((text) => JSON.parse(text));
+    assert.deepEqual(
+      lines.map((entry) => [entry.source, entry.id, entry.summary]),
+      [["job", payload.job, "[exit 0] sleep 2; echo E2E-JOB-$((6 * 7))"]],
+    );
+  }));
+
   it("makes a turn of a heartbeat after the quiet minutes, and asks nothing before folding it", track(async () => {
     // Guards against: no heartbeat after a quiet stretch (ADR-0031), a heartbeat that carries more than the fact,
     // a second one queued before the first one's turn has ended, or a heartbeat's turn with no tool costing a
