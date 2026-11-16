@@ -371,7 +371,7 @@ Slack の Socket Mode で、1 つ以上のワークスペースの発言・編�
 | OAuth & Permissions の Bot Token Scopes | `channels:history`・`groups:history`・`im:history`・`mpim:history`（発言と取り直し）、`channels:read`・`groups:read`・`im:read`・`mpim:read`（チャンネルの名前と一覧）、`users:read`（人の名前）、`reactions:read`（取り直した発言のリアクション）、`files:read`（ファイル） |
 | App Home | DM を受けるなら、Messages Tab を有効にし、メッセージを送れるようにする |
 
-- エージェントが投稿に使う scope（`chat:write` など）は、Sentinel が持つ token の側の話で、受けるのには要らない。同じ App の bot の token を両方で使うときは、両方の scope を持たせる（ADR-0028 の Consequences）。
+- エージェントが投稿に使う scope は、Sentinel が持つ token の側の話で、受けるのには要らない。下の「投稿の CLI」には `chat:write`（投稿）、`chat:write.customize`（表情のアイコン）、`files:write`（画像）と、チャンネルを名前で探すための `channels:read`・`groups:read` が要る。同じ App の bot の token を両方で使うときは、両方の scope を持たせる（ADR-0028 の Consequences）。
 - bot は、入っているチャンネルの出来事だけを受ける。受けたいチャンネルに bot を招く。
 - `app_mention` は購読しなくてよい。メンションは `message.*` で届く。購読しても、読まずに受けたことだけを返す。
 - 取り直しは `conversations.history` と `conversations.replies` を呼ぶ。Slack は 2025 年に、Marketplace に出していない配布の App のこの 2 つの上限を大きく下げた。自分のワークスペースにだけ入れる App として作る。
@@ -521,6 +521,32 @@ Slack の出来事をターンに描いて載せるには、配置が、この�
 
 - どれも `--sources <場所>`（既定 `/sources`）、`--source <名前>`（既定 `slack`。有効化の `source` を変えた配置で使う）、`--time-zone <時間帯>` を受ける。
 - 無い `stream` や `thread` は終了コード 1、書き方の誤りは 2 で、標準エラーに理由と使い方を書く。
+
+### 投稿の CLI
+
+同じ `slackctl` で、エージェントとして Slack に投稿する（[ADR-0033](adr/0033-slack-posts-through-slackctl-with-the-token-stand-in.md)）。通信は Sentinel を通り、鍵はサロゲートのまま送る。curl で Web API を呼んでもよい。
+
+| 書き方 | すること |
+| --- | --- |
+| `slackctl post --channel <チャンネル> [--workspace <名前>] [--thread <ts>] [--face <表情>] [--image <ファイル>]...` | 標準入力の本文を `chat.postMessage` で投稿し、続けて画像を共有する |
+| `slackctl faces` | `--face` に書ける表情と、Slack に渡すアイコンの URL |
+
+- 本文は標準入力を UTF-8 として読み、末尾の空白と改行を除いて、そのまま送る（複数行も Slack の記法もそのまま）。画像だけを送るときは標準入力を空にする（`</dev/null`）。本文も画像も無ければ書き方の誤りである。
+- `--channel` はチャンネルの ID（`C…`・`G…`・`D…`）か名前（`#` は付けても付けなくてもよい）。名前は `users.conversations` で、bot の入っている公開・非公開のチャンネルから探す。DM は ID で書く（読み取りの見出しの `channel <ID>`）。
+- `--thread` はスレッドの親の発言の `ts`。本文も画像もそのスレッドに入る。
+- `--image` は何度でも書ける。画像は Slack の 3 段で送る: `files.getUploadURLExternal`（`filename` と `length`）→ 返った `upload_url` へ中身を POST（`application/octet-stream`、`Authorization` を付けない）→ 全部を 1 回の `files.completeUploadExternal` で、本文と同じチャンネル（とスレッド）に共有する。本文があれば、画像は本文の後の別の投稿になる。
+- `--face` を書くと、表情の画像の URL を、本文の投稿と画像の共有の `icon_url` に入れる。URL は `PENELOPE_PUBLIC_URL` の `/api/agent`（ログインなし）が返す表情の道（[ui-api.md](ui-api.md) の「エージェント」、画像の拡張子で終わる）で、Slack はそれを外から取りにくる。投稿の名前は変えない。
+
+| 環境変数（sandbox） | 中身 |
+| --- | --- |
+| `SLACK_BOT_TOKEN` | `--workspace` を書かないときの bot の token のサロゲート |
+| `SLACK_BOT_TOKEN_<名前>` | `--workspace <名前>` のときのサロゲート。`<名前>` はワークスペースの名前を大文字にし、`-` を `_` にしたもの（`--workspace home-two` なら `SLACK_BOT_TOKEN_HOME_TWO`）。ワークスペースの名前は上の「設定」の `workspaces[].name` と同じ形 |
+| `PENELOPE_PUBLIC_URL` | オーナーが backend に届く公開の URL（backend の同じ名前の設定と同じ値）。`--face` と `faces` が使う |
+
+- 配置は、`slack.com` の登録に、各サロゲートを本物の bot の token に差し替える `bearer` の `credentials` を書く（[sentinel-config.md](sentinel-config.md)）。アップロード先（`files.slack.com`）にはサロゲートを送らない。
+- 出力は、投稿した順に 1 行ずつ、タブで区切る。本文は `message <チャンネルの ID> <ts> <permalink>`（permalink は `chat.getPermalink` で取り、取れなければ省く）、画像は `file <ファイルの ID> <名前>`。
+- 終了コードは、投稿し終えたら 0、Slack が断った・届かない・サロゲートの環境変数が無い・画像が読めない・表情やチャンネルが無いときは 1、書き方の誤りは 2。標準エラーに理由を書く（Slack が断ったときは `<メソッド>: <Slack のエラー>`）。
+- 環境変数・画像・表情・チャンネルは、何かを投稿する前にすべて確かめる。本文を投稿した後に画像で失敗したときは、投稿した分を出力に残して 1 で終わる。
 
 ## 後に足すプラグイン
 

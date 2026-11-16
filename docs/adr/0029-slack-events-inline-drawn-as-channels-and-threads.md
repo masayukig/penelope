@@ -87,6 +87,7 @@ ADR-0013 は、受信元のプラグインが `/sources` の中身を読むた�
 - Related: ADR-0017 ターンの入力は 1 行 1 件の JSON を `<events>` で囲み、1 件の型を契約にする（`batch` のまとめの行に、描いた文を足す）
 - Related: ADR-0023 receivers のプラグインはリポジトリの中に持って配置の設定で有効にし、最初に Alertmanager の webhook を受ける（`source` は配置が決める）
 - Related: ADR-0028 Slack は receivers のプラグインが Socket Mode で受け、つなぎ直しのたびに最近の発言を取り直す
+- Related: ADR-0033 Slack への投稿は読み取りの CLI に足し、鍵はサロゲートのまま Sentinel を通す（読み取り用の CLI に投稿を足した）
 
 ## References
 
