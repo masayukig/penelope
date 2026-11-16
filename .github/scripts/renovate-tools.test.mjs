@@ -15,6 +15,8 @@ const tools = [
   ["GH", "cli/cli", "v2.103.3", "2.103.3"],
   ["VMCTL", "yuanying/vmapi", "v0.2.0", "v0.2.0"],
   ["A2A", "a2aproject/a2a-cli", "v0.2.0", "0.2.0"],
+  // Built with go install from the release's tag, not downloaded.
+  ["SDCTL", "yuanying/sdctl", "v0.5.0", "v0.5.0"],
 ];
 
 for (const [name, depName, tag, value] of tools) {

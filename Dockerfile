@@ -136,6 +136,21 @@ RUN KUBECTL_VERSION=$KUBECTL_VERSION HELM_VERSION=$HELM_VERSION KUSTOMIZE_VERSIO
     SOPS_VERSION=$SOPS_VERSION GH_VERSION=$GH_VERSION VMCTL_VERSION=$VMCTL_VERSION A2A_VERSION=$A2A_VERSION \
     /fetch-tools.sh "$TARGETARCH" /out
 
+# sdctl, the CLI of Stable Diffusion's WebUI, which the agents draw with
+# (ADR-0032). Its releases carry no binary, so it is built here from its Go
+# module at the release's tag, for the target's architecture; go install
+# checks the module against Go's checksum database. Renovate reads
+# SDCTL_VERSION from the repository's GitHub releases.
+FROM --platform=$BUILDPLATFORM golang:1.27.4-trixie AS sandbox-sdctl
+ARG TARGETOS TARGETARCH
+ARG SDCTL_VERSION=v0.5.0
+RUN --mount=type=cache,target=/root/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go install -trimpath -ldflags "-s -w" "github.com/yuanying/sdctl@${SDCTL_VERSION}" \
+    && mkdir -p /out \
+    && install -m 0755 "$(find /go/bin -type f -name sdctl | head -n 1)" /out/sdctl
+
 # The Go toolchain of the target platform, copied whole.
 FROM golang:1.27.4-trixie AS sandbox-go
 
@@ -186,6 +201,7 @@ RUN apt-get update \
 COPY --from=sandbox-go /usr/local/go /usr/local/go
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /usr/local/bin/
 COPY --from=sandbox-tools /out/ /usr/local/bin/
+COPY --from=sandbox-sdctl /out/sdctl /usr/local/bin/sdctl
 COPY --from=sandbox-porkadot /var/lib/gems/ /var/lib/gems/
 COPY --from=sandbox-porkadot /usr/local/bin/porkadot /usr/local/bin/porkadot
 COPY packages/runner/image/entrypoint.sh /usr/local/bin/penelope-sandbox
