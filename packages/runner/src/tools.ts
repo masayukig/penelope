@@ -5,7 +5,11 @@
 // (ADR-0022), and those of her background jobs (ADR-0030). Their
 // descriptions state what they do (ADR-0008).
 
+import { readFile, stat } from "node:fs/promises";
+import { basename, resolve } from "node:path";
+
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX, type ReplyImageUpload } from "@penelope/contract";
 import { Type } from "typebox";
 
 import type { Backend } from "./backend.ts";
@@ -16,7 +20,30 @@ function text(value: string) {
   return { content: [{ type: "text" as const, text: value }], details: undefined };
 }
 
-export function backendTools(backend: Backend): ToolDefinition[] {
+/**
+ * The files of a reply's images, read: each a regular file of at most the
+ * limit, relative paths from HOME. The backend tells their kind from their
+ * bytes; the runner only spares reading and sending what cannot pass.
+ */
+async function readImages(paths: readonly string[], home: string): Promise<ReplyImageUpload[]> {
+  if (paths.length > REPLY_IMAGES_MAX) throw new Error(`Not sent: a reply carries at most ${REPLY_IMAGES_MAX} images, not ${paths.length}.`);
+  const images: ReplyImageUpload[] = [];
+  for (const path of paths) {
+    const file = resolve(home, path);
+    try {
+      const info = await stat(file);
+      if (!info.isFile()) throw new Error("not a file");
+      if (info.size > REPLY_IMAGE_MAX_BYTES) throw new Error(`${info.size} bytes, over the ${REPLY_IMAGE_MAX_BYTES} an image may have`);
+      images.push({ name: basename(file), data: (await readFile(file)).toString("base64") });
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      throw new Error(`Not sent: ${path}: ${why}.`);
+    }
+  }
+  return images;
+}
+
+export function backendTools(backend: Backend, { home }: { home: string }): ToolDefinition[] {
   const reply = defineTool({
     name: "reply",
     label: "Reply",
@@ -31,9 +58,16 @@ export function backendTools(backend: Backend): ToolDefinition[] {
         }),
       ),
       in_reply_to: Type.Optional(Type.Integer({ description: "The seq of the event this answers." })),
+      images: Type.Optional(
+        Type.Array(Type.String(), {
+          description: `Paths of image files to show with the message, relative to your home or absolute: PNG, JPEG, GIF or WebP, at most ${REPLY_IMAGES_MAX}, each at most ${REPLY_IMAGE_MAX_BYTES} bytes. The owner sees copies taken when it is sent; changing a file later does not change them. If one of them cannot be sent, nothing of the message is sent, and the error says why.`,
+        }),
+      ),
     }),
     async execute(_id, params) {
-      const { id } = await backend.reply(params);
+      const { images: paths, ...rest } = params;
+      const images = paths === undefined || paths.length === 0 ? undefined : await readImages(paths, home);
+      const { id } = await backend.reply({ ...rest, ...(images === undefined ? {} : { images }) });
       return text(`Sent (id ${id}).`);
     },
   });

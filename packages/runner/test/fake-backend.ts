@@ -42,6 +42,8 @@ export class FakeBackend {
   private readonly schedules: Schedule[] = [];
   private waiters: (() => void)[] = [];
   private replies = 0;
+  /** When set, every reply is refused with a 400 and this error, as the backend refuses an image. */
+  refuseReplies: string | undefined;
   private readonly server: Server;
 
   constructor() {
@@ -146,7 +148,10 @@ export class FakeBackend {
       for (const seq of (body as { seqs: number[] }).seqs) if (!this.dropAcks.has(seq)) this.acked.add(seq);
       return answer(204);
     }
-    if (key === "POST /v1/replies") return answer(201, { id: `r-${++this.replies}` });
+    if (key === "POST /v1/replies") {
+      if (this.refuseReplies !== undefined) return answer(400, { error: this.refuseReplies });
+      return answer(201, { id: `r-${++this.replies}` });
+    }
     if (key === "POST /v1/a2a/replies") {
       const { in_reply_to, state } = body as { in_reply_to: number; state: string };
       return in_reply_to === 404 ? answer(404, { error: "the event 404 is not a message of an A2A task" }) : answer(200, { task_id: "t-1", state });

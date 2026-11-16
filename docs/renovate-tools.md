@@ -23,6 +23,12 @@ update, grouping and automerge policies are unchanged.
 | GH_VERSION | cli/cli | v2.103.3 | 2.103.3 |
 | VMCTL_VERSION | yuanying/vmapi | v0.2.0 | v0.2.0 |
 | A2A_VERSION | a2aproject/a2a-cli | v0.2.0 | 0.2.0 |
+| SDCTL_VERSION | yuanying/sdctl | v0.5.0 | v0.5.0（`go install` に渡す） |
+
+sdctl's releases carry no binary: the Dockerfile's `sandbox-sdctl` stage builds
+it with `go install github.com/yuanying/sdctl@${SDCTL_VERSION}` for the target
+architecture, so the value is the release tag itself. Its releases are still
+read for their publication times.
 
 GitHub release tags and asset names were checked against the download script.
 Kustomize also publishes `kyaml/`, `cmd/config/`, and other module releases:

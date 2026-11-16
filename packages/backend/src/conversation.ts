@@ -1,11 +1,14 @@
 // The conversation and the record of the turns (ADR-0002, docs/ui-api.md):
 // the owner's messages and the replies as history, what the turns did block
 // by block, and the nightly switches. What is new also goes down the feed.
+// A reply's images are kept by the assets (ADR-0032).
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-import type { Activity, AgentId, AgentState, HistoryEntry, HistoryResponse, ReplyRequest, Trigger } from "@penelope/contract";
+import type { Activity, AgentId, AgentState, HistoryEntry, HistoryResponse, ReplyImage, ReplyRequest, Trigger } from "@penelope/contract";
 
+import type { Assets, CheckedImage } from "./assets.ts";
+import { transaction } from "./db.ts";
 import type { Feed } from "./feed.ts";
 import { iso } from "./time.ts";
 
@@ -27,11 +30,14 @@ export class Conversation {
   private readonly db: DatabaseSync;
   private readonly feed: Feed;
   private readonly now: () => number;
+  private readonly assets: Assets | undefined;
 
-  constructor(db: DatabaseSync, feed: Feed, { now }: { now: () => number }) {
+  /** Without `assets`, a reply carries no images. */
+  constructor(db: DatabaseSync, feed: Feed, { now, assets }: { now: () => number; assets?: Assets }) {
     this.db = db;
     this.feed = feed;
     this.now = now;
+    this.assets = assets;
   }
 
   /** The owner's message, kept under the id of the `ui` event it became. */
@@ -41,12 +47,28 @@ export class Conversation {
       .run(id, iso(this.now()), text);
   }
 
-  reply(request: ReplyRequest): { id: string } {
+  /**
+   * Keeps the reply with copies of its images, tied to it, and sends it down
+   * the feed. All of it is kept or none: when the copies cannot be written,
+   * it throws AssetStoreError and the reply is not taken (ADR-0032).
+   */
+  reply(request: Omit<ReplyRequest, "images">, images: readonly CheckedImage[] = []): { id: string } {
     const id = randomUUID();
     const at = iso(this.now());
-    this.db
-      .prepare("INSERT INTO history (id, kind, agent, at, text, expression, in_reply_to) VALUES (?, 'agent', ?, ?, ?, ?, ?)")
-      .run(id, request.agent, at, request.text, request.expression ?? null, request.in_reply_to ?? null);
+    if (images.length > 0 && this.assets === undefined) throw new Error("this conversation keeps no images");
+    const stored = images.length === 0 ? [] : this.assets!.write(images);
+    try {
+      transaction(this.db, () => {
+        this.db
+          .prepare("INSERT INTO history (id, kind, agent, at, text, expression, in_reply_to) VALUES (?, 'agent', ?, ?, ?, ?, ?)")
+          .run(id, request.agent, at, request.text, request.expression ?? null, request.in_reply_to ?? null);
+        if (stored.length > 0) this.assets!.record(id, request.agent, stored);
+      });
+    } catch (error) {
+      this.assets?.discard(stored);
+      throw error;
+    }
+    const kept: ReplyImage[] = stored.map(({ id: imageId, mime_type, size, name }) => ({ id: imageId, mime_type, size, name }));
     const trigger = request.in_reply_to === undefined ? undefined : this.triggerOf(request.in_reply_to);
     this.feed.publish({
       event: "reply",
@@ -58,6 +80,7 @@ export class Conversation {
         agent: request.agent,
         ...(request.expression === undefined ? {} : { expression: request.expression }),
         ...(trigger === undefined ? {} : { trigger }),
+        ...(kept.length === 0 ? {} : { images: kept }),
       },
     });
     return { id };
@@ -88,7 +111,8 @@ export class Conversation {
       .all(below, limit + 1) as Row[];
     const more = rows.length > limit;
     const entries = rows.slice(0, limit);
-    return { entries: entries.map(entry), ...(more ? { before: String(entries.at(-1)!.row) } : {}) };
+    const images = this.assets?.ofReplies(entries.filter((row) => row.kind === "agent").map((row) => row.id)) ?? new Map<string, ReplyImage[]>();
+    return { entries: entries.map((row) => entry(row, images.get(row.id))), ...(more ? { before: String(entries.at(-1)!.row) } : {}) };
   }
 
   /**
@@ -128,7 +152,7 @@ export class Conversation {
   }
 }
 
-function entry(row: Row): HistoryEntry {
+function entry(row: Row, images: ReplyImage[] | undefined): HistoryEntry {
   if (row.kind === "owner") return { kind: "owner", id: row.id, at: row.at, text: row.text };
   return {
     kind: "agent",
@@ -138,5 +162,6 @@ function entry(row: Row): HistoryEntry {
     agent: row.agent ?? "main",
     ...(row.expression === null ? {} : { expression: row.expression }),
     ...(row.trigger_source === null || row.trigger_summary === null ? {} : { trigger: { source: row.trigger_source, summary: row.trigger_summary } }),
+    ...(images === undefined ? {} : { images }),
   };
 }

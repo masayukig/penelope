@@ -18,6 +18,8 @@ export class ConfigError extends Error {}
 
 export type Config = {
   databasePath: string;
+  /** Where the copies of what the agents made are kept (ADR-0032). */
+  assetsDir: string;
   sourcesDir: string;
   memoryDir: string;
   intakeSocket: string;
@@ -164,9 +166,12 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
   }
 
   const avatar = avatarOf(get("PENELOPE_AVATARS_DIR") ?? "/app/avatars", get("PENELOPE_AVATAR"), readFile);
+  const databasePath = get("PENELOPE_DATABASE") ?? "/var/lib/penelope/backend.sqlite";
 
   return {
-    databasePath: get("PENELOPE_DATABASE") ?? "/var/lib/penelope/backend.sqlite",
+    databasePath,
+    // Beside the database by default: the same persistent place, which the backend alone mounts.
+    assetsDir: get("PENELOPE_ASSETS_DIR") ?? path.join(path.dirname(databasePath), "assets"),
     sourcesDir: get("PENELOPE_SOURCES_DIR") ?? "/sources",
     memoryDir: get("PENELOPE_MEMORY_DIR") ?? "/memory",
     intakeSocket: get("PENELOPE_INTAKE_SOCKET") ?? "/run/penelope/intake/backend.sock",

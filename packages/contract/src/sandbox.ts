@@ -128,8 +128,18 @@ export type ReplyRequest = FromAgent & {
   expression?: string;
   /** The `seq` of the event it answers. */
   in_reply_to?: number;
+  /** Images to show with it, read from files in the sandbox: at most REPLY_IMAGES_MAX (ADR-0032). */
+  images?: ReplyImageUpload[];
 };
 export type ReplyResponse = { id: string };
+
+/** One image of a reply, as the runner read it from a file in the sandbox. */
+export type ReplyImageUpload = {
+  /** The file's name, without its directory. */
+  name: string;
+  /** The file's bytes, in base64. */
+  data: string;
+};
 
 type ActivityBase = { at: string; turn_id: string };
 

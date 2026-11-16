@@ -43,7 +43,7 @@ export class FakeClock {
 
 export type Target = { socketPath: string } | { port: number };
 
-export type Answer = { status: number; headers: http.IncomingHttpHeaders; text: string; json: () => any };
+export type Answer = { status: number; headers: http.IncomingHttpHeaders; text: string; body: Buffer; json: () => any };
 
 export type Ask = {
   method?: string;
@@ -67,8 +67,9 @@ export function ask(target: Target, pathname: string, options: Ask = {}): Promis
         const chunks: Buffer[] = [];
         response.on("data", (chunk: Buffer) => chunks.push(chunk));
         response.on("end", () => {
-          const text = Buffer.concat(chunks).toString("utf8");
-          resolve({ status: response.statusCode ?? 0, headers: response.headers, text, json: () => JSON.parse(text) });
+          const body = Buffer.concat(chunks);
+          const text = body.toString("utf8");
+          resolve({ status: response.statusCode ?? 0, headers: response.headers, text, body, json: () => JSON.parse(text) });
         });
         response.on("error", reject);
       },

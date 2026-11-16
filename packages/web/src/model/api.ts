@@ -11,6 +11,11 @@ import type {
   SubAgentsResponse,
 } from "@penelope/contract";
 
+/** Where the bytes of a copy the backend keeps are read: an image of a reply (ADR-0032). They never change. */
+export function assetUrl(id: string): string {
+  return `/api/assets/${encodeURIComponent(id)}`;
+}
+
 export type Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 /** The session is gone or never was: the owner has to log in. */

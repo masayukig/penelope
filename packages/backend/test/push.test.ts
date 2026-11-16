@@ -123,6 +123,15 @@ describe("the notice of a reply", () => {
     assert.deepEqual(notice, { id: "r1", agent: "Iris", text: "終わりました", expression: "happy" } satisfies Notice);
   });
 
+  it("says how many images the reply has, and carries none of them", () => {
+    // Guards against: a notice that does not say the reply has images, or that grows with their bytes (ADR-0032).
+    const images = [1, 2].map((n) => ({ id: `a${n}`, mime_type: "image/png", size: 100, name: `${n}.png` }));
+    const notice = noticeOf({ kind: "agent", id: "r1", at: "2026-11-16T00:00:00Z", text: "描いたよ", agent: "main", images }, "Iris");
+    assert.deepEqual(notice, { id: "r1", agent: "Iris", text: "描いたよ", images: 2 } satisfies Notice);
+    const none = noticeOf({ kind: "agent", id: "r2", at: "2026-11-16T00:00:00Z", text: "x", agent: "main", images: [] }, "Iris");
+    assert.equal("images" in none, false);
+  });
+
   it("cuts a long reply short, without breaking a character", () => {
     const text = "😀".repeat(NOTICE_TEXT_LENGTH + 10);
     const notice = noticeOf({ kind: "agent", id: "r1", at: "2026-11-16T00:00:00Z", text, agent: "main" }, "Iris");

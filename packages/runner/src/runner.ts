@@ -126,7 +126,7 @@ export class Runner {
     });
     this.setup = {
       ...pi,
-      tools: [...backendTools(options.backend), ...subAgentTools(this.subAgents), ...jobTools(this.jobs, options.config.jobs)],
+      tools: [...backendTools(options.backend, { home: options.config.home }), ...subAgentTools(this.subAgents), ...jobTools(this.jobs, options.config.jobs)],
       extensions: [
         foldExtension({
           folding: () => options.config.turnFold,

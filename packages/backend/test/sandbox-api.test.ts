@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import type { StreamEvent } from "@penelope/contract";
+import { REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX, type StreamEvent } from "@penelope/contract";
 
 import { Inbox } from "../src/a2a/inbox.ts";
 import { SubAgents } from "../src/agents.ts";
+import { Assets } from "../src/assets.ts";
 import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
 import { Feed } from "../src/feed.ts";
@@ -41,7 +42,9 @@ async function setup(
   const feed = new Feed();
   const streamed: StreamEvent[] = [];
   feed.subscribe(undefined, (_id, event) => streamed.push(event));
-  const conversation = new Conversation(db, feed, { now: clock.now });
+  const assetsDir = path.join(dir, "assets");
+  const assets = new Assets(db, assetsDir, { now: clock.now });
+  const conversation = new Conversation(db, feed, { now: clock.now, assets });
   const agents = new SubAgents(db, feed, conversation, { now: clock.now });
   const memoryDir = path.join(dir, "memory");
   mkdirSync(memoryDir);
@@ -59,8 +62,17 @@ async function setup(
   });
   const call = (pathname: string, options: Ask = {}) =>
     ask({ socketPath }, pathname, { ...options, headers: { authorization: `Bearer ${TOKEN}`, ...options.headers } });
-  return { queue, conversation, agents, streamed, memoryDir, sourcesDir: path.join(dir, "sources"), call, socketPath, inbox, db, feed, clock };
+  return { queue, conversation, agents, streamed, memoryDir, sourcesDir: path.join(dir, "sources"), call, socketPath, inbox, db, feed, clock, assets, assetsDir };
 }
+
+/** The first bytes of each kind of image a reply may carry, followed by `padding` zero bytes. */
+const image = {
+  png: (padding = 0) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(padding)]),
+  jpeg: () => Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]),
+  gif: () => Buffer.from("GIF89a-gif"),
+  webp: () => Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBPVP8 ")]),
+};
+const upload = (name: string, bytes: Buffer) => ({ name, data: bytes.toString("base64") });
 
 const self = (id: string) => ({ agent: "main", id, summary: `note ${id}`, payload: { id } });
 
@@ -225,6 +237,92 @@ describe("the sandbox's API", () => {
       const { call } = await setup(t);
       assert.equal((await call("/v1/replies", { json: { agent: "main" } })).status, 400);
       assert.equal((await call("/v1/replies", { json: { agent: "main", text: "x", in_reply_to: "3" } })).status, 400);
+    });
+  });
+
+  describe("replies with images", () => {
+    it("keep a copy of each image, tied to the reply, in the history and down the stream", async (t) => {
+      // Guards against: an image the owner is not shown, shown in another order, or read from the sandbox's file later.
+      const { call, conversation, streamed, assets } = await setup(t);
+      const sent = [image.png(100), image.jpeg(), image.gif(), image.webp()];
+      const answer = await call("/v1/replies", {
+        json: { agent: "main", text: "描いたよ", images: sent.map((bytes, i) => upload(`draw-${i}.img`, bytes)) },
+      });
+      assert.equal(answer.status, 201, answer.text);
+      const { id } = answer.json();
+      const [entry] = conversation.page().entries;
+      assert.equal(entry?.id, id);
+      assert.equal(entry?.kind, "agent");
+      const images = entry?.kind === "agent" ? (entry.images ?? []) : [];
+      assert.deepEqual(
+        images.map(({ mime_type, size, name }) => ({ mime_type, size, name })),
+        [
+          { mime_type: "image/png", size: sent[0]!.length, name: "draw-0.img" },
+          { mime_type: "image/jpeg", size: sent[1]!.length, name: "draw-1.img" },
+          { mime_type: "image/gif", size: sent[2]!.length, name: "draw-2.img" },
+          { mime_type: "image/webp", size: sent[3]!.length, name: "draw-3.img" },
+        ],
+      );
+      assert.equal(new Set(images.map((kept) => kept.id)).size, 4, "each copy has an id of its own");
+      images.forEach((kept, i) => {
+        const found = assets.get(kept.id);
+        assert.ok(found, kept.id);
+        assert.equal(found.mime_type, kept.mime_type);
+        assert.deepEqual(readFileSync(found.file), sent[i]);
+      });
+      const reply = streamed.find((event) => event.event === "reply");
+      assert.deepEqual(reply?.event === "reply" ? reply.data.images : undefined, images);
+    });
+
+    it("leave out the images of a reply that has none", async (t) => {
+      const { call, conversation, streamed } = await setup(t);
+      assert.equal((await call("/v1/replies", { json: { agent: "main", text: "x", images: [] } })).status, 201);
+      const [entry] = conversation.page().entries;
+      assert.ok(entry && !("images" in entry));
+      assert.ok(streamed[0]?.event === "reply" && !("images" in streamed[0].data));
+    });
+
+    it("take four images of the largest size in one reply", async (t) => {
+      // Guards against: a body limit that refuses what the limits of the images allow.
+      const { call, conversation } = await setup(t);
+      const largest = image.png(REPLY_IMAGE_MAX_BYTES - 8);
+      const images = Array.from({ length: REPLY_IMAGES_MAX }, (_, i) => upload(`big-${i}.png`, largest));
+      const answer = await call("/v1/replies", { json: { agent: "main", text: "大きいよ", images } });
+      assert.equal(answer.status, 201, answer.text.slice(0, 200));
+      const [entry] = conversation.page().entries;
+      assert.equal(entry?.kind === "agent" ? entry.images?.length : 0, REPLY_IMAGES_MAX);
+    });
+
+    for (const [why, images, said] of [
+      ["an image that is not PNG, JPEG, GIF or WebP", [upload("ok.png", image.png()), upload("notes.txt", Buffer.from("just text"))], /notes\.txt/],
+      ["an image with no bytes", [upload("empty.png", Buffer.alloc(0))], /empty\.png/],
+      ["an image over the size limit", [upload("huge.png", image.png(REPLY_IMAGE_MAX_BYTES - 7))], /huge\.png/],
+      ["more images than the limit", Array.from({ length: REPLY_IMAGES_MAX + 1 }, (_, i) => upload(`${i}.png`, image.png())), /at most 4/],
+      ["data that is not base64", [{ name: "x.png", data: "not base64!" }], /x\.png/],
+      ["an image without a name", [{ data: image.png().toString("base64") }], /name/],
+      ["images that are not a list", "x.png", /images/],
+    ] as const) {
+      it(`are refused whole, text and all, for ${why}`, async (t) => {
+        // Guards against: a reply that reaches the owner with an image missing, or a copy kept of what was refused.
+        const { call, conversation, streamed, assetsDir } = await setup(t);
+        const answer = await call("/v1/replies", { json: { agent: "main", text: "見て", images } });
+        assert.equal(answer.status, 400);
+        assert.match(answer.json().error, said);
+        assert.deepEqual(conversation.page().entries, []);
+        assert.deepEqual(streamed, []);
+        assert.deepEqual(existsSync(assetsDir) ? readdirSync(assetsDir) : [], []);
+      });
+    }
+
+    it("are refused whole with 500 when the copies cannot be written", async (t) => {
+      // Guards against: a reply that reaches the owner without the images it said it had.
+      const { call, conversation, streamed, assetsDir } = await setup(t);
+      writeFileSync(assetsDir, "not a directory");
+      const answer = await call("/v1/replies", { json: { agent: "main", text: "見て", images: [upload("a.png", image.png())] } });
+      assert.equal(answer.status, 500);
+      assert.match(answer.json().error, /images/);
+      assert.deepEqual(conversation.page().entries, []);
+      assert.deepEqual(streamed, []);
     });
   });
 
@@ -535,8 +633,16 @@ describe("the sandbox's API", () => {
 
   it("answers 413 to a body over the 16 MiB of the spec, and keeps none of it", async (t) => {
     // Guards against: a sandbox that can make the backend read and keep a body of any size.
+    const { call, streamed } = await setup(t);
+    const answer = await call("/v1/activity", { json: { agent: "main", activities: [], padding: "x".repeat(16 * 1024 * 1024) } });
+    assert.equal(answer.status, 413);
+    assert.deepEqual(streamed, []);
+  });
+
+  it("answers 413 to a reply over the 64 MiB of the spec, and keeps none of it", async (t) => {
+    // Guards against: a reply's images making the backend read and keep a body of any size.
     const { call, conversation } = await setup(t);
-    const answer = await call("/v1/replies", { json: { agent: "main", text: "x".repeat(16 * 1024 * 1024) } });
+    const answer = await call("/v1/replies", { json: { agent: "main", text: "x".repeat(64 * 1024 * 1024) } });
     assert.equal(answer.status, 413);
     assert.deepEqual(conversation.page().entries, []);
   });

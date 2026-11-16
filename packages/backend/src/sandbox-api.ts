@@ -8,6 +8,7 @@ import { type Activity, type AgentId, type DeliveredEvent, isSubAgentName, type 
 
 import { type Inbox, InboxRefusal } from "./a2a/inbox.ts";
 import type { SubAgents } from "./agents.ts";
+import { AssetStoreError, checkImages, ImageRefusal } from "./assets.ts";
 import type { Conversation } from "./conversation.ts";
 import { isTime } from "./envelope.ts";
 import { type Handler, HttpError, readJson, sendEmpty, sendJson } from "./http.ts";
@@ -20,6 +21,8 @@ import { iso } from "./time.ts";
 export const MAX_WAIT_SECONDS = 60;
 /** Replies and activity carry tool output, so the limit is generous. */
 export const DEFAULT_SANDBOX_BYTES = 16 * 1024 * 1024;
+/** A reply carries up to four images of 10 MiB in base64 (ADR-0032). */
+export const DEFAULT_REPLY_BYTES = 64 * 1024 * 1024;
 
 export type SandboxOptions = {
   /** The real token. Without one, every request is refused. */
@@ -34,6 +37,8 @@ export type SandboxOptions = {
   inbox: Inbox;
   now: () => number;
   maxBytes?: number;
+  /** The limit of a reply's body, which carries its images. */
+  maxReplyBytes?: number;
   log?: (line: string) => void;
 };
 
@@ -41,6 +46,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
   const { queue, conversation, agents, schedules, memory, inbox, now } = options;
   const log = options.log ?? console.error;
   const maxBytes = options.maxBytes ?? DEFAULT_SANDBOX_BYTES;
+  const maxReplyBytes = options.maxReplyBytes ?? DEFAULT_REPLY_BYTES;
   const expected = options.token === undefined || options.token === "" ? undefined : digest(options.token);
 
   return async (request, response) => {
@@ -94,17 +100,35 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         return;
       }
       case "POST /v1/replies": {
-        const { agent, text, expression, in_reply_to } = withAgent(await body());
+        const { agent, text, expression, in_reply_to, images } = withAgent(object(await readJson(request, maxReplyBytes)));
         mainOnly(agent, "replies to the owner");
         if (typeof text !== "string") throw new HttpError(400, "text must be a string");
         if (expression !== undefined && typeof expression !== "string") throw new HttpError(400, "expression must be a string");
         if (in_reply_to !== undefined && !Number.isSafeInteger(in_reply_to)) throw new HttpError(400, "in_reply_to must be a seq");
-        const reply = conversation.reply({
-          agent,
-          text,
-          ...(expression === undefined ? {} : { expression: expression as string }),
-          ...(in_reply_to === undefined ? {} : { in_reply_to: in_reply_to as number }),
-        });
+        // Any image that does not pass refuses the whole reply, its text too (ADR-0032).
+        let checked;
+        try {
+          checked = checkImages(images);
+        } catch (error) {
+          if (error instanceof ImageRefusal) throw new HttpError(400, `not sent: ${error.message}`);
+          throw error;
+        }
+        let reply;
+        try {
+          reply = conversation.reply(
+            {
+              agent,
+              text,
+              ...(expression === undefined ? {} : { expression: expression as string }),
+              ...(in_reply_to === undefined ? {} : { in_reply_to: in_reply_to as number }),
+            },
+            checked,
+          );
+        } catch (error) {
+          if (!(error instanceof AssetStoreError)) throw error;
+          log(`replies: ${error.message}`);
+          throw new HttpError(500, "not sent: the images could not be kept");
+        }
         sendJson(response, 201, reply);
         return;
       }

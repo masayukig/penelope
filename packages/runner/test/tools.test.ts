@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
+
+import { REPLY_IMAGE_MAX_BYTES } from "@penelope/contract";
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
@@ -9,14 +14,19 @@ import { FakeBackend, TOKEN } from "./fake-backend.ts";
 
 let fake: FakeBackend;
 let tools: Map<string, ToolDefinition>;
+let home: string;
 
-// Each test has a backend of its own, so that what one sent is not seen by the next.
+// Each test has a backend and a home of its own, so that what one sent is not seen by the next.
 beforeEach(async () => {
   fake = new FakeBackend();
+  home = mkdtempSync(join(tmpdir(), "runner-tools-"));
   const backend = new Backend({ url: await fake.url, token: TOKEN, agent: "main" });
-  tools = new Map(backendTools(backend).map((tool) => [tool.name, tool]));
+  tools = new Map(backendTools(backend, { home }).map((tool) => [tool.name, tool]));
 });
-afterEach(() => fake.close());
+afterEach(() => {
+  rmSync(home, { recursive: true, force: true });
+  return fake.close();
+});
 
 async function call(name: string, params: Record<string, unknown>): Promise<string> {
   const tool = tools.get(name);
@@ -33,6 +43,50 @@ test("the tools", () => {
 test("reply sends the text, the expression and the event it answers", async () => {
   assert.match(await call("reply", { text: "done", expression: "smile", in_reply_to: 13 }), /r-1/);
   assert.deepEqual(fake.sent("POST", "/v1/replies"), [{ agent: "main", text: "done", expression: "smile", in_reply_to: 13 }]);
+});
+
+test("reply sends the images it is given, read from their files, in their order", async () => {
+  // Guards against: an image she names not reaching the backend, or reaching it as another file's bytes.
+  mkdirSync(join(home, "out"));
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 2]);
+  writeFileSync(join(home, "out", "cat.png"), png);
+  writeFileSync(join(home, "dog.jpg"), jpeg);
+  assert.match(await call("reply", { text: "描いたよ", images: ["out/cat.png", join(home, "dog.jpg")] }), /r-1/);
+  assert.deepEqual(fake.sent("POST", "/v1/replies"), [
+    {
+      agent: "main",
+      text: "描いたよ",
+      images: [
+        { name: "cat.png", data: png.toString("base64") },
+        { name: "dog.jpg", data: jpeg.toString("base64") },
+      ],
+    },
+  ]);
+});
+
+test("reply sends nothing when an image cannot be read, and says which", async () => {
+  // Guards against: a reply that reaches the owner without an image she meant to show.
+  writeFileSync(join(home, "ok.png"), "x");
+  mkdirSync(join(home, "folder"));
+  await assert.rejects(call("reply", { text: "見て", images: ["ok.png", "missing.png"] }), /missing\.png/);
+  await assert.rejects(call("reply", { text: "見て", images: ["folder"] }), /folder/);
+  await assert.rejects(call("reply", { text: "見て", images: ["1", "2", "3", "4", "5"] }), /at most 4/);
+  assert.deepEqual(fake.sent("POST", "/v1/replies"), []);
+});
+
+test("reply sends nothing for an image over the size limit, and does not read it", async () => {
+  // Guards against: a file of any size read into memory and sent through the Sentinel.
+  writeFileSync(join(home, "huge.png"), "");
+  truncateSync(join(home, "huge.png"), REPLY_IMAGE_MAX_BYTES + 1);
+  await assert.rejects(call("reply", { text: "見て", images: ["huge.png"] }), /huge\.png/);
+  assert.deepEqual(fake.sent("POST", "/v1/replies"), []);
+});
+
+test("reply gives the backend's refusal of an image as its error", async () => {
+  fake.refuseReplies = "not sent: image 1 (notes.png) is not a PNG, JPEG, GIF or WebP image";
+  writeFileSync(join(home, "notes.png"), "just text");
+  await assert.rejects(call("reply", { text: "見て", images: ["notes.png"] }), /notes\.png\) is not a PNG/);
 });
 
 test("reply_to_agent answers in the task of the a2a event it names", async () => {

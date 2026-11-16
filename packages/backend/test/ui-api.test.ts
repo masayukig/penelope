@@ -7,6 +7,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 
 import { SubAgents } from "../src/agents.ts";
+import { Assets } from "../src/assets.ts";
 import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
 import { Feed } from "../src/feed.ts";
@@ -86,7 +87,8 @@ async function setup(
     redeliverMs: 300_000,
   });
   const feed = new Feed();
-  const conversation = new Conversation(db, feed, { now });
+  const assets = new Assets(db, path.join(dir, "assets"), { now });
+  const conversation = new Conversation(db, feed, { now, assets });
   const agents = new SubAgents(db, feed, conversation, { now });
   const schedules = new Schedules(db, { now, timeZone: "Asia/Tokyo" });
   const github = await fakeGitHub(t);
@@ -101,6 +103,7 @@ async function setup(
     uiHandler({
       queue,
       conversation,
+      assets,
       agents,
       schedules,
       feed,
@@ -127,7 +130,7 @@ async function setup(
   const signIn = () => cookieOf(sessions.create(OWNER).token);
   const call = (pathname: string, cookie: string | undefined, options: Ask = {}) =>
     ask(target, pathname, { ...options, headers: { ...(cookie ? { cookie } : {}), ...options.headers } });
-  return { queue, conversation, agents, schedules, feed, sessions, github, target, signIn, call, sourcesDir, clock, subscriptions };
+  return { queue, conversation, assets, agents, schedules, feed, sessions, github, target, signIn, call, sourcesDir, clock, subscriptions };
 }
 
 /** A Set-Cookie line as its value and its attributes, in whatever order they came. */
@@ -389,6 +392,41 @@ describe("the UI's API", () => {
     it("refuses a cursor it did not give", async (t) => {
       const env = await setup(t);
       assert.equal((await env.call("/api/history?before=x", env.signIn())).status, 400);
+    });
+
+    it("lists the images of a reply, whose bytes are read by their id", async (t) => {
+      // Guards against: the owner not seeing an image of a reply, or seeing other bytes than were sent.
+      const env = await setup(t);
+      const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7, 7]);
+      env.conversation.reply({ agent: "main", text: "描いたよ" }, [{ name: "cat.png", mime_type: "image/png", data: bytes }]);
+      const cookie = env.signIn();
+      const [entry] = (await env.call("/api/history", cookie)).json().entries;
+      assert.equal(entry.images.length, 1);
+      const [image] = entry.images;
+      assert.deepEqual({ ...image, id: "" }, { id: "", mime_type: "image/png", size: bytes.length, name: "cat.png" });
+
+      const answer = await env.call(`/api/assets/${image.id}`, cookie);
+      assert.equal(answer.status, 200);
+      assert.equal(answer.headers["content-type"], "image/png");
+      assert.equal(answer.headers["content-length"], String(bytes.length));
+      assert.equal(answer.headers["x-content-type-options"], "nosniff");
+      // The same id is always the same bytes: the browser keeps what it read.
+      assert.match(answer.headers["cache-control"] ?? "", /private/);
+      assert.match(answer.headers["cache-control"] ?? "", /immutable/);
+      assert.deepEqual(answer.body, Buffer.from(bytes));
+    });
+
+    it("gives an image only to the owner's session, and not one it does not have", async (t) => {
+      // Guards against: the images of the conversation read by anyone who has the link.
+      const env = await setup(t);
+      env.conversation.reply({ agent: "main", text: "x" }, [{ name: "a.png", mime_type: "image/png", data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) }]);
+      const cookie = env.signIn();
+      const [entry] = (await env.call("/api/history", cookie)).json().entries;
+      const id = entry.images[0].id;
+      assert.equal((await env.call(`/api/assets/${id}`, undefined)).status, 401);
+      assert.equal((await env.call("/api/assets/no-such-image", cookie)).status, 404);
+      assert.equal((await env.call(`/api/assets/${id}/more`, cookie)).status, 404);
+      assert.equal((await env.call(`/api/assets/${id}`, cookie, { method: "POST", body: "" })).status, 405);
     });
   });
 

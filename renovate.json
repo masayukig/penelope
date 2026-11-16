@@ -88,6 +88,15 @@
       "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
     },
     {
+      "description": "sdctl's releases carry no binary; the sandbox's image builds it with go install at the release's tag, which keeps the v",
+      "customType": "regex",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": ["(?:^|\\n)ARG SDCTL_VERSION=(?<currentValue>v\\d+\\.\\d+\\.\\d+)[ \\t]*(?:\\r?\\n|$)"],
+      "depNameTemplate": "yuanying/sdctl",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^(?<version>v\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
       "description": "porkadot is not on RubyGems; the sandbox's image builds its gem from a tag of its repository, so its version is read from the repository's tags",
       "customType": "regex",
       "managerFilePatterns": ["/^Dockerfile$/"],

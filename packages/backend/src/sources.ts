@@ -101,7 +101,7 @@ function unique(name: string, taken: Set<string>): string {
   return candidate;
 }
 
-/** The image types the runner can put into a turn, by their first bytes. */
+/** The image types the runner can put into a turn, and a reply can carry, by their first bytes. */
 const SIGNATURES: Array<[type: string, matches: (bytes: Uint8Array) => boolean]> = [
   ["image/png", (b) => starts(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
   ["image/jpeg", (b) => starts(b, [0xff, 0xd8, 0xff])],
@@ -118,11 +118,16 @@ const MEDIA_TYPE = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+(\s*;.*)?$/i;
  * application/octet-stream when nothing else will do.
  */
 function mediaType(file: Attachment): string {
-  const found = SIGNATURES.find(([, matches]) => matches(file.data));
-  if (found) return found[0];
+  const found = imageTypeOf(file.data);
+  if (found) return found;
   const said = file.type.trim();
   if (!MEDIA_TYPE.test(said) || SIGNATURES.some(([type]) => said.toLowerCase().startsWith(type))) return "application/octet-stream";
   return said;
+}
+
+/** PNG, JPEG, GIF or WebP, by the first bytes; undefined for anything else. */
+export function imageTypeOf(bytes: Uint8Array): string | undefined {
+  return SIGNATURES.find(([, matches]) => matches(bytes))?.[0];
 }
 
 function starts(bytes: Uint8Array, prefix: readonly number[]): boolean {

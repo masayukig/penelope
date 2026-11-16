@@ -28,6 +28,7 @@ describe("the configuration", () => {
     const config = loadConfig({}, read);
     assert.deepEqual(config, {
       databasePath: "/var/lib/penelope/backend.sqlite",
+      assetsDir: "/var/lib/penelope/assets",
       sourcesDir: "/sources",
       memoryDir: "/memory",
       intakeSocket: "/run/penelope/intake/backend.sock",
@@ -57,6 +58,7 @@ describe("the configuration", () => {
       {
         PENELOPE_DATABASE: "/data/b.sqlite",
         PENELOPE_SOURCES_DIR: "/s",
+        PENELOPE_ASSETS_DIR: "/data/assets",
         PENELOPE_MEMORY_DIR: "/m",
         PENELOPE_INTAKE_SOCKET: "/run/i.sock",
         PENELOPE_SANDBOX_SOCKET: "/run/s.sock",
@@ -84,6 +86,7 @@ describe("the configuration", () => {
       read,
     );
     assert.equal(config.databasePath, "/data/b.sqlite");
+    assert.equal(config.assetsDir, "/data/assets");
     assert.deepEqual(config.listen, { host: "::", port: 9090 });
     assert.equal(config.publicUrl, "https://penelope.example.com");
     assert.equal(config.sandboxToken, "real-token");
