@@ -34,6 +34,7 @@ penelope の sandbox では、Pi の基本のツールと開発の道具が自�
 - Sentinel はこのリポジトリに新しく書く。natsumi-sentinel からは低い層だけを写す。写すのは、透過の向け直しと元の宛先の取り方（IPv4・IPv6）、SNI の読み取り、証明書の生成、上流へ送る部品（flush・Upgrade・hop-by-hop の扱い）、サロゲートの置き場所の形である。
 - 判定（コネクタ）と鍵の差し替えは、プラグインの形で新しく書く。
 - natsumi-sentinel は、natsumi のキャラクターたちのために残す。
+  - 2026-11-16 追記: ADR-0026 で、natsumi のキャラクターたちも penelope に移すと決めた。全員を移した後は、natsumi-sentinel を使う配置は無くなる。
 
 ### 既定の扱いは切り替えられる
 
@@ -116,6 +117,7 @@ penelope の sandbox では、Pi の基本のツールと開発の道具が自�
 - Related: ADR-0005 承認待ちは Sentinel が持ち、オーナーは Web UI で答える
 - Related: ADR-0008 プロンプトは事実と環境だけを伝え、やり方は任せる
 - Related: ADR-0011 sandbox の image は開発の一式を持ち、汎用のユーザーの HOME で作業する
+- Related: ADR-0026 なつみ・ミャオ・アキも 1 人 1 つの配置で penelope に移し、記憶は履歴ごと写して、戻し道は持たない（natsumi-sentinel を使う者がいなくなる）
 - Related（natsumi-sentinel、このリポジトリの外）: ADR-0002「作業環境の外向きの通信を透過で関所に通し、宛先ごとに扱いを決める」、ADR-0007「関所が判定して自分で上流へ送り、authd は鍵を保管して要求ごとに渡す」、ADR-0008「表に無い宛先は、断った名前を関所が覚え、本人が許せば台帳の許しで通す」
 
 ## References
