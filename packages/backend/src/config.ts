@@ -67,9 +67,11 @@ const SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount";
 /**
  * What the UI shows of the agent: the deployment's, never the code's
  * (ADR-0001). `icons` holds the file of each face of her avatar, by
- * expression; none when no avatar is chosen.
+ * expression; none when no avatar is chosen. `pngIcons` holds a PNG of the
+ * faces that have one, for those who may not take the other image (Slack's
+ * icon_url).
  */
-export type AgentSettings = { name: string; icons: Readonly<Record<string, string>> };
+export type AgentSettings = { name: string; icons: Readonly<Record<string, string>>; pngIcons?: Readonly<Record<string, string>> };
 
 /** The image types an icon may be, by its extension. */
 export const ICON_TYPES: Readonly<Record<string, string>> = {
@@ -204,7 +206,11 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
       name: get("PENELOPE_GIT_AUTHOR_NAME") ?? "penelope-backend",
       email: get("PENELOPE_GIT_AUTHOR_EMAIL") ?? "backend@penelope.invalid",
     },
-    agent: { name: get("PENELOPE_AGENT_NAME") ?? avatar?.name ?? "Agent", icons: avatar?.icons ?? {} },
+    agent: {
+      name: get("PENELOPE_AGENT_NAME") ?? avatar?.name ?? "Agent",
+      icons: avatar?.icons ?? {},
+      ...(avatar === undefined || Object.keys(avatar.pngIcons).length === 0 ? {} : { pngIcons: avatar.pngIcons }),
+    },
     webDir: get("PENELOPE_WEB_DIR") ?? "/app/web",
     a2a: a2aOf(get, readFile, publicUrl),
     webPush: webPushOf(secret("PENELOPE_WEB_PUSH_VAPID_KEY_FILE"), publicUrl),
@@ -311,29 +317,41 @@ function a2aOf(get: (name: string) => string | undefined, readFile: (file: strin
 }
 
 /**
- * The avatar named `id` under `dir`: its avatar.json gives her name and the
- * image of each face, relative to its own directory.
+ * The avatar named `id` under `dir`: its avatar.json gives her name, the
+ * image of each face and the PNG of the faces that have one, relative to its
+ * own directory.
  */
-function avatarOf(dir: string, id: string | undefined, readFile: (file: string) => string): { name: string | undefined; icons: Record<string, string> } | undefined {
+function avatarOf(
+  dir: string,
+  id: string | undefined,
+  readFile: (file: string) => string,
+): { name: string | undefined; icons: Record<string, string>; pngIcons: Record<string, string> } | undefined {
   if (id === undefined) return undefined;
   if (!/^[a-z0-9][a-z0-9._-]*$/.test(id)) throw new ConfigError("PENELOPE_AVATAR must be the name of a directory: lower-case letters, digits, ., _ and -");
   const root = path.resolve(dir, id);
   const file = path.join(root, "avatar.json");
-  let avatar: { name?: unknown; icons?: unknown };
+  let avatar: { name?: unknown; icons?: unknown; pngIcons?: unknown };
   try {
     avatar = JSON.parse(readFile(file)) as typeof avatar;
   } catch (error) {
     throw new ConfigError(`PENELOPE_AVATAR: ${file} cannot be read: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const icons: Record<string, string> = {};
-  for (const [expression, relative] of Object.entries((avatar.icons ?? {}) as Record<string, unknown>)) {
-    const icon = typeof relative === "string" ? path.resolve(root, relative) : "";
-    if (!icon.startsWith(`${root}${path.sep}`) || ICON_TYPES[path.extname(icon).toLowerCase()] === undefined) {
-      throw new ConfigError(`PENELOPE_AVATAR: the icon of ${expression} in ${file} must be an image inside ${root}`);
+  const images = (field: unknown, what: string, fits: (extension: string) => boolean) => {
+    const found: Record<string, string> = {};
+    for (const [expression, relative] of Object.entries((field ?? {}) as Record<string, unknown>)) {
+      const image = typeof relative === "string" ? path.resolve(root, relative) : "";
+      if (!image.startsWith(`${root}${path.sep}`) || !fits(path.extname(image).toLowerCase())) {
+        throw new ConfigError(`PENELOPE_AVATAR: the ${what} of ${expression} in ${file} must be ${what === "icon" ? "an image" : "a PNG"} inside ${root}`);
+      }
+      found[expression] = image;
     }
-    icons[expression] = icon;
-  }
-  return { name: typeof avatar.name === "string" && avatar.name.trim() !== "" ? avatar.name.trim() : undefined, icons };
+    return found;
+  };
+  return {
+    name: typeof avatar.name === "string" && avatar.name.trim() !== "" ? avatar.name.trim() : undefined,
+    icons: images(avatar.icons, "icon", (extension) => ICON_TYPES[extension] !== undefined),
+    pngIcons: images(avatar.pngIcons, "PNG icon", (extension) => extension === ".png"),
+  };
 }
 
 /** `host:port`, the host in brackets when it is IPv6. */

@@ -95,10 +95,10 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 
 ## エージェント
 
-- `GET /api/agent` は `{name, icons?}`。`name` は backend の設定のエージェントの名前（[backend.md](backend.md) の `PENELOPE_AGENT_NAME`、無ければアバターの名前）。`icons` は、設定でアバターを選んでいるとき（`PENELOPE_AVATAR`）だけあり、表情（expression）ごとの画像の道（`/api/agent/icons/<表情><拡張子>`。拡張子は画像のファイルの拡張子を小文字にしたもの。例 `/api/agent/icons/happy.png`）を持つ。Slack への投稿のアイコン（[receivers.md](receivers.md) の「投稿の CLI」）は、URL が画像の拡張子で終わる形にするため、この道を使う。
+- `GET /api/agent` は `{name, icons?}`。`name` は backend の設定のエージェントの名前（[backend.md](backend.md) の `PENELOPE_AGENT_NAME`、無ければアバターの名前）。`icons` は、設定でアバターを選んでいるとき（`PENELOPE_AVATAR`）だけあり、表情（expression）ごとの画像の道（`/api/agent/icons/<表情><拡張子>`。拡張子は画像のファイルの拡張子を小文字にしたもの。例 `/api/agent/icons/happy.png`）を持つ。`png_icons` は、アバターが表情の PNG を持つとき（`avatar.json` の `pngIcons`、[backend.md](backend.md) の「設定」）だけあり、その表情ごとの PNG の道（`/api/agent/icons/<表情>.png`）を持つ。Slack への投稿のアイコン（[receivers.md](receivers.md) の「投稿の CLI」）は、URL が画像の拡張子で終わる形にするため、これらの道を使い、PNG があればそちらを使う。Slack が WebP のアイコンを受けるかを確かめていないためである。Web UI は `icons` の画像を使う。
 - UI はエージェントの名前とアイコンをここから取る。コードと UI に決め打ちの名前を書かない（[ADR-0001](adr/0001-one-pod-with-pi-inside-the-sandbox.md)）。
 - UI はアバターを表情ごとの画像で出す（[ADR-0016](adr/0016-show-the-avatar-and-expression-from-the-first-web-ui.md)）。表情が無いとき、アバターに無い表情のときは `neutral` の画像を出し、それも無ければ build に含めた汎用のアイコンを出す。
-- `GET /api/agent/icons/<表情>` と `GET /api/agent/icons/<表情><拡張子>` は、その表情の画像を、拡張子の画像の型で返す。拡張子が画像のファイルのものと違う、無い表情、読めない画像は `404`。
+- `GET /api/agent/icons/<表情>` と `GET /api/agent/icons/<表情><拡張子>` は、その表情の画像を、拡張子の画像の型で返す。`GET /api/agent/icons/<表情>.png` は、その表情の PNG があればそれを返す。拡張子が画像のファイルのものと違う（PNG があるときの `.png` を除く）、無い表情、読めない画像は `404`。
 
 ## 知らせ
 

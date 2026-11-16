@@ -11,5 +11,16 @@
     "sad": "icons/sad.webp",
     "sleepy": "icons/sleepy.webp",
     "angry": "icons/angry.webp"
+  },
+  "pngIcons": {
+    "neutral": "slack/neutral.png",
+    "happy": "slack/happy.png",
+    "laughing": "slack/laughing.png",
+    "surprised": "slack/surprised.png",
+    "thinking": "slack/thinking.png",
+    "worried": "slack/worried.png",
+    "sad": "slack/sad.png",
+    "sleepy": "slack/sleepy.png",
+    "angry": "slack/angry.png"
   }
 }

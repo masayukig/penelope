@@ -9,7 +9,11 @@ import { run, type Online } from "../src/cli.ts";
 type Seen = { url: string; method: string; authorization: string | undefined; form: Record<string, string>; body: Uint8Array };
 
 const PUBLIC = "https://penelope.example.com";
-const AGENT = { name: "Iris", icons: { neutral: "/api/agent/icons/neutral.png", happy: "/api/agent/icons/happy.png" } };
+const AGENT = {
+  name: "Iris",
+  icons: { neutral: "/api/agent/icons/neutral.webp", happy: "/api/agent/icons/happy.webp", sad: "/api/agent/icons/sad.webp" },
+  png_icons: { neutral: "/api/agent/icons/neutral.png", happy: "/api/agent/icons/happy.png" },
+};
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
 
 /** Slack and the backend's public way, with what each was sent. */
@@ -131,7 +135,7 @@ describe("slackctl post", () => {
     const { fetcher, calls } = world();
     const odd = await run(["post", "--channel", "C0DEV", "--face", "smug"], ENV, online(fetcher, "hi"));
     assert.equal(odd.code, 1);
-    assert.match(odd.stderr, /no face smug \(faces: happy, neutral\)/);
+    assert.match(odd.stderr, /no face smug \(faces: happy, neutral, sad\)/);
     const nowhere = await run(["post", "--channel", "C0DEV", "--face", "happy"], { SLACK_BOT_TOKEN: "surrogate-work" }, online(fetcher, "hi"));
     assert.equal(nowhere.code, 1);
     assert.match(nowhere.stderr, /PENELOPE_PUBLIC_URL/);
@@ -232,7 +236,14 @@ describe("slackctl faces", () => {
     const { fetcher } = world();
     const result = await run(["faces"], ENV, online(fetcher));
     assert.equal(result.code, 0, result.stderr);
-    assert.equal(result.stdout, `happy\t${PUBLIC}/api/agent/icons/happy.png\nneutral\t${PUBLIC}/api/agent/icons/neutral.png\n`);
+    assert.equal(result.stdout, `happy\t${PUBLIC}/api/agent/icons/happy.png\nneutral\t${PUBLIC}/api/agent/icons/neutral.png\nsad\t${PUBLIC}/api/agent/icons/sad.webp\n`);
+  });
+
+  test("gives Slack the PNG of a face, and its image only when it has no PNG", async () => {
+    const { fetcher } = world({ agent: { name: "Iris", icons: { happy: "/api/agent/icons/happy.webp" } } });
+    const result = await run(["faces"], ENV, online(fetcher));
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout, `happy\t${PUBLIC}/api/agent/icons/happy.webp\n`);
   });
 
   test("says when the avatar has no faces", async () => {

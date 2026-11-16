@@ -686,13 +686,13 @@ describe("the Pod end to end", () => {
     assert.equal(calls.find((call) => call.method === "files.getUploadURLExternal")?.args.filename, "e2e-post.png");
     assert.deepEqual(slack.uploads.map(({ token, length, png }) => ({ token, length, png })), [{ token: "none", length: 70, png: true }]);
 
-    // The icon is the avatar's face at the public URL, which Slack fetches from the outside.
+    // The icon is the PNG of the avatar's face at the public URL, which Slack fetches from the outside.
     const icon = new URL(post.args.icon_url ?? "");
     assert.equal(icon.origin, new URL(pod.url).origin);
-    assert.match(icon.pathname, /^\/api\/agent\/icons\/happy\.webp$/);
+    assert.match(icon.pathname, /^\/api\/agent\/icons\/happy\.png$/);
     const face = new Browser().request(icon.pathname);
     assert.equal(face.status, 200);
-    assert.equal(face.headers["content-type"], "image/webp");
+    assert.equal(face.headers["content-type"], "image/png");
     assert.match(exec("sandbox", "slackctl faces").stdout, new RegExp(`^happy\\t${icon.href.replaceAll(".", "\\.")}$`, "m"));
   }));
 

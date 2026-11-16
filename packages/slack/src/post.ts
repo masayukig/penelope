@@ -45,20 +45,25 @@ function publicUrl(env: Env): string {
   return value;
 }
 
-/** Each face of the avatar, with the URL of its image the backend gives without a login. */
+/**
+ * Each face of the avatar, with the URL of its image the backend gives
+ * without a login: its PNG when it has one, as Slack may not take the Web
+ * UI's WebP (docs/ui-api.md, "エージェント").
+ */
 export async function facesOf(env: Env, online: Online): Promise<Map<string, string>> {
   const base = publicUrl(env);
   const url = new URL("/api/agent", base).href;
-  let agent: { icons?: unknown };
+  let agent: { icons?: unknown; png_icons?: unknown };
   try {
     const response = await online.fetch(url);
     if (!response.ok) throw new Failure(`cannot read the faces from ${url} (${response.status})`);
-    agent = (await response.json()) as { icons?: unknown };
+    agent = (await response.json()) as typeof agent;
   } catch (error) {
     if (error instanceof Failure) throw error;
     throw new Failure(`cannot read the faces from ${url} (${error instanceof Error ? error.message : String(error)})`);
   }
-  const icons = typeof agent.icons === "object" && agent.icons !== null ? (agent.icons as Raw) : {};
+  const ways = (field: unknown) => (typeof field === "object" && field !== null ? (field as Raw) : {});
+  const icons = { ...ways(agent.icons), ...ways(agent.png_icons) };
   const faces = new Map<string, string>();
   for (const name of Object.keys(icons).sort()) {
     const way = icons[name];
