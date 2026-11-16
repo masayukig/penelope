@@ -33,7 +33,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 | `POST /api/messages` | オーナーのメッセージを送る |
 | `GET /api/history?before=` | 会話の履歴 |
 | `GET /api/stream` | 返事・途中経過・状態の流れ（SSE） |
-| `GET /api/agent`・`GET /api/agent/icons/<表情>` | エージェントの名前と表情のアイコン（認証なし） |
+| `GET /api/agent`・`GET /api/agent/icons/<表情>[<拡張子>]` | エージェントの名前と表情のアイコン（認証なし） |
 | `GET /api/agents` | 閉じていないサブエージェントの一覧 |
 | `GET /api/assets/<id>` | 返事に添えられた画像の写し |
 | `GET /api/push`・`POST /api/push/subscriptions`・`POST /api/push/subscriptions/delete` | 返事の知らせ（Web Push）の鍵と、購読の登録と解除 |
@@ -95,10 +95,10 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 
 ## エージェント
 
-- `GET /api/agent` は `{name, icons?}`。`name` は backend の設定のエージェントの名前（[backend.md](backend.md) の `PENELOPE_AGENT_NAME`、無ければアバターの名前）。`icons` は、設定でアバターを選んでいるとき（`PENELOPE_AVATAR`）だけあり、表情（expression）ごとの画像の道（`/api/agent/icons/<表情>`）を持つ。
+- `GET /api/agent` は `{name, icons?}`。`name` は backend の設定のエージェントの名前（[backend.md](backend.md) の `PENELOPE_AGENT_NAME`、無ければアバターの名前）。`icons` は、設定でアバターを選んでいるとき（`PENELOPE_AVATAR`）だけあり、表情（expression）ごとの画像の道（`/api/agent/icons/<表情><拡張子>`。拡張子は画像のファイルの拡張子を小文字にしたもの。例 `/api/agent/icons/happy.png`）を持つ。Slack への投稿のアイコン（[receivers.md](receivers.md) の「投稿の CLI」）は、URL が画像の拡張子で終わる形にするため、この道を使う。
 - UI はエージェントの名前とアイコンをここから取る。コードと UI に決め打ちの名前を書かない（[ADR-0001](adr/0001-one-pod-with-pi-inside-the-sandbox.md)）。
 - UI はアバターを表情ごとの画像で出す（[ADR-0016](adr/0016-show-the-avatar-and-expression-from-the-first-web-ui.md)）。表情が無いとき、アバターに無い表情のときは `neutral` の画像を出し、それも無ければ build に含めた汎用のアイコンを出す。
-- `GET /api/agent/icons/<表情>` はその表情の画像を、拡張子の画像の型で返す。無い表情、読めない画像は `404`。
+- `GET /api/agent/icons/<表情>` と `GET /api/agent/icons/<表情><拡張子>` は、その表情の画像を、拡張子の画像の型で返す。拡張子が画像のファイルのものと違う、無い表情、読めない画像は `404`。
 
 ## 知らせ
 

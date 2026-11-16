@@ -118,7 +118,7 @@ export function uiHandler(options: UiOptions): Handler {
     // Read without a login: the login screen and the home screen show who
     // she is. Nothing else is here (docs/ui-api.md).
     if (route === "GET /api/agent") {
-      const icons = Object.fromEntries(Object.keys(agent.icons).map((expression) => [expression, `${AGENT_ICONS_PATH}${encodeURIComponent(expression)}`]));
+      const icons = Object.fromEntries(Object.entries(agent.icons).map(([expression, file]) => [expression, `${AGENT_ICONS_PATH}${encodeURIComponent(expression)}${path.extname(file).toLowerCase()}`]));
       sendJson(response, 200, { name: agent.name, ...(Object.keys(icons).length === 0 ? {} : { icons }) } satisfies AgentResponse);
       return;
     }
@@ -129,7 +129,7 @@ export function uiHandler(options: UiOptions): Handler {
       } catch {
         // Not a name of any face: answered as one that is not there.
       }
-      const file = Object.hasOwn(agent.icons, expression) ? agent.icons[expression] : undefined;
+      const file = faceFile(agent.icons, expression);
       if (file === undefined) throw new HttpError(404, "no such face");
       let body: Buffer;
       try {
@@ -329,3 +329,16 @@ function sessionCookie(value: string, expiresMs: number, now: number, secure: bo
 const notBuilt: Handler = async (_request, response) => {
   sendError(response, 404, "the Web UI is not built yet");
 };
+
+/**
+ * The image of a face, named as it is or with the extension of its image
+ * after it (docs/ui-api.md): Slack wants an icon's URL to end in one.
+ */
+function faceFile(icons: Readonly<Record<string, string>>, name: string): string | undefined {
+  if (Object.hasOwn(icons, name)) return icons[name];
+  const extension = path.extname(name);
+  const face = name.slice(0, name.length - extension.length);
+  if (extension === "" || !Object.hasOwn(icons, face)) return undefined;
+  const file = icons[face]!;
+  return path.extname(file).toLowerCase() === extension ? file : undefined;
+}
