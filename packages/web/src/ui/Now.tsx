@@ -11,6 +11,7 @@ import type { Activity } from "@penelope/contract";
 
 import { argumentsText, type FlowItem, type Status } from "../model/store.ts";
 import { useAgent } from "./agent.tsx";
+import { Linked } from "./links.tsx";
 import { Dots } from "./Timeline.tsx";
 import { statusWord, timeOf, words } from "./words.ts";
 
@@ -89,7 +90,11 @@ export function FlowLine({ item, all }: { item: FlowItem; all: readonly FlowItem
             <span className="flow-label">{words.tool}</span>
             <Code>
               <strong>{item.name}</strong>
-              {what === "" ? null : `: ${what}`}
+              {what === "" ? null : (
+                <>
+                  : <Linked text={what} />
+                </>
+              )}
             </Code>
           </span>
           {result ? (
@@ -106,7 +111,9 @@ export function FlowLine({ item, all }: { item: FlowItem; all: readonly FlowItem
           <span className="flow-label">
             {words.interrupt} {timeOf(item.at)} ・ {words.ownerMessage}
           </span>
-          <span>{item.text}</span>
+          <span>
+            <Linked text={item.text} />
+          </span>
         </li>
       );
     case "tool_result":
@@ -121,7 +128,9 @@ function Folded({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <p className={open ? "folded open" : "folded"}>{text}</p>
+      <p className={open ? "folded open" : "folded"}>
+        <Linked text={text} />
+      </p>
       <Button label={open ? words.thoughtClose : words.thoughtOpen} variant="ghost" size="sm" onClick={() => setOpen(!open)} aria-expanded={open} />
     </>
   );

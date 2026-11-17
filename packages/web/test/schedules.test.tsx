@@ -3,6 +3,7 @@
 // time, and removed by the owner after a confirmation. Nothing adds one from
 // here.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, it } from "node:test";
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -203,6 +204,85 @@ describe("the schedules in the Web UI", () => {
     await press(within(await screen.findByRole("alertdialog")).getByRole("button", { name: words.scheduleRemove }));
     assert.ok(await screen.findByText(words.scheduleRemoveFailed));
     assert.ok(within(await page()).getByText("PR を見直す"));
+  });
+});
+
+// What docs/design/README.md, 12 asks of an implementation.
+describe("the schedules, as the design asks of them", () => {
+  async function open(backend: FakeBackend) {
+    start(backend);
+    await backend.connected();
+    await press(screen.findByRole("button", { name: words.places.events }));
+  }
+  let style: HTMLStyleElement | undefined;
+  afterEach(() => style?.remove());
+  const css = (el: Element) => getComputedStyle(el);
+
+  it("cuts a long lead at two lines while closed, and shows it whole once open", async () => {
+    style = document.createElement("style");
+    style.textContent = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8").replace(/^@import .*$/gm, "");
+    document.head.append(style);
+    const backend = new FakeBackend();
+    const long = "とても長い最初の文".repeat(20);
+    backend.schedules = [{ id: "s-1", reason: `${long}。残り`, cron: "0 6 * * *", next_at: daysOn(1, 6) }];
+    await open(backend);
+    const row = await rowOf(long);
+    const lead = row.querySelector(".schedule-lead")!;
+    assert.equal(lead.textContent, long);
+    assert.equal(css(lead).overflow, "hidden");
+    // Happy-dom computes no clamp and keeps only the unprefixed one: it is read from the rules that match the lead.
+    const clampOf = (el: Element) =>
+      [...style!.sheet!.cssRules]
+        .filter((r): r is CSSStyleRule => "selectorText" in r && el.matches((r as CSSStyleRule).selectorText))
+        .map((r) => r.style.getPropertyValue("line-clamp"))
+        .filter((v) => v !== "")
+        .at(-1);
+    assert.equal(clampOf(lead), "2");
+    await press(within(row).getAllByRole("button")[0]!);
+    assert.equal(clampOf(row.querySelector(".schedule-lead")!), "none");
+  });
+
+  it("splits the reason at its first 。 only, and keeps every word of the lead", async () => {
+    const backend = new FakeBackend();
+    backend.schedules = [{ id: "s-1", reason: "朝の予定確認（毎朝6:00 JST）. /memory/always.md を読む。残り", cron: "0 6 * * *", next_at: daysOn(1, 6) }];
+    await open(backend);
+    const row = await rowOf("朝の予定確認（毎朝6:00 JST）. /memory/always.md を読む");
+    assert.ok(within(row).getByText("毎日 6:00"));
+    assert.ok(within(row).getByText("0 6 * * *"));
+  });
+
+  it("puts the button that removes one beside the one that opens it, not in it, and names the lead", async () => {
+    const backend = new FakeBackend();
+    backend.schedules = four();
+    await open(backend);
+    const row = await rowOf("朝のクラスタの見回り");
+    const [toggle, remove] = within(row).getAllByRole("button") as [HTMLElement, HTMLElement];
+    assert.equal(toggle.contains(remove), false);
+    assert.equal(remove.contains(toggle), false);
+    assert.equal(remove.getAttribute("aria-label") ?? remove.textContent, words.scheduleRemoveOf("朝のクラスタの見回り"));
+    await press(remove);
+    assert.equal(toggle.getAttribute("aria-expanded"), "false");
+  });
+
+  it("drops the day with its last one, and keeps open the row that was open", async () => {
+    const backend = new FakeBackend();
+    backend.schedules = four();
+    await open(backend);
+    const toggleOf = async (lead: string) => within(await rowOf(lead)).getAllByRole("button")[0]!;
+    await press(toggleOf("週ごとの片付け"));
+    const days = () => within(screen.getByRole("region", { name: words.schedules })).getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    assert.ok(days().includes("2030年1月2日(水)"));
+    await press(removeOf("PR を見直す"));
+    await press(within(await screen.findByRole("alertdialog")).getByRole("button", { name: words.scheduleRemove }));
+    await waitFor(() => assert.equal(screen.queryByText("PR を見直す"), null));
+    assert.equal(days().includes("2030年1月2日(水)"), false);
+    assert.equal(days().length, 2);
+    assert.equal((await toggleOf("週ごとの片付け")).getAttribute("aria-expanded"), "true");
+
+    await press(removeOf("朝のクラスタの見回り"));
+    await press(within(await screen.findByRole("alertdialog")).getByRole("button", { name: words.scheduleRemove }));
+    await waitFor(() => assert.equal(screen.queryByText("朝のクラスタの見回り"), null));
+    assert.ok(await within(await page()).findByText(`2 件 ・ ${words.scheduleNext} 明日 10:30`));
   });
 });
 
