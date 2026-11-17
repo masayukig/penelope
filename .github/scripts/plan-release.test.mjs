@@ -103,3 +103,18 @@ test("a held vulnerability fix lists the person's commits and the commands in th
   assert.doesNotMatch(text, /Change 0 by fraction-vuln-responder/);
   assert.match(text, /git tag -a v0\.1\.1 /);
 });
+
+// A run started again after a newer release would plan the version that
+// release already took, and push its images over that version's.
+test("the next version is not released when its tag already exists elsewhere", (t) => {
+  const dir = repositoryChanging(["packages/backend/package.json"]);
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, { cwd: dir, env });
+  git("checkout", "--quiet", "-b", "newer");
+  writeFileSync(join(dir, "newer.txt"), "x\n");
+  git("add", ".");
+  git("commit", "--quiet", "-m", "Newer change");
+  git("tag", "v0.1.1");
+  git("checkout", "--quiet", "-");
+  assert.match(plan(dir), /^no release: v0\.1\.1 is already tagged/);
+});

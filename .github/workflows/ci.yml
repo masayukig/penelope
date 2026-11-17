@@ -135,18 +135,39 @@ jobs:
       matrix:
         target: [sentinel, backend, receivers, sandbox]
     steps:
-      - uses: actions/checkout@v7
+      # Runs one at a time keep two pushes apart, but a run started again
+      # later would put an older commit back under main. Only the commit at
+      # the head of main now is published; any other is skipped, not failed.
+      - name: This commit is still the head of main
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          if [ "${head}" = "${GITHUB_SHA}" ]; then
+            echo "current=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "current=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::main is at ${head} now, not ${GITHUB_SHA}; skipped"
+            echo "Skipped: main is at \`${head}\` now, not \`${GITHUB_SHA}\`." >> "${GITHUB_STEP_SUMMARY}"
+          fi
+      - if: steps.current.outputs.current == 'true'
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
       # As in release.yml: two final stages run commands of their platform.
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - if: steps.current.outputs.current == 'true'
+        uses: docker/setup-qemu-action@v4
+      - if: steps.current.outputs.current == 'true'
+        uses: docker/setup-buildx-action@v4
+      - if: steps.current.outputs.current == 'true'
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v7
+      - if: steps.current.outputs.current == 'true'
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: ${{ matrix.target }}
@@ -172,14 +193,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      contents: read
       packages: write
     strategy:
       matrix:
         target: [sentinel, backend, receivers, sandbox]
     steps:
+      # Runs one at a time keep two pushes apart, but a run started again
+      # later would put an older commit back under main. Only the commit at
+      # the head of main now is published; any other is skipped, not failed.
+      - name: This commit is still the head of main
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          if [ "${head}" = "${GITHUB_SHA}" ]; then
+            echo "current=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "current=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::main is at ${head} now, not ${GITHUB_SHA}; skipped"
+            echo "Skipped: main is at \`${head}\` now, not \`${GITHUB_SHA}\`." >> "${GITHUB_STEP_SUMMARY}"
+          fi
       # Pinned to a commit, unlike the other actions: a third party's action
       # that can delete package versions.
-      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+      - if: steps.current.outputs.current == 'true'
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
         with:
           package: penelope-${{ matrix.target }}
           delete-untagged: true

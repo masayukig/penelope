@@ -29,13 +29,16 @@ permissions: {}
 
 # Two releases at once would both try to release the same version, so the
 # weekly and the at-once release share one group. Every other pull request
-# that is closed runs alone and does nothing: in the group it would cancel a
-# release waiting for its turn. A fix waiting is cancelled only by a later
-# one, whose merge commit carries the earlier fix too.
+# that is closed, a fork's among them, runs alone and does nothing: in the
+# group it would cancel a release waiting for its turn. The condition is the
+# plan job's. A fix waiting is cancelled only by a later one, whose merge
+# commit carries the earlier fix too.
 concurrency:
   group: >-
     ${{ (github.event_name != 'pull_request'
-    || (github.event.pull_request.merged && startsWith(github.event.pull_request.head.ref, 'vuln-responder/')))
+    || (github.event.pull_request.merged
+    && startsWith(github.event.pull_request.head.ref, 'vuln-responder/')
+    && github.event.pull_request.head.repo.full_name == github.repository))
     && 'weekly-release' || format('weekly-release-skipped-{0}', github.run_id) }}
   cancel-in-progress: false
 

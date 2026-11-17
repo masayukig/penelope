@@ -102,6 +102,16 @@ if [[ -z "${changed}" ]]; then
 fi
 
 version="$(next_version)"
+# A run started again after a newer release finds that release's tag beyond
+# its HEAD: the version is taken, and releasing it would push images over
+# the ones that tag names. The checkout has every tag; origin is asked too,
+# for one pushed since.
+if git rev-parse --quiet --verify "refs/tags/${version}" > /dev/null \
+  || { git remote get-url origin > /dev/null 2>&1 \
+    && git ls-remote --exit-code --tags origin "refs/tags/${version}" > /dev/null; }; then
+  no_release "${version} is already tagged, on a commit HEAD does not reach"
+  exit 0
+fi
 subjects="$(git log --no-merges --reverse --format='- %s' "${tag}..HEAD")"
 if [[ "${trigger}" == "vuln-fix" ]]; then
   title="vulnerability fix, released as soon as the vulnerability responder's pull request was merged"
