@@ -227,6 +227,14 @@ describe("the Pod end to end", () => {
     assert.match(exec("sandbox", "cd /memory && git log --format=%s -1").stdout, /^Turn /);
   }));
 
+  it("copies the chosen avatar into /memory at the start, for her to grow and check", track(async () => {
+    // Guards against: the avatar not reaching /memory, its copy left uncommitted, her unable to edit it, or `avatar check` or sdctl missing from the sandbox.
+    assert.match(memoryLog(), /^Avatar penelope\nCopied from \/app\/avatars\/penelope\n+avatar\//m);
+    assert.match(exec("sandbox", "avatar check").stdout, /^ok: \/memory\/avatar\n/);
+    assert.equal(exec("sandbox", "test -w /memory/avatar/appearance.yaml && test -w /memory/avatar/icons", { check: false }).status, 0);
+    assert.equal(exec("sandbox", "sdctl --help >/dev/null", { check: false }).status, 0);
+  }));
+
   it("folds the first turn in the second turn's input to the model", track(async () => {
     // Guards against: ended turns sent whole again, with their thinking and tool output, or her replies folded away.
     // The first turn, whole, while it ran: the tool's output was there.

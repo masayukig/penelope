@@ -5,7 +5,9 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { type AgentSettings, ICON_TYPES } from "./config.ts";
+import { ICON_TYPES } from "@penelope/avatar";
+
+import type { AgentSettings } from "./avatar.ts";
 import { type Handler, sendError } from "./http.ts";
 
 /** Where each face of the avatar is served, by expression (docs/ui-api.md). */
@@ -27,7 +29,7 @@ const TYPES: Readonly<Record<string, string>> = {
   ".txt": "text/plain; charset=utf-8",
 };
 
-export function webHandler({ dir, agent }: { dir: string; agent: AgentSettings }): Handler {
+export function webHandler({ dir, agent }: { dir: string; agent: () => AgentSettings }): Handler {
   const root = path.resolve(dir);
   return async (request, response) => {
     if (request.method !== "GET" && request.method !== "HEAD") {
@@ -36,7 +38,7 @@ export function webHandler({ dir, agent }: { dir: string; agent: AgentSettings }
     }
     const { pathname } = new URL(request.url ?? "/", "http://ui");
     if (pathname === "/manifest.webmanifest") {
-      const body = JSON.stringify(manifestOf(agent));
+      const body = JSON.stringify(manifestOf(agent()));
       response.writeHead(200, { "content-type": "application/manifest+json", "cache-control": "no-cache" });
       response.end(request.method === "HEAD" ? undefined : body);
       return;

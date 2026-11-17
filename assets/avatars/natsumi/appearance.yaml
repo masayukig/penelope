@@ -1,0 +1,25 @@
+lora: kutara_anima.v1
+body: |
+  <lora:kutara_anima.v1:1> ,
+  masterpiece, newest,
+  kutara natsumi, low ponytail, freckles, large breasts,
+
+  black glasses,
+outfit: "black business suit,  collared white shirt,"
+outfitName: スーツ
+keep:
+  - freckles
+  - large breasts
+  - low ponytail
+examples:
+  - title: 私服の自撮り
+    outfit: white knit sweater, long skirt,
+    scene: |
+      1girl, solo, selfie, upper body, smile, looking at viewer,
+      outdoors, park, sunlight
+  - title: 気分の絵
+    outfit: oversized cardigan,
+    scene: |
+      1girl, solo,
+      A woman with glasses is gazing out of a rainy window, feeling calm.
+      indoors, window, rain, dim light

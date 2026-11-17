@@ -7,13 +7,13 @@ import type http from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
+import { ICON_TYPES } from "@penelope/avatar";
 import type { AgentResponse, PostMessageResponse, PushResponse, SchedulesResponse, SubAgentsResponse } from "@penelope/contract";
 
 import { isA2APath } from "./a2a/endpoint.ts";
 import type { SubAgents } from "./agents.ts";
 import { AssetStoreError, type Assets } from "./assets.ts";
-import { type AgentSettings, ICON_TYPES } from "./config.ts";
-
+import { type AgentSettings, faceBytes } from "./avatar.ts";
 import type { Conversation } from "./conversation.ts";
 import type { Feed } from "./feed.ts";
 import { type Handler, HttpError, isMultipart, readForm, readJson, sendEmpty, sendError, sendJson } from "./http.ts";
@@ -53,8 +53,8 @@ export type UiOptions = {
   ownerId: number | undefined;
   /** Where the owner reaches the backend. Cookies are Secure when it is https. */
   publicUrl: string | undefined;
-  /** The agent's name and icon, read without a login. */
-  agent: AgentSettings;
+  /** The agent's name and her avatar's faces as they are now, read without a login. */
+  agent: () => AgentSettings;
   now: () => number;
   maxBytes?: number;
   /** The Web UI's files, served for everything else. Until it is built, nothing is. */
@@ -66,7 +66,7 @@ export type UiOptions = {
 };
 
 export function uiHandler(options: UiOptions): Handler {
-  const { queue, conversation, assets, agents, schedules, feed, login, sessions, ownerId, agent, now } = options;
+  const { queue, conversation, assets, agents, schedules, feed, login, sessions, ownerId, now } = options;
   const maxBytes = options.maxBytes ?? DEFAULT_UI_BYTES;
   const secure = options.publicUrl?.startsWith("https:") ?? false;
   const web = options.web ?? notBuilt;
@@ -118,6 +118,7 @@ export function uiHandler(options: UiOptions): Handler {
     // Read without a login: the login screen and the home screen show who
     // she is. Nothing else is here (docs/ui-api.md).
     if (route === "GET /api/agent") {
+      const agent = options.agent();
       const ways = (images: Readonly<Record<string, string>>) =>
         Object.fromEntries(Object.entries(images).map(([expression, file]) => [expression, `${AGENT_ICONS_PATH}${encodeURIComponent(expression)}${path.extname(file).toLowerCase()}`]));
       const icons = ways(agent.icons);
@@ -136,11 +137,12 @@ export function uiHandler(options: UiOptions): Handler {
       } catch {
         // Not a name of any face: answered as one that is not there.
       }
+      const agent = options.agent();
       const file = faceFile(agent, expression);
       if (file === undefined) throw new HttpError(404, "no such face");
       let body: Buffer;
       try {
-        body = await readFile(file);
+        body = faceBytes(agent, file);
       } catch {
         throw new HttpError(404, "the face cannot be read");
       }

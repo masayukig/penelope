@@ -13,6 +13,7 @@ import { type SenderCheck, Senders } from "./a2a/senders.ts";
 import { TokenReview } from "./a2a/tokenreview.ts";
 import { SubAgents } from "./agents.ts";
 import { Assets } from "./assets.ts";
+import { AgentAvatar, seedAvatar } from "./avatar.ts";
 import type { Config } from "./config.ts";
 import { Conversation } from "./conversation.ts";
 import { openDatabase } from "./db.ts";
@@ -47,6 +48,11 @@ export async function startBackend(
   for (const dir of [path.dirname(config.databasePath), config.assetsDir, config.sourcesDir, config.memoryDir, path.dirname(config.intakeSocket), path.dirname(config.sandboxSocket)]) {
     mkdirSync(dir, { recursive: true });
   }
+  const memory = new Memory(config.memoryDir, config.gitAuthor);
+  const avatar = new AgentAvatar(await seedAvatar(config.avatar, config.memoryDir, memory, log), config.avatar.name, log);
+  // What she changed in her avatar is shown once it is committed, at the end of the turn.
+  memory.afterCommit(() => avatar.reload());
+  const agent = avatar.settings();
   const db = openDatabase(config.databasePath);
   const awake = new AwakeHours(config.awakeHours, config.timeZone);
   const queue = new Queue(db, new Sources(config.sourcesDir, config.timeZone), {
@@ -63,7 +69,6 @@ export async function startBackend(
   const agents = new SubAgents(db, feed, conversation, { now });
   const schedules = new Schedules(db, { now, timeZone: config.timeZone });
   const scheduler = new Scheduler(schedules, queue, { now, timeZone: config.timeZone, nightly: config.nightly, log });
-  const memory = new Memory(config.memoryDir, config.gitAuthor);
   const sessions = new LoginSessions(db, { now });
   const inbox = new Inbox(db, queue, { now, limits: config.a2a?.limits ?? { deadlineMs: 24 * 3_600_000, maxOpenTasks: 3 } });
   const login = new GitHubLogin({ settings: config.github, ...(githubEndpoints ? { endpoints: githubEndpoints } : {}), sessions, now, log });
@@ -75,7 +80,7 @@ export async function startBackend(
       : new Notifier({
           feed,
           subscriptions,
-          agentName: config.agent.name,
+          agentName: agent.name,
           channels: { "web-push": new WebPushChannel({ vapid, subject: config.webPush.subject, now, ...(sendWebPush ? { send: sendWebPush } : {}) }) },
           log,
         });
@@ -112,9 +117,9 @@ export async function startBackend(
           sessions,
           ownerId: config.github?.ownerId,
           publicUrl: config.publicUrl,
-          agent: config.agent,
-          web: webHandler({ dir: config.webDir, agent: config.agent }),
-          ...(config.a2a === undefined ? {} : { a2a: a2aOf(config.a2a, config.agent.name, inbox, now, log) }),
+          agent: () => avatar.settings(),
+          web: webHandler({ dir: config.webDir, agent: () => avatar.settings() }),
+          ...(config.a2a === undefined ? {} : { a2a: a2aOf(config.a2a, agent.name, inbox, now, log) }),
           ...(vapid === undefined ? {} : { push: { publicKey: vapid.publicKey, subscriptions } }),
           now,
         }),

@@ -10,13 +10,6 @@ const files: Record<string, string> = {
   "/secrets/not-a-key.pem": "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n",
   "/secrets/sandbox-token": "real-token\n",
   "/secrets/github-secret": "client-secret\n",
-  "/avatars/iris/avatar.json": JSON.stringify({ id: "iris", name: "Iris", icons: { neutral: "icons/neutral.webp", happy: "icons/happy.webp" } }),
-  "/avatars/escape/avatar.json": JSON.stringify({ name: "Out", icons: { neutral: "../../secrets/github-secret.webp" } }),
-  "/avatars/text/avatar.json": JSON.stringify({ name: "Text", icons: { neutral: "icons/neutral.txt" } }),
-  "/avatars/broken/avatar.json": "{",
-  "/avatars/png/avatar.json": JSON.stringify({ name: "Png", icons: { neutral: "icons/neutral.webp", happy: "icons/happy.webp" }, pngIcons: { neutral: "slack/neutral.png" } }),
-  "/avatars/png-webp/avatar.json": JSON.stringify({ name: "Png", icons: { neutral: "icons/neutral.webp" }, pngIcons: { neutral: "slack/neutral.webp" } }),
-  "/avatars/png-escape/avatar.json": JSON.stringify({ name: "Png", icons: { neutral: "icons/neutral.webp" }, pngIcons: { neutral: "../iris/slack/neutral.png" } }),
   "/sa/token": "backend-sa-token\n",
   "/sa/ca.crt": "-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n",
 };
@@ -49,7 +42,7 @@ describe("the configuration", () => {
       builtinDelivery: { ui: "now", cron: "now", a2a: "now", self: "now", job: "now" },
       inline: new Set(["ui", "job", "control"]),
       gitAuthor: { name: "penelope-backend", email: "backend@penelope.invalid" },
-      agent: { name: "Agent", icons: {} },
+      avatar: { name: undefined, chosen: undefined, from: ["/app/avatars"] },
       webDir: "/app/web",
       a2a: undefined,
       webPush: undefined,
@@ -108,26 +101,13 @@ describe("the configuration", () => {
     // control is always inline: the runner needs what it says.
     assert.deepEqual(config.inline, new Set(["ui", "self", "control"]));
     assert.deepEqual(config.gitAuthor, { name: "backend", email: "backend@example.com" });
-    // The name and the faces are the avatar's the deployment chose: nothing in the code names her (ADR-0001).
-    assert.deepEqual(config.agent, { name: "Iris", icons: { neutral: "/avatars/iris/icons/neutral.webp", happy: "/avatars/iris/icons/happy.webp" } });
+    // The deployment's avatars are looked in before the image's (ADR-0036).
+    assert.deepEqual(config.avatar, { name: undefined, chosen: "iris", from: ["/avatars", "/app/avatars"] });
     assert.equal(config.webDir, "/srv/web");
   });
 
-  it("lets the settings name the agent over her avatar's name", () => {
-    const config = loadConfig({ PENELOPE_AVATARS_DIR: "/avatars", PENELOPE_AVATAR: "iris", PENELOPE_AGENT_NAME: " Kestrel " }, read);
-    assert.equal(config.agent.name, "Kestrel");
-    assert.equal(config.agent.icons.neutral, "/avatars/iris/icons/neutral.webp");
-    assert.equal(loadConfig({ PENELOPE_AGENT_NAME: "Kestrel" }, read).agent.name, "Kestrel");
-  });
-
-  // Slack is given a PNG of the face, not the Web UI's WebP (docs/ui-api.md, "エージェント").
-  it("takes the PNG of each face the avatar has one of", () => {
-    const config = loadConfig({ PENELOPE_AVATARS_DIR: "/avatars", PENELOPE_AVATAR: "png" }, read);
-    assert.deepEqual(config.agent, {
-      name: "Png",
-      icons: { neutral: "/avatars/png/icons/neutral.webp", happy: "/avatars/png/icons/happy.webp" },
-      pngIcons: { neutral: "/avatars/png/slack/neutral.png" },
-    });
+  it("takes the agent's name from the settings, and looks for the avatar in the image alone without a place of the deployment's", () => {
+    assert.deepEqual(loadConfig({ PENELOPE_AGENT_NAME: " Kestrel ", PENELOPE_AVATAR: "iris" }, read).avatar, { name: "Kestrel", chosen: "iris", from: ["/app/avatars"] });
   });
 
   it("takes the time zone from TZ when it has none of its own", () => {
@@ -173,15 +153,8 @@ describe("the configuration", () => {
       { PENELOPE_OWNER_GITHUB_ID: "someone" },
       { PENELOPE_PUBLIC_URL: "not a url" },
       { PENELOPE_SANDBOX_TOKEN_FILE: "/secrets/missing" },
-      // An avatar must be there and readable, its faces images inside its own directory.
-      { PENELOPE_AVATARS_DIR: "/avatars", PENELOPE_AVATAR: "missing" },
-      { PENELOPE_AVATARS_DIR: "/avatars", PENELOPE_AVATAR: "broken" },
-      { PENELOPE_AVATARS_DIR: "/avatars", PENELOPE_AVATAR: "escape" },
-      { PENELOPE_AVATARS_DIR: "/avatars", PENELOPE_AVATAR: "text" },
+      // An avatar is named as a directory, never a path.
       { PENELOPE_AVATARS_DIR: "/avatars", PENELOPE_AVATAR: "../secrets" },
-      // A face's PNG is a PNG inside the avatar's own directory.
-      { PENELOPE_AVATARS_DIR: "/avatars", PENELOPE_AVATAR: "png-webp" },
-      { PENELOPE_AVATARS_DIR: "/avatars", PENELOPE_AVATAR: "png-escape" },
     ]) {
       assert.throws(() => loadConfig(env, read), ConfigError, JSON.stringify(env));
     }

@@ -79,6 +79,18 @@ describe("the memory", () => {
     assert.deepEqual(await Promise.all([first, second]), ["committed", "clean"]);
   });
 
+  // The avatar's copy at the start does not take in what the owner or a turn left uncommitted.
+  it("commits only the paths it is given, leaving the rest for the next turn", async (t) => {
+    const dir = tempDir(t);
+    const memory = new Memory(dir, author);
+    mkdirSync(path.join(dir, "avatar"));
+    writeFileSync(path.join(dir, "avatar/avatar.json"), "{}");
+    writeFileSync(path.join(dir, "always.md"), "# always\n");
+    assert.equal(await memory.commitPaths(["avatar"], ["Avatar iris"]), "committed");
+    assert.equal(git(dir, "ls-files"), "avatar/avatar.json\n");
+    assert.equal(git(dir, "status", "--porcelain"), "?? always.md\n");
+  });
+
   it("fails, saying why, when git fails", async (t) => {
     const dir = path.join(tempDir(t), "not-there");
     await assert.rejects(new Memory(dir, author).commit({ agent: "main", turnId: "t-1" }));
