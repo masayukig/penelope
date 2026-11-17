@@ -11,6 +11,7 @@ import { Fragment, useState } from "react";
 import { assetUrl } from "../model/api.ts";
 import type { AgentItem, LocalFile, OwnerItem, TimelineItem } from "../model/store.ts";
 import { AgentAvatar, useAgent } from "./agent.tsx";
+import { Linked, markdownLinks } from "./links.tsx";
 import { dayOf, faceWord, sourceWord, timeOf, words } from "./words.ts";
 
 export function Timeline({
@@ -95,7 +96,7 @@ function Reply({ item, wide, onOpen }: { item: AgentItem; wide: boolean; onOpen:
   if (wide) {
     return (
       <ChatMessage sender="assistant" name={name} metadata={metadata}>
-        <Markdown>{item.text}</Markdown>
+        <Markdown {...markdownLinks}>{item.text}</Markdown>
         <ReplyImages item={item} onOpen={onOpen} />
       </ChatMessage>
     );
@@ -103,7 +104,7 @@ function Reply({ item, wide, onOpen }: { item: AgentItem; wide: boolean; onOpen:
   return (
     <ChatMessage sender="assistant">
       <ChatMessageBubble variant="ghost" name={name} metadata={metadata}>
-        <Markdown>{item.text}</Markdown>
+        <Markdown {...markdownLinks}>{item.text}</Markdown>
         <ReplyImages item={item} onOpen={onOpen} />
       </ChatMessageBubble>
     </ChatMessage>
@@ -135,7 +136,9 @@ function OwnerMessage({ item, onOpen }: { item: OwnerItem; onOpen: (file: LocalF
       ) : null}
       {item.text !== "" ? (
         <ChatMessageBubble variant="filled" metadata={metadata}>
-          <span className="owner-text">{item.text}</span>
+          <span className="owner-text">
+            <Linked text={item.text} />
+          </span>
         </ChatMessageBubble>
       ) : (
         metadata
