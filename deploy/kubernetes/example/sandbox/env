@@ -1,0 +1,19 @@
+# The sandbox's settings that are neither surrogates nor endpoints
+# (ConfigMap penelope-sandbox-env, together with surrogates.env).
+# Who she is, shown in her system prompt.
+PENELOPE_NAME=Example
+PENELOPE_ROLE=The owner's companion, also on Slack
+PENELOPE_OWNER=example-owner (example-owner on GitHub)
+# <provider>/<model> of Pi. The provider's endpoint and surrogate are in models.json.
+PENELOPE_MODEL=openai/gpt-5.5
+# The time of the tools and of what the runner draws.
+TZ=Asia/Tokyo
+# Slack's events drawn into the turn: the source of the Slack plugin (receivers/config.json).
+PENELOPE_SLACK_SOURCES=slack
+# slackctl post --face makes the icon's URL from this (the same as the backend's).
+PENELOPE_PUBLIC_URL=https://penelope.example.com
+# The avatar she draws herself as (README.md, "Avatar"). PENELOPE_AVATARS_DIR is set by patches/statefulset.yaml.
+PENELOPE_AVATAR=example
+# Where sdctl writes what she draws.
+SDCTL_FORMAT=jpeg
+SDCTL_OUTPUT_DIR=/home/agent/work/images

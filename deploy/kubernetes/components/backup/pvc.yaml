@@ -1,0 +1,14 @@
+# Where the backups go, as an example: a PVC of the cluster's default class.
+# A backup on the same storage as what it backs up does not survive losing
+# that storage, so point the volume backup of cronjob.yaml somewhere else
+# (an NFS share, say) with a patch (README.md, "Backup").
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: penelope-backup
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi

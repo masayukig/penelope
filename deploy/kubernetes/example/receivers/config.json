@@ -1,0 +1,17 @@
+{
+  "plugins": [
+    {
+      "name": "slack",
+      "plugin": "slack",
+      "settings": {
+        "workspaces": [
+          {
+            "name": "work",
+            "app_token_file": "/run/secrets/penelope-receivers/slack-work-app-token",
+            "bot_token_file": "/run/secrets/penelope-receivers/slack-work-bot-token"
+          }
+        ]
+      }
+    }
+  ]
+}

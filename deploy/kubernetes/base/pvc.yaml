@@ -1,0 +1,30 @@
+# The two persistent places of the Pod (docs/pod.md, "volume"). The names are
+# fixed: the README and the migration guide point at them.
+#
+# penelope: subPaths home/ (/home/agent: Pi's settings and sessions, the
+# tools' caches, cloned work), backend/ (the backend's SQLite and the copies
+# of images) and sources/ (/sources). The Go and Node caches grow in HOME, so
+# it is the larger one. The size and the storage class are the overlay's to
+# change; a PVC can usually be grown but not shrunk.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: penelope
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+# penelope-memory: /memory (git and Markdown, ADR-0006) under the subPath memory/.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: penelope-memory
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi

@@ -1,0 +1,28 @@
+# The Web UI and the UI's API (optional). Any Ingress controller; TLS is
+# ended here. The host is PENELOPE_PUBLIC_URL's. The login is the backend's
+# GitHub OAuth, so nothing else needs to guard /.
+#
+# A webhook plugin of the receivers (Alertmanager, GitHub) would add the path
+# /v1/webhooks/ to the Service's port webhooks. Slack needs no path: it is
+# received over Socket Mode.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: penelope
+spec:
+  ingressClassName: example
+  tls:
+  - hosts:
+    - penelope.example.com
+    secretName: penelope-tls
+  rules:
+  - host: penelope.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: penelope
+            port:
+              name: http

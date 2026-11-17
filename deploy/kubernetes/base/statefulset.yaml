@@ -1,0 +1,517 @@
+# The Pod: the four containers of docs/pod.md (backend, Sentinel, sandbox,
+# receivers) and their init containers. The same for every deployment; what
+# belongs to one deployment comes from the ConfigMaps and Secrets named below,
+# which the overlay makes (README.md, "What the overlay gives").
+#
+# UIDs and groups (docs/pod.md, "コンテナ"):
+#   1000   sandbox (user agent, HOME /home/agent)
+#   1001   backend
+#   1002   receivers
+#   65532  Sentinel (distroless nonroot)
+#   2000   the shared group (supplementalGroups). The /memory work tree
+#          (written by the sandbox), its .git and /sources (written by the
+#          backend) are read by the other side through this group.
+# fsGroup is not used: the kubelet would open the whole PVC to the group, and
+# the backend's SQLite and the sandbox's HOME could not stay 0700. The init
+# container "volumes" gives the owners instead (README.md, "Volumes and owners").
+#
+# A StatefulSet, so that at most one Pod runs at a time.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: penelope
+spec:
+  replicas: 1
+  serviceName: penelope
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: penelope
+      app.kubernetes.io/component: agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: penelope
+        app.kubernetes.io/component: agent
+    spec:
+      serviceAccountName: penelope
+      # The token is not mounted on its own; the Sentinel gets one, projected
+      # (docs/pod.md, "ServiceAccount の token").
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # The name the runner calls the backend's sandbox API by. It is not in
+      # the cluster's DNS. The address leads nowhere (RFC 5737): the
+      # sandbox's TCP is redirected to the Sentinel, which opens it by SNI and
+      # sends it to the backend's Unix socket (the overlay's sentinel.yaml).
+      hostAliases:
+      - ip: 192.0.2.10
+        hostnames:
+        - backend.penelope.internal
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        supplementalGroups:
+        - 2000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+      # The deployment's own skills into /skills (init/skills.sh). Before the
+      # redirect, as a UID other than the sandbox's: after it, the Sentinel
+      # is not running yet.
+      - name: skills
+        image: ghcr.io/yuanying/penelope-sandbox
+        command:
+        - sh
+        - /etc/penelope/init/skills.sh
+        env:
+        - name: HOME
+          value: /tmp
+        securityContext:
+          runAsUser: 65534
+          runAsGroup: 65534
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 256Mi
+        volumeMounts:
+        - name: init
+          mountPath: /etc/penelope/init
+          readOnly: true
+        - name: skills-config
+          mountPath: /etc/penelope/skills
+          readOnly: true
+        - name: skills
+          mountPath: /skills
+        - name: skills-tmp
+          mountPath: /tmp
+      # The places on the PVCs and Pi's model settings (init/volumes.sh). Root,
+      # to give owners. Nothing goes out.
+      - name: volumes
+        image: ghcr.io/yuanying/penelope-sandbox
+        command:
+        - sh
+        - /etc/penelope/init/volumes.sh
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+          runAsNonRoot: false
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - CHOWN
+            - FOWNER
+            - DAC_OVERRIDE
+            # to set setgid on a directory of a group (2000) root is not in
+            - FSETID
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            memory: 64Mi
+        volumeMounts:
+        - name: init
+          mountPath: /etc/penelope/init
+          readOnly: true
+        - name: models
+          mountPath: /etc/penelope/models
+          readOnly: true
+        - name: state
+          mountPath: /volume
+        - name: memory
+          mountPath: /volume/memory
+      # The real token of the backend's sandbox API, made afresh for each Pod
+      # rather than kept in a Secret. Only the backend and the Sentinel mount
+      # it; the sandbox has a surrogate.
+      - name: backend-token
+        image: ghcr.io/yuanying/penelope-backend
+        command:
+        - sh
+        - -c
+        - 'f=/run/penelope/backend-token/token; [ -s "$f" ] || { umask 0222; head -c 32 /dev/urandom | od -An -tx1 | tr -d " \n" > "$f"; }; ls -ln "$f"'
+        securityContext:
+          runAsUser: 1001
+          runAsGroup: 1001
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            memory: 64Mi
+        volumeMounts:
+        - name: backend-token
+          mountPath: /run/penelope/backend-token
+      # The sandbox UID's outbound traffic to the Sentinel (init/redirect.sh,
+      # docs/pod.md "網"). The only container with NET_ADMIN.
+      - name: redirect
+        image: registry.k8s.io/build-image/distroless-iptables
+        command:
+        - sh
+        - /etc/penelope/init/redirect.sh
+        env:
+        - name: SANDBOX_UID
+          value: "1000"
+        # the same ports as listen in the overlay's sentinel.yaml
+        - name: PROXY_PORT
+          value: "15001"
+        - name: DNS_PORT
+          value: "15053"
+        securityContext:
+          runAsUser: 0
+          runAsNonRoot: false
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            memory: 64Mi
+        volumeMounts:
+        - name: init
+          mountPath: /etc/penelope/init
+          readOnly: true
+        - name: redirect-run
+          mountPath: /run
+      containers:
+      # The intake and the queue, the sandbox API, the UI's API
+      # (docs/backend.md). umask 007, so that what it makes in .git and
+      # /sources is readable by the sandbox through group 2000.
+      - name: backend
+        image: ghcr.io/yuanying/penelope-backend
+        command:
+        - sh
+        - -c
+        - umask 007 && exec node --disable-warning=ExperimentalWarning /app/dist/main.js serve
+        # The deployment's settings (PENELOPE_PUBLIC_URL, the GitHub login,
+        # the avatar, the time zone and so on; docs/backend.md "設定").
+        envFrom:
+        - configMapRef:
+            name: penelope-backend-env
+        # The places this Pod fixes. env wins over envFrom.
+        env:
+        - name: PENELOPE_LISTEN
+          value: "[::]:8080"
+        - name: PENELOPE_DATABASE
+          value: /var/lib/penelope/backend.sqlite
+        - name: PENELOPE_SANDBOX_TOKEN_FILE
+          value: /run/penelope/backend-token/token
+        - name: PENELOPE_GITHUB_CLIENT_SECRET_FILE
+          value: /run/secrets/penelope-backend/github-client-secret
+        ports:
+        - name: http
+          containerPort: 8080
+        securityContext:
+          runAsUser: 1001
+          runAsGroup: 1001
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        startupProbe:
+          tcpSocket:
+            port: http
+          periodSeconds: 2
+          failureThreshold: 60
+        readinessProbe:
+          tcpSocket:
+            port: http
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        volumeMounts:
+        - name: memory
+          mountPath: /memory
+          subPath: memory
+        - name: state
+          mountPath: /var/lib/penelope
+          subPath: backend
+        - name: state
+          mountPath: /sources
+          subPath: sources
+        - name: intake-socket
+          mountPath: /run/penelope/intake
+        - name: sandbox-socket
+          mountPath: /run/penelope/sandbox
+        - name: backend-token
+          mountPath: /run/penelope/backend-token
+          readOnly: true
+        - name: backend-secrets
+          mountPath: /run/secrets/penelope-backend
+          readOnly: true
+        - name: backend-tmp
+          mountPath: /tmp
+      # The redirected listener, name lookups and the keys
+      # (docs/sentinel-config.md; the settings are the overlay's sentinel.yaml).
+      - name: sentinel
+        image: ghcr.io/yuanying/penelope-sentinel
+        args:
+        - serve
+        - -config
+        - /etc/penelope/sentinel/sentinel.yaml
+        securityContext:
+          runAsUser: 65532
+          runAsGroup: 65532
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 20m
+            memory: 32Mi
+          limits:
+            memory: 256Mi
+        volumeMounts:
+        - name: sentinel-config
+          mountPath: /etc/penelope/sentinel
+          readOnly: true
+        - name: sentinel-ca
+          mountPath: /run/secrets/penelope-sentinel/ca
+          readOnly: true
+        - name: sentinel-keys
+          mountPath: /run/secrets/penelope-sentinel/keys
+          readOnly: true
+        - name: kube-token
+          mountPath: /run/secrets/penelope-sentinel/kube
+          readOnly: true
+        - name: backend-token
+          mountPath: /run/penelope/backend-token
+          readOnly: true
+        - name: sandbox-socket
+          mountPath: /run/penelope/sandbox
+      # The runner, Pi and the development tools (ADR-0011). It holds only
+      # surrogates and the Sentinel's CA certificate. umask 007 for the same
+      # reason as the backend's.
+      - name: sandbox
+        image: ghcr.io/yuanying/penelope-sandbox
+        command:
+        - sh
+        - -c
+        - umask 007 && exec /usr/local/bin/penelope-sandbox run
+        # Who she is, the model, the surrogates and the endpoints
+        # (the overlay's sandbox/env and sandbox/surrogates.env).
+        envFrom:
+        - configMapRef:
+            name: penelope-sandbox-env
+        env:
+        - name: PENELOPE_BACKEND_URL
+          value: https://backend.penelope.internal
+        - name: PENELOPE_OWNER_SKILLS_DIR
+          value: /skills
+        - name: PENELOPE_CONNECTORS_DIR
+          value: /etc/penelope/connectors
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: "2"
+            memory: 4Gi
+        volumeMounts:
+        # .git is read-only here; the backend commits (ADR-0006).
+        - name: memory
+          mountPath: /memory
+          subPath: memory
+        - name: memory
+          mountPath: /memory/.git
+          subPath: memory/.git
+          readOnly: true
+        - name: state
+          mountPath: /home/agent
+          subPath: home
+        - name: state
+          mountPath: /sources
+          subPath: sources
+          readOnly: true
+        - name: skills
+          mountPath: /skills
+          readOnly: true
+        - name: sandbox-ca
+          mountPath: /etc/penelope/ca
+          readOnly: true
+        - name: connectors
+          mountPath: /etc/penelope/connectors
+          readOnly: true
+      # The receiving plugins (docs/receivers.md). Which ones run is the
+      # overlay's receivers config.json. No state, so no persistent volume.
+      - name: receivers
+        image: ghcr.io/yuanying/penelope-receivers
+        ports:
+        - name: webhooks
+          containerPort: 8081
+        securityContext:
+          runAsUser: 1002
+          runAsGroup: 1002
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: webhooks
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: webhooks
+          periodSeconds: 30
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 10m
+            memory: 64Mi
+          limits:
+            memory: 256Mi
+        volumeMounts:
+        - name: receivers-config
+          mountPath: /etc/penelope/receivers
+          readOnly: true
+        - name: receivers-keys
+          mountPath: /run/secrets/penelope-receivers
+          readOnly: true
+        - name: intake-socket
+          mountPath: /run/penelope/intake
+      volumes:
+      # /memory (pvc.yaml). The work tree and .git under memory/.
+      - name: memory
+        persistentVolumeClaim:
+          claimName: penelope-memory
+      # home/ (/home/agent), backend/ (the SQLite) and sources/ (pvc.yaml).
+      - name: state
+        persistentVolumeClaim:
+          claimName: penelope
+      - name: skills
+        emptyDir:
+          sizeLimit: 64Mi
+      - name: skills-tmp
+        emptyDir:
+          sizeLimit: 256Mi
+      - name: init
+        configMap:
+          name: penelope-init
+      - name: skills-config
+        configMap:
+          name: penelope-skills
+          optional: true
+      - name: models
+        configMap:
+          name: penelope-models
+      - name: sentinel-config
+        configMap:
+          name: penelope-sentinel
+      # The Sentinel's CA (a kubernetes.io/tls Secret: tls.crt, tls.key).
+      # Readable by the Sentinel (65532).
+      - name: sentinel-ca
+        secret:
+          secretName: penelope-sentinel-ca
+          defaultMode: 0444
+      # Only the certificate of the same Secret, for the sandbox's trust
+      # (docs/pod.md "CA"). The key is never mounted there.
+      - name: sandbox-ca
+        secret:
+          secretName: penelope-sentinel-ca
+          items:
+          - key: tls.crt
+            path: sentinel.crt
+      # The real keys the Sentinel puts in place of the surrogates. Each key
+      # of the Secret is a file.
+      - name: sentinel-keys
+        secret:
+          secretName: penelope-sentinel
+          defaultMode: 0444
+      # A token for the cluster's API server and the cluster's CA, for a
+      # registration of kubernetes.default.svc. Unused unless the overlay's
+      # sentinel.yaml points at it.
+      - name: kube-token
+        projected:
+          defaultMode: 0444
+          sources:
+          - serviceAccountToken:
+              expirationSeconds: 3600
+              path: token
+          - configMap:
+              name: kube-root-ca.crt
+              items:
+              - key: ca.crt
+                path: ca.crt
+      - name: backend-token
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Mi
+      # The backend's keys: github-client-secret, and web-push-vapid-key when
+      # Web Push is on. Readable by the backend (1001).
+      - name: backend-secrets
+        secret:
+          secretName: penelope-backend
+          defaultMode: 0444
+      # The intake's socket: the backend and the receivers only, never the
+      # sandbox (docs/pod.md).
+      - name: intake-socket
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Mi
+      # The backend's sandbox API socket: the backend and the Sentinel only.
+      - name: sandbox-socket
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Mi
+      - name: connectors
+        configMap:
+          name: penelope-connectors
+      - name: receivers-config
+        configMap:
+          name: penelope-receivers
+      # The receivers' keys (Slack's tokens, webhook secrets). Each key of the
+      # Secret is a file, named as the receivers config.json says. Optional: a
+      # deployment with no plugin needs none. Readable by the receivers (1002).
+      - name: receivers-keys
+        secret:
+          secretName: penelope-receivers
+          defaultMode: 0444
+          optional: true
+      - name: redirect-run
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Mi
+      - name: backend-tmp
+        emptyDir:
+          sizeLimit: 256Mi

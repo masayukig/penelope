@@ -1,0 +1,93 @@
+# What this deployment adds to the base's Pod.
+#
+# - An avatar of its own (README.md, "Avatar"): the init container avatar
+#   fetches one avatar directory into the emptyDir avatars, which the backend
+#   and the sandbox both read as PENELOPE_AVATARS_DIR. A deployment that uses
+#   an avatar in the images drops all of this and sets only PENELOPE_AVATAR.
+# - A ServiceAccount token with the audience a2a for the Sentinel, put in
+#   place of HELPER_AGENT_TOKEN (sentinel/sentinel.yaml).
+#
+# The containers are matched by name, so their order stays the base's. The
+# init container avatar comes first; it has to run before the redirect.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: penelope
+spec:
+  template:
+    spec:
+      initContainers:
+      - name: avatar
+        image: ghcr.io/yuanying/penelope-sandbox
+        command:
+        - sh
+        - /etc/penelope/init/avatar.sh
+        env:
+        - name: HOME
+          value: /tmp
+        - name: AVATAR_REPO
+          value: https://github.com/example/avatars.git
+        - name: AVATAR_BRANCH
+          value: main
+        - name: AVATAR_PATH
+          value: example
+        - name: AVATAR_NAME
+          value: example
+        - name: AVATARS_DIR
+          value: /avatars
+        securityContext:
+          runAsUser: 65534
+          runAsGroup: 65534
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 256Mi
+        volumeMounts:
+        - name: init
+          mountPath: /etc/penelope/init
+          readOnly: true
+        - name: avatars
+          mountPath: /avatars
+        - name: skills-tmp
+          mountPath: /tmp
+      containers:
+      - name: backend
+        env:
+        - name: PENELOPE_AVATARS_DIR
+          value: /etc/penelope/avatars
+        volumeMounts:
+        - name: avatars
+          mountPath: /etc/penelope/avatars
+          readOnly: true
+      - name: sentinel
+        volumeMounts:
+        - name: a2a-token
+          mountPath: /run/secrets/penelope-sentinel/a2a
+          readOnly: true
+      - name: sandbox
+        env:
+        - name: PENELOPE_AVATARS_DIR
+          value: /etc/penelope/avatars
+        volumeMounts:
+        - name: avatars
+          mountPath: /etc/penelope/avatars
+          readOnly: true
+      volumes:
+      - name: avatars
+        emptyDir:
+          sizeLimit: 64Mi
+      - name: a2a-token
+        projected:
+          defaultMode: 0444
+          sources:
+          - serviceAccountToken:
+              audience: a2a
+              expirationSeconds: 3600
+              path: token

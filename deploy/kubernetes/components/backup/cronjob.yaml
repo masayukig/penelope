@@ -1,0 +1,142 @@
+# Once a day, a backup of the two PVCs (penelope, penelope-memory) into the
+# volume backup (README.md, "Backup"), without stopping the Pod.
+#
+# 1. sqlite (init container, the backend's image, UID 1001): a consistent
+#    copy of the backend's SQLite into /staging (sqlite-backup.mjs). The
+#    same Node as the backend's opens it, so their SQLite versions agree.
+# 2. archive (the sandbox's image, root): the copy and a tar of each PVC,
+#    kept KEEP_DAYS days (archive.sh). Root, to read what is 0700 to the
+#    sandbox and the backend and keep the owners.
+#
+# The PVCs are ReadWriteOnce, so the Job runs on the node of the agent's Pod.
+# When that Pod is not running, the Job stays Pending until its deadline.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: penelope-backup
+spec:
+  # After the nightly switch (PENELOPE_NIGHTLY_CRON, 04:00 in the example)
+  # has had time to end and commit. The time zone is the CronJob's own.
+  schedule: "30 5 * * *"
+  timeZone: Asia/Tokyo
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: penelope
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+              - topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: penelope
+                    app.kubernetes.io/component: agent
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+          - name: sqlite
+            image: ghcr.io/yuanying/penelope-backend
+            command:
+            - node
+            - --no-warnings
+            - /etc/penelope-backup/sqlite-backup.mjs
+            - /var/lib/penelope/backend.sqlite
+            - /staging/backend.sqlite
+            securityContext:
+              runAsUser: 1001
+              runAsGroup: 1001
+              runAsNonRoot: true
+              readOnlyRootFilesystem: true
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 256Mi
+            volumeMounts:
+            # Writable: SQLite in WAL mode writes its shared-memory file even to read.
+            - name: state
+              mountPath: /var/lib/penelope
+              subPath: backend
+            - name: staging
+              mountPath: /staging
+            - name: scripts
+              mountPath: /etc/penelope-backup
+              readOnly: true
+          containers:
+          - name: archive
+            image: ghcr.io/yuanying/penelope-sandbox
+            command:
+            - sh
+            - /etc/penelope-backup/archive.sh
+            env:
+            - name: KEEP_DAYS
+              value: "14"
+            securityContext:
+              runAsUser: 0
+              runAsGroup: 0
+              runAsNonRoot: false
+              readOnlyRootFilesystem: true
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+                add:
+                - DAC_OVERRIDE
+                - DAC_READ_SEARCH
+                - FOWNER
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                memory: 512Mi
+            volumeMounts:
+            - name: state
+              mountPath: /volume/state
+              readOnly: true
+            - name: memory
+              mountPath: /volume/memory
+              readOnly: true
+            - name: staging
+              mountPath: /staging
+              readOnly: true
+            - name: backup
+              mountPath: /backup
+            - name: scripts
+              mountPath: /etc/penelope-backup
+              readOnly: true
+          volumes:
+          - name: state
+            persistentVolumeClaim:
+              claimName: penelope
+          - name: memory
+            persistentVolumeClaim:
+              claimName: penelope-memory
+          - name: staging
+            emptyDir:
+              sizeLimit: 512Mi
+          - name: scripts
+            configMap:
+              name: penelope-backup
+          - name: backup
+            persistentVolumeClaim:
+              claimName: penelope-backup
