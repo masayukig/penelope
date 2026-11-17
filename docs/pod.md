@@ -1,7 +1,7 @@
 # Pod の形の仕様
 
 1 つの Pod に並ぶ 4 つのコンテナと、その UID・volume・網の向け直しを決める。sandbox の image と、配置のリポジトリの manifest は、これに合わせる。
-方針は [ADR-0001](adr/0001-one-pod-with-pi-inside-the-sandbox.md)・[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)・[ADR-0003](adr/0003-all-egress-through-the-sentinel-passthrough-by-default.md)・[ADR-0004](adr/0004-the-sentinel-keeps-the-keys-through-a-replaceable-source.md)・[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)・[ADR-0011](adr/0011-a-full-dev-image-and-a-generic-user-home.md)・[ADR-0013](adr/0013-event-contents-in-sources-and-summaries-in-turns.md)・[ADR-0014](adr/0014-sandbox-loopback-left-open-and-pod-ports-on-unix-sockets.md)・[ADR-0020](adr/0020-connectors-with-a-usage-document-listed-in-the-prompt.md)・[ADR-0021](adr/0021-her-own-ssh-key-in-home-for-the-vms-she-makes.md) にある。
+方針は [ADR-0001](adr/0001-one-pod-with-pi-inside-the-sandbox.md)・[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)・[ADR-0003](adr/0003-all-egress-through-the-sentinel-passthrough-by-default.md)・[ADR-0004](adr/0004-the-sentinel-keeps-the-keys-through-a-replaceable-source.md)・[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)・[ADR-0011](adr/0011-a-full-dev-image-and-a-generic-user-home.md)・[ADR-0013](adr/0013-event-contents-in-sources-and-summaries-in-turns.md)・[ADR-0014](adr/0014-sandbox-loopback-left-open-and-pod-ports-on-unix-sockets.md)・[ADR-0020](adr/0020-connectors-with-a-usage-document-listed-in-the-prompt.md)・[ADR-0021](adr/0021-her-own-ssh-key-in-home-for-the-vms-she-makes.md)・[ADR-0035](adr/0035-tool-usage-and-shared-skills-as-image-skills.md) にある。
 
 「未決」と書いた点は、実装の作業単位が決めて、この文書を直す。
 
@@ -37,7 +37,15 @@
 | コネクタの文書（`/etc/penelope/connectors/`、配置が置く） | 読み取り | — | — | — |
 
 - Pi のディレクトリ（設定・認証・モデル・skill）とセッションの記録は HOME の下に置く（`/home/agent/.pi/agent/`、セッションは `/home/agent/.pi/agent/sessions/main/`、サブエージェントの記録とセッションは `/home/agent/.pi/agent/sessions/agents/`）。別の volume にはしない。HOME が永続なので足りる。
-- オーナーの skill は `<名前>/SKILL.md` の並びで、runner は `PENELOPE_OWNER_SKILLS_DIR` が指す場所から記憶の `skills/` と並べて読む。同じ名前が両方にあれば、オーナーの方が一覧に載る。読み取りで mount するので、エージェントは書き換えられない。設定が無いか、場所が無ければ、オーナーの skill は無い。
+- skill は `<名前>/SKILL.md` の並びで、runner は次の 3 か所から並べて読む。同じ名前が 2 か所以上にあれば、この表の上の方が一覧に載る（[ADR-0035](adr/0035-tool-usage-and-shared-skills-as-image-skills.md)）。場所が無ければ、そこの skill は無い。
+
+| 順 | 置き場所 | 持ち主 |
+| --- | --- | --- |
+| 1 | `PENELOPE_OWNER_SKILLS_DIR` が指す場所（オーナーの skill）。読み取りで mount するので、エージェントは書き換えられない。設定が無ければ無い | 配置 |
+| 2 | 記憶の `skills/` | エージェント |
+| 3 | `/opt/penelope/skills/`（sandbox の image の中。リポジトリの `packages/runner/image/skills/`）。配置は設定しない | このリポジトリ |
+
+- image の skill は、image の道具の使い方（`slack`・`sd-webui`・`a2a`・`github`）と、どの配置にも同じ skill（`self-portrait`・`goals`）である。配置の値は持たず、それは配置のコネクタの文書にある。image の skill とコネクタは名前で突き合わせない。
 - コネクタの文書は `<名前>.md` の並びで、runner は `PENELOPE_CONNECTORS_DIR` が指す場所から読み、一覧をシステムプロンプトに出す（[sentinel-config.md](sentinel-config.md) の「コネクタの文書」）。読み取りで mount する。設定が無いか、場所が無ければ、コネクタの一覧は無い。
 - 自分で作った VM への ssh の鍵は、エージェントが HOME に自分で作る（[ADR-0021](adr/0021-her-own-ssh-key-in-home-for-the-vms-she-makes.md)）。配置は ssh の鍵も ssh-agent も置かない。ssh の接続は、ほかの外向きと同じく Sentinel へ向け直され、既定の扱いに従う。
 - `/memory` の `.git` は sandbox からは読むだけである。backend がターンの終わりにコミットする（[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)）。

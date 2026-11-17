@@ -162,6 +162,15 @@ test("the owner's skills are named with their place, which she cannot change", a
   }
 });
 
+test("the image's skills are named with their place, and which of a name is listed", async () => {
+  // Guards against: skills she finds listed without knowing where they come from, or which copy of a name is listed.
+  const places = { ...(await memory({})), ownerSkills: "/skills", imageSkills: "/opt/penelope/skills" };
+  const prompt = systemPrompt(identity, places, await readPromptFiles(places.memory, 1000));
+  const line = prompt.split("\n").find((l) => l.includes("/opt/penelope/skills/"));
+  assert.ok(line, "a line names the image's skills");
+  assert.match(line, /your owner's, then the memory's, then the image's/);
+});
+
 test("without the owner's skills, the prompt names none", async () => {
   const places = await memory({});
   const prompt = systemPrompt(identity, places, await readPromptFiles(places.memory, 1000));

@@ -6,6 +6,9 @@ import { join } from "node:path";
 import type { AgentId } from "@penelope/contract";
 import { DEFAULT_MAX_CHARS, SEGMENT } from "@penelope/slack";
 
+/** Where the sandbox's image carries the skills of the repository (Dockerfile, docs/pod.md). */
+export const IMAGE_SKILLS_DIR = "/opt/penelope/skills";
+
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
@@ -32,6 +35,8 @@ export interface Config {
   ownerSkillsDir?: string;
   /** The connectors' documents, one <name>.md each (ADR-0020); left out, there are none. */
   connectorsDir?: string;
+  /** The skills that come with the image, listed after the owner's and the memory's; not set by the deployment. */
+  imageSkillsDir: string;
   sourcesDir: string;
   /** Pi's directory: its settings, credentials, models and skills. */
   agentDir: string;
@@ -157,5 +162,6 @@ export function readConfig(env: Env): Config {
     pollWaitSeconds,
     turnFold: fold !== "off",
     slack: { sources: slackSources, maxChars: slackMaxChars },
+    imageSkillsDir: IMAGE_SKILLS_DIR,
   };
 }
