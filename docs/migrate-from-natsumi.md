@@ -2,7 +2,7 @@
 
 Kubernetes で動いている natsumi（[yuanying/natsumi](https://github.com/yuanying/natsumi)）のインスタンス 1 人を、penelope の配置 1 つに移す手順である。方針は [ADR-0026](adr/0026-move-natsumi-myao-and-aki-one-deployment-each-without-a-way-back.md) にある。記憶は git の履歴ごと写し、書き手は常に 1 つにし、並べて確かめる期間も戻し道も持たない。問題が起きたら、natsumi に戻すのではなく penelope の側を直す。
 
-- 対象の版は **v0.9.0 以降**。新しい配置は [deploy/kubernetes/](../deploy/kubernetes/README.md) の見本から作る。この手引きの名前（StatefulSet `penelope`、PVC `penelope`・`penelope-memory` など）は、見本の「名前」の節のものである。
+- 対象の版は **v0.9.1 以降**。v0.9.0 の backend が記憶に写したアバターは、配置によってはエージェントが上書きできない（見本の README の冒頭）。アバターは新しい配置の最初の起動で 1 回だけ写されるので、最初から v0.9.1 以降で立てる。新しい配置は [deploy/kubernetes/](../deploy/kubernetes/README.md) の見本から作る。この手引きの名前（StatefulSet `penelope`、PVC `penelope`・`penelope-memory` など）は、見本の「名前」の節のものである。
 - 写すときに使う作業用の Pod と道具は [deploy/kubernetes/migrate/](../deploy/kubernetes/migrate/) にある。
 - **記憶・作業の場所・HOME・予約の中身は読まない。** 鍵や個人の情報が入っている。この手引きのコマンドは、数・大きさ・持ち主と権限・`git fsck` の終了コード・コミットの数だけを出す。`cat`・`grep`・`git log`・`git show`・ファイルの名前を並べる `ls -R` や `find`・`rsync -v`・SQLite の行の表示は使わない。
 
@@ -133,7 +133,7 @@ natsumi と penelope でアバターのディレクトリの形が違うとこ�
 | 場所 | 値 | 置き換えるもの |
 | --- | --- | --- |
 | `kustomization.yaml` | `namespace: penelope` | natsumi の PVC がある名前空間。Pod は自分の名前空間の PVC しか mount できないので、**新しい配置も同じ名前空間に置く** |
-| `kustomization.yaml` | `newTag: v0.8.0` | 新しい配置と同じ版（v0.9.0 以降） |
+| `kustomization.yaml` | `newTag` | 新しい配置と同じ版（v0.9.1 以降） |
 | `pod.yaml` | `claimName: natsumi-data` | natsumi の data directory がある PVC の名前 |
 | `pod.yaml` | `subPath: data` | その PVC の中の data directory の場所（natsumi の `--data-dir`）。PVC の一番上なら `subPath` の行を消す |
 
