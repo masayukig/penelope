@@ -10,12 +10,15 @@ on:
   pull_request:
 
 # Deciding whether a pull request is good writes nothing. Work that writes
-# lives in release.yml, with the permission on the job that needs it.
+# lives in release.yml and in the main image jobs at the end, which run on a
+# push to main only, with the permission on the job that needs it.
 permissions:
   contents: read
 
 # A pull request that gets pushed to again drops its earlier run. Pushes to
 # main are not cancelled: every commit on main should have its own result.
+# They still run one at a time, so the main images of an older commit never
+# overwrite a newer one's, and two cleanups never run at once.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -113,3 +116,111 @@ jobs:
           node-version: 24.22.3
           cache: npm
       - run: make e2e
+
+  # On a push to main, every image of a release is pushed under the moving
+  # tag main, for the vulnerability tracker to scan: it tells a vulnerability
+  # fixed on main but not yet released from one not fixed (ADR 0037). Nothing
+  # runs these images. The platforms and the labels are those of
+  # release.yml; the labels name this repository and the commit.
+  main-image:
+    name: main image (${{ matrix.target }})
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        target: [sentinel, backend, receivers, sandbox]
+    steps:
+      # Runs one at a time keep two pushes apart, but a run started again
+      # later would put an older commit back under main. Only the commit at
+      # the head of main now is published; any other is skipped, not failed.
+      - name: This commit is still the head of main
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          if [ "${head}" = "${GITHUB_SHA}" ]; then
+            echo "current=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "current=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::main is at ${head} now, not ${GITHUB_SHA}; skipped"
+            echo "Skipped: main is at \`${head}\` now, not \`${GITHUB_SHA}\`." >> "${GITHUB_STEP_SUMMARY}"
+          fi
+      - if: steps.current.outputs.current == 'true'
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # As in release.yml: two final stages run commands of their platform.
+      - if: steps.current.outputs.current == 'true'
+        uses: docker/setup-qemu-action@v4
+      - if: steps.current.outputs.current == 'true'
+        uses: docker/setup-buildx-action@v4
+      - if: steps.current.outputs.current == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - if: steps.current.outputs.current == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository }}-${{ matrix.target }}:main
+          build-args: VERSION=main
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=main
+
+  # Each push of main leaves the version main pointed at before untagged.
+  # Only untagged versions are deleted, never a tagged one: the action keeps
+  # or deletes an image's platform manifests and attestations with its index.
+  # validate then warns in the log of any image left with a platform missing.
+  # A release can be pushing at the same time (a fix merged starts both), and
+  # its platform manifests stay untagged until its index is pushed, so only
+  # versions older than any push in flight are deleted.
+  main-image-cleanup:
+    name: main image cleanup (${{ matrix.target }})
+    needs: main-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        target: [sentinel, backend, receivers, sandbox]
+    steps:
+      # Runs one at a time keep two pushes apart, but a run started again
+      # later would put an older commit back under main. Only the commit at
+      # the head of main now is published; any other is skipped, not failed.
+      - name: This commit is still the head of main
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          if [ "${head}" = "${GITHUB_SHA}" ]; then
+            echo "current=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "current=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::main is at ${head} now, not ${GITHUB_SHA}; skipped"
+            echo "Skipped: main is at \`${head}\` now, not \`${GITHUB_SHA}\`." >> "${GITHUB_STEP_SUMMARY}"
+          fi
+      # Pinned to a commit, unlike the other actions: a third party's action
+      # that can delete package versions.
+      - if: steps.current.outputs.current == 'true'
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          package: penelope-${{ matrix.target }}
+          delete-untagged: true
+          older-than: 1 hour
+          validate: true

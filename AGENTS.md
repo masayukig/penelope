@@ -72,5 +72,8 @@ The `Makefile` is the entry point for both languages, and CI only calls its targ
 
 - A `vX.Y.Z` tag builds every target of the Dockerfile for linux/amd64 and linux/arm64, pushes it to ghcr.io and makes
   a GitHub Release. A tag is pushed by hand.
-- Every Monday, the next patch version is released on its own when every commit since the latest tag is Renovate's
-  (`.github/scripts/plan-release.sh` decides and says why).
+- Every Monday, the next patch version is released on its own when every commit since the latest tag is a bot's
+  (Renovate's or the vulnerability responder's; `.github/scripts/plan-release.sh` decides and says why). The same
+  release is made at once when a pull request from a `vuln-responder/` branch is merged.
+- A push to main pushes every image under the tag `main`, for the vulnerability tracker to scan, and deletes the
+  versions it leaves untagged.
