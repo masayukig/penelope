@@ -8,7 +8,8 @@
 #   PVC penelope         /volume/home      /home/agent of the sandbox (1000, 0700)
 #                        /volume/backend   the backend's SQLite and copies (1001, 0700)
 #                        /volume/sources   /sources (written by the backend, read by the sandbox)
-#   PVC penelope-memory  /volume/memory/memory       the /memory work tree (sandbox)
+#   PVC penelope-memory  /volume/memory/memory       the /memory work tree (sandbox; the
+#                                                backend makes avatar/ in it)
 #                        /volume/memory/memory/.git  its .git (backend)
 #
 # The shared places belong to group 2000 (the Pod's supplementalGroups) with

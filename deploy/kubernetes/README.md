@@ -3,7 +3,7 @@
 penelope の Pod（[docs/pod.md](../../docs/pod.md)）を Kubernetes で動かすための、kustomize の見本である。
 1 人のエージェントを 1 つの名前空間に、1 つの StatefulSet（replicas 1）で置く。
 
-- 対象の版は **v0.9.0 以降**。v0.9.0 から、道具の使い方のコネクタの文書と、誰にも同じ skill（`self-portrait`・`goals`）が sandbox の image に入っている。配置が渡すのは、その配置だけのことである。
+- 対象の版は **v0.9.0 以降**。v0.9.0 から、道具の使い方と誰にも同じ skill（`self-portrait`・`goals` など）が sandbox の image の skill に入り（[ADR-0035](../../docs/adr/0035-tool-usage-and-shared-skills-as-image-skills.md)）、アバターは記憶の `/memory/avatar/` で育つ（[ADR-0036](../../docs/adr/0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md)）。配置が渡すのは、その配置だけのことである。
 - `example/` の値はすべて作りものである。そのままでは動かない。下の「置き換える値」を自分のものにする。
 
 ## 置き場
@@ -99,7 +99,8 @@ base が決めている場所:
 | `backend.env`・`sandbox/env` | `https://penelope.example.com` | backend に届く公開の URL |
 | `backend.env` | `PENELOPE_GITHUB_CLIENT_ID`・`PENELOPE_OWNER_GITHUB_ID` | GitHub の OAuth App の client ID と、オーナーの数値の user ID（`gh api users/<名前> --jq .id`） |
 | `backend.env` | `PENELOPE_TIME_ZONE`・`PENELOPE_AWAKE_HOURS`・`PENELOPE_NIGHTLY_CRON`・`PENELOPE_HEARTBEAT_MINUTES` | 時間帯、起きている時間、夜の切り替え、heartbeat |
-| `backend.env`・`sandbox/env` | `PENELOPE_AVATAR=example`、`PENELOPE_AGENT_NAME`・`PENELOPE_NAME` | アバターと名前（下の「アバター」） |
+| `backend.env` | `PENELOPE_AVATAR=example`、`PENELOPE_AGENT_NAME` | 最初に写すアバターと、UI に出す名前（下の「アバター」） |
+| `sandbox/env` | `PENELOPE_NAME` | システムプロンプトに入る名前。`PENELOPE_AGENT_NAME` と同じにする |
 | `sandbox/env` | `PENELOPE_ROLE`・`PENELOPE_OWNER` | 役目とオーナー（システムプロンプトに入る） |
 | `sandbox/env`・`sandbox/models.json` | `PENELOPE_MODEL=openai/gpt-5.5`、provider `openai` | Pi の provider とモデル |
 | `sandbox/surrogates.env`・`sandbox/models.json`・`sentinel/sentinel.yaml` | `surrogate-example-*` | 自分のサロゲート（下の「サロゲート」） |
@@ -107,7 +108,7 @@ base が決めている場所:
 | `sandbox/surrogates.env` | `SDCTL_URL` | sd-webui の URL |
 | `receivers/config.json`・`connectors/slack.md` | ワークスペース `work` | Slack のワークスペースの短い名前 |
 | `connectors/*.md` | ホスト・token の環境変数・宛先 | その配置のもの |
-| `patches/statefulset.yaml` | `AVATAR_REPO` など、sandbox の mount の `subPath: example` | 自分のアバターの置き場と名前（下の「アバター」） |
+| `patches/statefulset.yaml` | `AVATAR_REPO` など | 自分のアバターの置き場と名前（下の「アバター」） |
 | `patches/statefulset.yaml` | audience `a2a` | A2A の相手が求める token の audience |
 | `ingress.yaml` | `ingressClassName: example`、ホスト、`penelope-tls` | 使う Ingress と証明書 |
 | `skills/skills.list` | 上流の skill | 要る skill（要らなければ ConfigMap ごと消す） |
@@ -159,28 +160,28 @@ kubectl -n "$ns" create secret generic penelope-receivers \
 
 ## アバター
 
-アバターのディレクトリ（`avatar.json`・`icons/`・`slack/`・`appearance.yaml`・`sdctl-params.yaml`）を、backend と sandbox が別の場所で読む。
+アバター（名前、表情の画像、姿の `appearance.yaml`、描画の既定の `sdctl-params.yaml`）は記憶の `/memory/avatar/` にあり、エージェントが育てる（[ADR-0036](../../docs/adr/0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md)、[docs/backend.md](../../docs/backend.md) の「アバター」）。
 
-- backend は名前と顔（`avatar.json`・`icons/`・`slack/`）を `<PENELOPE_AVATARS_DIR>/<PENELOPE_AVATAR>/` から読む。
-- sandbox は姿の素材（`appearance.yaml`・`sdctl-params.yaml`）を、いつも `/etc/penelope/avatar/` から読む。起動のとき、そこが無ければ image の中の `PENELOPE_AVATAR` のアバターをそこへ写し、在れば触らない。sandbox に `PENELOPE_AVATARS_DIR` は要らない。
+- backend は起動のとき、`/memory/avatar/` が無ければ、`PENELOPE_AVATAR` の名前のアバターを、`PENELOPE_AVATARS_DIR`（あれば）、image の基本のアバターの順に探して写し、コミットする。**写すのは最初の 1 回だけ**で、`/memory/avatar/` があれば触らない。置き場や `PENELOPE_AVATAR` を後から替えても、写し直されない。
+- UI に出す名前は `PENELOPE_AGENT_NAME`。無ければ `/memory/avatar/avatar.json` の名前。
+- sandbox には何も mount しない。sdctl の描画の既定は、配置が `SDCTL_PARAMS` を書かなければ `/memory/avatar/sdctl-params.yaml` になる。
 
 置き方は 2 つ。
 
-- **image に入っているアバター**（`penelope`・`natsumi`・`myao`・`aki`）を使うなら、mount は要らない。backend と sandbox の両方の `PENELOPE_AVATAR` に名前を書き、`example/patches/statefulset.yaml` の avatar の部分（init container `avatar`、volume `avatars` とその mount、`PENELOPE_AVATARS_DIR`）を消す。写し先はコンテナの中なので、Pod を作り直すたびに image の版のものになる。
-- **自分のアバター**を使うなら（`example/` の形）、アバターのディレクトリを置いた 1 つの volume を、backend には `PENELOPE_AVATARS_DIR` の場所に、sandbox には `subPath: <アバターの名前>` で `/etc/penelope/avatar` に mount し、両方に同じ `PENELOPE_AVATAR` を渡す。1 つの volume と 1 つの名前なので、名前と顔（backend）と姿（sandbox）がずれない。backend からは image のアバターは見えなくなる。`avatar.json` の形は [docs/backend.md](../../docs/backend.md) の「設定」。
-- `/etc/penelope/avatar` を、PVC `penelope` の上のほかのものと同じ置き場にしない。
+- **image に入っているアバター**（`penelope`・`natsumi`・`myao`・`aki`）を使うなら、backend の `PENELOPE_AVATAR` に名前を書くだけでよい。`example/patches/statefulset.yaml` の avatar の部分（init container `avatar`、volume `avatars` とその mount、`PENELOPE_AVATARS_DIR`）を消す。
+- **自分のアバター**を使うなら（`example/` の形）、`<名前>/` にアバターのディレクトリ（`avatar.json` と表情の画像、`appearance.yaml`・`sdctl-params.yaml`）を置いた volume を、**backend にだけ**読み取りで mount して `PENELOPE_AVATARS_DIR` で指し、`PENELOPE_AVATAR` をその名前にする。写したあとは mount を外してよい。
 
 画像は ConfigMap の大きさの上限（1 MiB）を超えやすいので、置き方は次から選ぶ。
 
 | 置き方 | やり方 |
 | --- | --- |
 | init で取る（`example/` の形） | public な git のリポジトリに置き、init container が `base/init/avatar.sh` で emptyDir に取る。Pod を作り直すたびに取り直す |
-| PVC | アバター専用の PVC に `<名前>/` を置き、上と同じく backend と sandbox に読み取りで mount する。中身は一度だけ `kubectl cp` などで入れる |
-| image を作る | `ghcr.io/yuanying/penelope-backend` と `-sandbox` を元に、image のアバターの置き場に `<名前>/` を足した image を作る。mount は要らないが、版を上げるたびに作り直す |
+| PVC | アバター専用の PVC に `<名前>/` を置き、backend に読み取りで mount する。中身は一度だけ `kubectl cp` などで入れる |
+| image を作る | `ghcr.io/yuanying/penelope-backend` を元に、`/app/avatars/<名前>/` を足した image を作る。mount は要らないが、版を上げるたびに作り直す |
 
 ## skill
 
-image に入っている skill は、配置の設定なしで効く。init container `skills`（`base/init/skills.sh`）が置くのは、その配置だけの skill である。
+image に入っている skill（道具の使い方の `slack`・`sd-webui`・`a2a`・`github`・`avatar` と、`self-portrait`・`goals`）は、配置の設定なしで効く。init container `skills`（`base/init/skills.sh`）が置くのは、その配置だけの skill である。同じ名前があれば、配置の skill が image の skill より先に一覧に載る（[docs/pod.md](../../docs/pod.md) の「volume」）。
 
 - ConfigMap `penelope-skills` の `<名前>.SKILL.md` は `/skills/<名前>/SKILL.md` になる。
 - `skills.list` の 1 行は `<git の URL> <枝> <skill>...` で、そのリポジトリの `skills/<skill>/` を写す。リポジトリは public であること（向け直しの前に、鍵なしで取る）。
@@ -188,7 +189,7 @@ image に入っている skill は、配置の設定なしで効く。init conta
 
 ## コネクタの文書
 
-`penelope-connectors` に置くのは、その配置だけのこと（ホスト、token の環境変数、ワークスペース、宛先）である。`slackctl`・`sdctl`・`a2a` などの道具の使い方は image の文書にある。
+`penelope-connectors` に置くのは、その配置だけのこと（ホスト、token の環境変数、ワークスペース、宛先）である。`slackctl`・`sdctl`・`a2a` などの道具の使い方は image の skill にある。
 
 - 文書の `hosts` は `sentinel.yaml` の登録の `name` と同じにし、鍵を差し替える登録はどれかの文書の `hosts` に入れる（[docs/sentinel-config.md](../../docs/sentinel-config.md) の「コネクタの文書」）。
 - `example/connectors/` にあるのは、Slack（`slack.md`）、A2A の相手（`agents.md`）、sd-webui（`sd-webui.md`）、モデル（`model.md`）、backend（`backend.md`。runner が使う。どの配置にも要る）。
@@ -209,7 +210,7 @@ init container `volumes`（`base/init/volumes.sh`）が、無いディレクト�
 | `penelope` の `home/` | 1000:1000 | 0700 |
 | `penelope` の `backend/` | 1001:1001 | 0700 |
 | `penelope` の `sources/` | 1001:2000 | 2770 |
-| `penelope-memory` の `memory/` | 1000:2000 | 2770 |
+| `penelope-memory` の `memory/` | 1000:2000 | 2770。backend もグループで書く（`/memory/avatar/` を写すため） |
 | `penelope-memory` の `memory/.git` | 1001:2000 | 2770 |
 
 init container `redirect` は NET_ADMIN で iptables（nft）の規則を張る。ノードが nftables を使えることが要る。

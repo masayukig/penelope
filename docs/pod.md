@@ -54,7 +54,7 @@
 - 取り込み口の socket は sandbox に mount しない。送れるのは socket が見えるコンテナだけである（[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)）。
 - 管理口の socket も sandbox に mount しない（[ADR-0005](adr/0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md)）。
 - backend の sandbox 向けの口の socket は、backend と Sentinel だけが mount する。Sentinel は backend の登録の `upstream` でこの socket につなぐ（[sentinel-config.md](sentinel-config.md) の「上流」）。
-- コンテナの UID が違うので、配置は Pod の `fsGroup` で、共有する volume を 1 つのグループに置く。backend は sandbox が書いた `/memory` の作業ツリーを読み、`/memory/.git`・SQLite・`/sources` を書く。sandbox は `/sources` を読む。socket は backend が誰でも書ける mode で作るので、見えるかどうかは mount だけで決まる。
+- コンテナの UID が違うので、配置は共有する volume を 1 つのグループに置く。そのグループを Pod の `supplementalGroups` で全コンテナに与え、共有するディレクトリを set-group-ID にする。`fsGroup` は使わない。kubelet が volume の中身を丸ごとそのグループに開け、backend の SQLite と sandbox の HOME を持ち主だけのものに保てないためである。持ち主と権限は init container が付ける（見本は [deploy/kubernetes/](../deploy/kubernetes/README.md) の「volume と持ち主」）。backend は sandbox が書いた `/memory` の作業ツリーを読み、`/memory/.git`・SQLite・`/sources` を書く。sandbox は `/sources` を読む。socket は backend が誰でも書ける mode で作るので、見えるかどうかは mount だけで決まる。
 
 ## アバター
 

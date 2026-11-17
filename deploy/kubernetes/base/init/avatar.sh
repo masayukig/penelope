@@ -1,10 +1,10 @@
 #!/bin/sh
 # An init container an overlay may add (README.md, "Avatar"): fetches one
 # avatar directory (avatar.json, icons/, slack/, appearance.yaml,
-# sdctl-params.yaml) from a public git repository into an emptyDir. The
-# backend mounts it as PENELOPE_AVATARS_DIR, and the sandbox mounts the
-# avatar's own directory (subPath) at /etc/penelope/avatar. Only needed for
-# an avatar that is not in the images.
+# sdctl-params.yaml) from a public git repository into an emptyDir, which
+# the backend mounts as PENELOPE_AVATARS_DIR and copies into /memory/avatar/
+# the first time (ADR-0036). Only needed for an avatar that is not in the
+# images.
 #
 #   AVATAR_REPO    the repository's URL
 #   AVATAR_BRANCH  its branch or tag
@@ -14,7 +14,7 @@
 #
 # Like init/skills.sh, it runs before the redirect, as a UID other than the
 # sandbox's. Unlike a skill, a missing avatar stops the Pod: the backend
-# does not start without the avatar it is told to show.
+# does not start when it has to copy an avatar it cannot find.
 set -eu
 
 : "${AVATAR_REPO:?}" "${AVATAR_BRANCH:?}" "${AVATAR_PATH:?}" "${AVATAR_NAME:?}" "${AVATARS_DIR:?}"

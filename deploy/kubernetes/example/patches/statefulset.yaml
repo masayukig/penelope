@@ -1,12 +1,12 @@
 # What this deployment adds to the base's Pod.
 #
 # - An avatar of its own (README.md, "Avatar"): the init container avatar
-#   fetches one avatar directory into the emptyDir avatars. The backend reads
-#   the name and the faces from it as PENELOPE_AVATARS_DIR; the sandbox mounts
-#   the same avatar (subPath, the name of PENELOPE_AVATAR) at
-#   /etc/penelope/avatar, where it looks for what she looks like. One volume
-#   and one name, so the two never drift apart. A deployment that uses an
-#   avatar in the images drops all of this and sets only PENELOPE_AVATAR.
+#   fetches one avatar directory into the emptyDir avatars, which the
+#   backend alone mounts as PENELOPE_AVATARS_DIR. The backend copies the
+#   avatar named PENELOPE_AVATAR from there into /memory/avatar/ once, when
+#   /memory has none; after that she grows it there (ADR-0036), and this can
+#   be dropped. A deployment that uses an avatar in the images drops all of
+#   this and sets only PENELOPE_AVATAR.
 # - A ServiceAccount token with the audience a2a for the Sentinel, put in
 #   place of HELPER_AGENT_TOKEN (sentinel/sentinel.yaml).
 #
@@ -73,13 +73,6 @@ spec:
         volumeMounts:
         - name: a2a-token
           mountPath: /run/secrets/penelope-sentinel/a2a
-          readOnly: true
-      - name: sandbox
-        volumeMounts:
-        # the same name as PENELOPE_AVATAR (backend.env, sandbox/env)
-        - name: avatars
-          mountPath: /etc/penelope/avatar
-          subPath: example
           readOnly: true
       volumes:
       - name: avatars
