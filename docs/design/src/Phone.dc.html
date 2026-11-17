@@ -25,7 +25,14 @@ body{margin:0}
 </button>
 </header>
 
+<sc-if value="{{isTalk}}" hint-placeholder-val="{{ true }}">
 <dc-import name="Talk" subs="{{subs}}" mode="{{mode}}" attach="{{attach}}" strip="{{ true }}" h="{{talkH}}" size="16px" hint-size="390px,844px"></dc-import>
+</sc-if>
+<sc-if value="{{isSchedule}}" hint-placeholder-val="{{ false }}">
+<div style="height: 844px; overflow: auto">
+<dc-import name="Schedule" pad="140px" hint-size="390px,844px"></dc-import>
+</div>
+</sc-if>
 
 <sc-if value="{{kb}}" hint-placeholder-val="{{ false }}">
 <div style="flex: none; height: 336px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border-top: 1px dashed var(--color-text-secondary); color: var(--color-text-secondary); font-size: 13px">[端末のキーボードが出る領域]</div>
@@ -33,7 +40,7 @@ body{margin:0}
 
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"mode":{"editor":"enum","options":["busy","empty","offline"],"default":"busy"},"kb":{"editor":"boolean","default":false},"subs":{"editor":"int","default":0,"min":0,"max":6},"attach":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"mode":{"editor":"enum","options":["busy","empty","offline"],"default":"busy"},"kb":{"editor":"boolean","default":false},"page":{"editor":"enum","options":["talk","schedule"],"default":"talk"},"subs":{"editor":"int","default":0,"min":0,"max":6},"attach":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
 class Component extends DCLogic {
 renderVals() {
 const kb = !!this.props.kb;
@@ -41,6 +48,8 @@ return {
 scheme: this.props.dark ? 'dark' : 'light',
 mode: this.props.mode ?? 'busy',
 kb: kb,
+isTalk: (this.props.page ?? 'talk') === 'talk',
+isSchedule: this.props.page === 'schedule',
 subs: Number(this.props.subs ?? 0),
 attach: !!this.props.attach,
 talkH: kb ? '508px' : '844px'

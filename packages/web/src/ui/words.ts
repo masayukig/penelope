@@ -5,7 +5,7 @@ import type { Source } from "@penelope/contract";
 import type { Status } from "../model/store.ts";
 
 export const words = {
-  places: { talk: "会話", log: "活動の記録", memory: "記憶", events: "出来事", settings: "設定" },
+  places: { talk: "会話", log: "活動の記録", memory: "記憶", events: "出来事と予約", settings: "設定" },
   placeholderTitle: "まだありません",
   placeholderBody: "この場所は、これから作ります。",
   emptyTitle: "まだ会話はありません",
@@ -58,12 +58,18 @@ export const words = {
   schedulesNone: "予約はありません",
   schedulesNoneBody: "エージェントが予約を足すと、ここに並びます。",
   schedulesFailed: "予約を読めませんでした。",
-  scheduleOnce: "1 回",
+  scheduleOnce: "1 回だけ",
   scheduleNext: "次は",
+  scheduleCount: (n: number) => `${n} 件`,
   scheduleRemove: "取り消す",
+  scheduleRemoveOf: (lead: string) => `「${lead}」を取り消す`,
   scheduleKeep: "やめる",
   scheduleConfirm: "この予約を取り消しますか？",
-  scheduleConfirmBody: (reason: string) => `「${reason}」の予約を消します。エージェントには知らせません。`,
+  /** With how it comes: the cron in words, or else the cron itself; neither for a one-time one. */
+  scheduleConfirmBody: (lead: string, rhythm: string | undefined, cron: string | undefined) =>
+    `「${lead}」の予約を消します。${
+      rhythm !== undefined ? `${rhythm} に繰り返す予約です` : cron !== undefined ? `cron「${cron}」で繰り返す予約です` : "1 回だけの予約です"
+    }。エージェントには知らせません。`,
   scheduleRemoveFailed: "取り消せませんでした。もう一度試してください。",
   today: "今日",
   yesterday: "昨日",
@@ -146,6 +152,64 @@ export function dueOf(at: string, now: number = Date.now()): string {
   const startOf = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const label = Math.round((startOf(day) - startOf(today)) / 86_400_000) === 1 ? words.tomorrow : dayOf(at, now);
   return `${label} ${timeOf(at)}`;
+}
+
+const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"] as const;
+
+/** A whole number written plainly, from min to max; anything else is undefined. */
+function single(field: string, min: number, max: number): number | undefined {
+  if (!/^\d{1,2}$/.test(field)) return undefined;
+  const n = Number(field);
+  return n >= min && n <= max ? n : undefined;
+}
+
+/**
+ * A cron in words: every day, every week (one weekday), every month (one day)
+ * or every year (one month and day), at one minute of one hour. The rest is
+ * undefined, and only its expression is shown. The numbers are the
+ * expression's own, read by the backend in its time zone, so they are not
+ * turned into the browser's.
+ */
+export function rhythmOf(cron: string): string | undefined {
+  const fields = cron.trim().split(/\s+/);
+  if (fields.length !== 5) return undefined;
+  const [minuteField, hourField, dayField, monthField, weekdayField] = fields as [string, string, string, string, string];
+  const minute = single(minuteField, 0, 59);
+  const hour = single(hourField, 0, 23);
+  if (minute === undefined || hour === undefined) return undefined;
+  const time = `${hour}:${String(minute).padStart(2, "0")}`;
+  const any = (field: string) => field === "*";
+  if (any(dayField) && any(monthField)) {
+    if (any(weekdayField)) return `毎日 ${time}`;
+    const weekday = single(weekdayField, 0, 7);
+    return weekday === undefined ? undefined : `毎週 ${WEEKDAYS[weekday % 7]}曜 ${time}`;
+  }
+  if (!any(weekdayField)) return undefined;
+  const day = single(dayField, 1, 31);
+  if (day === undefined) return undefined;
+  if (any(monthField)) return `毎月 ${day}日 ${time}`;
+  const month = single(monthField, 1, 12);
+  return month === undefined ? undefined : `毎年 ${month}月${day}日 ${time}`;
+}
+
+/** A reason as a lead (up to its first 。, without it) and the rest, if any. */
+export function splitReason(reason: string): { lead: string; rest?: string } {
+  const end = reason.indexOf("。");
+  if (end < 0) return { lead: reason };
+  const rest = reason.slice(end + 1).trim();
+  return rest === "" ? { lead: reason.slice(0, end) } : { lead: reason.slice(0, end), rest };
+}
+
+/** The day schedules are grouped under: today or tomorrow before the date, and the year when it is not this one. */
+export function scheduleDayOf(at: string, now: number = Date.now()): string {
+  const day = new Date(at);
+  const today = new Date(now);
+  const startOf = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const date = `${day.getFullYear() === today.getFullYear() ? "" : `${day.getFullYear()}年`}${day.getMonth() + 1}月${day.getDate()}日(${WEEKDAYS[day.getDay()]})`;
+  const diff = Math.round((startOf(day) - startOf(today)) / 86_400_000);
+  if (diff === 0) return `${words.today} ・ ${date}`;
+  if (diff === 1) return `${words.tomorrow} ・ ${date}`;
+  return date;
 }
 
 export function sizeOf(bytes: number): string {
