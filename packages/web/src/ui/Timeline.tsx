@@ -8,11 +8,13 @@ import { Markdown } from "@astryxdesign/core/Markdown";
 import { Thumbnail } from "@astryxdesign/core/Thumbnail";
 import { Fragment, useState } from "react";
 
+import type { Source } from "@penelope/contract";
+
 import { assetUrl } from "../model/api.ts";
 import type { AgentItem, LocalFile, OwnerItem, TimelineItem } from "../model/store.ts";
 import { AgentAvatar, useAgent } from "./agent.tsx";
 import { Linked, markdownLinks } from "./links.tsx";
-import { dayOf, faceWord, sourceWord, timeOf, words } from "./words.ts";
+import { dayOf, faceWord, sourceWord, timeOf, triggerWords, words } from "./words.ts";
 
 export function Timeline({
   items,
@@ -85,10 +87,12 @@ function Reply({ item, wide, onOpen }: { item: AgentItem; wide: boolean; onOpen:
   const trigger = item.trigger !== undefined && item.trigger.source !== "ui" ? item.trigger : undefined;
   const name = (
     <span className="reply-name">
-      <AgentAvatar size={24} expression={item.expression} />
-      <strong>{agent.name}</strong>
-      {item.expression !== undefined ? <span className="reply-expression">{faceWord(item.expression)}</span> : null}
-      {trigger ? <Badge label={`${sourceWord(trigger.source)} ・ ${trigger.summary}`} /> : null}
+      <span className="reply-who">
+        <AgentAvatar size={24} expression={item.expression} />
+        <strong>{agent.name}</strong>
+        {item.expression !== undefined ? <span className="reply-expression">{faceWord(item.expression)}</span> : null}
+      </span>
+      {trigger ? <TriggerMark source={trigger.source} summary={trigger.summary} /> : null}
     </span>
   );
   const metadata = <ChatMessageMetadata timestamp={timeOf(item.at)} />;
@@ -108,6 +112,24 @@ function Reply({ item, wide, onOpen }: { item: AgentItem; wide: boolean; onOpen:
         <ReplyImages item={item} onOpen={onOpen} />
       </ChatMessageBubble>
     </ChatMessage>
+  );
+}
+
+/**
+ * What made her speak, beside her name (docs/design/README.md, 13): on one
+ * line, its kind whole and its words cut at the end by CSS alone, so that the
+ * whole of them is read aloud. Nothing opens it; the turn's own page shows
+ * it all. Its room takes the rest of the name's line, and goes below once
+ * the name takes more than half of it.
+ */
+function TriggerMark({ source, summary }: { source: Source; summary: string }) {
+  return (
+    <span className="reply-trigger-room">
+      <span className="reply-trigger">
+        <span className="reply-trigger-kind">{sourceWord(source)}</span>
+        <span className="reply-trigger-words">・ {triggerWords(summary)}</span>
+      </span>
+    </span>
   );
 }
 

@@ -64,6 +64,46 @@ body{margin:0}
 
 </div>
 </sc-if>
+<sc-if value="{{isTrig}}" hint-placeholder-val="{{ false }}">
+<div style="width: 100%; max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 32px">
+<article style="display: flex; flex-direction: column; gap: 6px; max-width: 88%">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; font-size: 12px; color: var(--color-text-secondary)">
+<span style="flex: 0 1 auto; min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 8px">
+<dc-import name="Avatar" d="28px" label="{{ false }}" hint-size="28px,28px"></dc-import>
+<span style="min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; color: var(--color-text-primary)">{{agent}}</span>
+<span style="flex: none">心配</span>
+</span>
+<span style="flex: 1 1 0; min-width: 50%; display: flex">
+<span style="min-width: 0; max-width: 100%; box-sizing: border-box; display: flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; background: var(--color-neutral)">
+<svg aria-hidden="true" style="flex: none" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4l2-2z"/><path d="M10 21h4"/></svg>
+<span style="flex: none; font-weight: 600">alertmanager</span>
+<span style="min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">・ [FIRING warning] KubeJobFailed: Job failed to complete.</span>
+</span>
+</span>
+</div>
+<p style="margin: 0; text-wrap: pretty">KubeJobFailed のアラートが来ました。失敗した Job のログを確かめています。</p>
+<span style="font-size: 12px; color: var(--color-text-secondary)">10:12</span>
+</article>
+<article style="display: flex; flex-direction: column; gap: 6px; max-width: 88%">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; font-size: 12px; color: var(--color-text-secondary)">
+<span style="flex: 0 1 auto; min-width: 0; max-width: 100%; display: flex; align-items: center; gap: 8px">
+<dc-import name="Avatar" d="28px" label="{{ false }}" hint-size="28px,28px"></dc-import>
+<span style="min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; color: var(--color-text-primary)">{{agent}}</span>
+<span style="flex: none">ほっとした</span>
+</span>
+<span style="flex: 1 1 0; min-width: 50%; display: flex">
+<span style="min-width: 0; max-width: 100%; box-sizing: border-box; display: flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; background: var(--color-neutral)">
+<svg aria-hidden="true" style="flex: none" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v16M4 12h16"/></svg>
+<span style="flex: none; font-weight: 600">自分から</span>
+<span style="min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">・ 2件の独立レビューを完了し、証跡と投稿案を保存しました。いずれも承認相当、今回の差分に起因する blocker は見つかりません。</span>
+</span>
+</span>
+</div>
+<p style="margin: 0; text-wrap: pretty">レビューが 2 件とも終わりました。どちらも承認相当です。投稿案を見ますか。</p>
+<span style="font-size: 12px; color: var(--color-text-secondary)">11:20</span>
+</article>
+</div>
+</sc-if>
 </div>
 
 <div style="padding: 0 16px 16px">
@@ -129,17 +169,20 @@ body{margin:0}
 
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["busy","empty","offline"],"default":"busy"},"strip":{"editor":"boolean","default":false},"attach":{"editor":"boolean","default":false},"subs":{"editor":"int","default":0,"min":0,"max":6},"h":{"editor":"text","default":"760px"},"size":{"editor":"text","default":"14px"},"$preview":{"width":760,"height":760}}'>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["busy","empty","offline","trigger"],"default":"busy"},"strip":{"editor":"boolean","default":false},"attach":{"editor":"boolean","default":false},"subs":{"editor":"int","default":0,"min":0,"max":6},"agent":{"editor":"text","default":"ペネロペ"},"h":{"editor":"text","default":"760px"},"size":{"editor":"text","default":"14px"},"$preview":{"width":760,"height":760}}'>
 class Component extends DCLogic {
 renderVals() {
 const mode = this.props.mode ?? 'busy';
 const busy = mode === 'busy';
+const st = this.state || {};
 return {
 attach: !!this.props.attach,
 subs: Number(this.props.subs ?? 0),
 hasSubs: Number(this.props.subs ?? 0) > 0,
 isEmpty: mode === 'empty',
-hasMsgs: mode !== 'empty',
+hasMsgs: mode !== 'empty' && mode !== 'trigger',
+isTrig: mode === 'trigger',
+agent: this.props.agent ?? 'ペネロペ',
 busy: busy,
 offline: mode === 'offline',
 showStrip: !!this.props.strip && mode !== 'offline',

@@ -431,16 +431,72 @@ body {
 }
 
 /* The timeline */
+/* The name's line (docs/design/README.md, 13): the avatar, the name and the
+   face, then the mark of what made her speak in the rest of the line. The
+   mark's room is at least half the line, so it goes below once the name
+   takes more; there, it has the whole width. All is cut on one line. */
+[data-chat-name]:has(> .reply-name) {
+  height: auto;
+  min-height: 20px;
+}
 .reply-name {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  row-gap: 4px;
+  column-gap: 8px;
+  width: 100%;
+  min-width: 0;
   font-size: 12px;
   color: var(--color-text-secondary);
 }
-.reply-name strong {
+.reply-who {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.reply-who > * {
+  flex: none;
+}
+.reply-who strong {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--color-text-primary);
+}
+.reply-trigger-room {
+  flex: 1 1 0;
+  display: flex;
+  min-width: 50%;
+}
+.reply-trigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: var(--color-neutral);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-text-primary);
+}
+.reply-trigger-kind {
+  flex: none;
+  font-weight: 600;
+}
+.reply-trigger-words {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .owner-text {
   white-space: pre-wrap;

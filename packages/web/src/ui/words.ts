@@ -130,6 +130,29 @@ export function sourceWord(source: Source): string {
   return SOURCES[source] ?? source;
 }
 
+/**
+ * The words of what made her speak, as its mark shows them: without the
+ * marks of Markdown (the mark has no style of its own inside it), and on one
+ * line. What is not a mark, such as the _ inside a name or a lone *, stays.
+ */
+export function triggerWords(summary: string): string {
+  const lines = summary.split(/\r?\n/).map((line) =>
+    line
+      .replace(/^\s*#{1,6}\s+/, "")
+      .replace(/^\s*>\s?/, "")
+      .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, ""),
+  );
+  return lines
+    .join("\n")
+    .replace(/!?\[([^\]\n]*)\]\([^)\n]*\)/g, "$1")
+    .replace(/`([^`\n]*)`/g, "$1")
+    .replace(/(\*\*|__|~~)(?=\S)([^\n]*?\S)\1/g, "$2")
+    .replace(/(?<!\*)\*(?=[^\s*])([^*\n]*?[^\s*])\*(?!\*)/g, "$1")
+    .replace(/(?<![\p{L}\p{N}_])_(?=\S)([^_\n]*?\S)_(?![\p{L}\p{N}_])/gu, "$1")
+    .replace(/\s*\n\s*/g, " ")
+    .trim();
+}
+
 export function timeOf(at: string): string {
   return new Date(at).toLocaleTimeString("ja-JP", { hour: "numeric", minute: "2-digit" });
 }
