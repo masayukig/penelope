@@ -218,6 +218,10 @@ COPY --from=ts-build /src/packages/slack/dist ./node_modules/@penelope/slack/dis
 COPY --from=ts-build /src/packages/slack/package.json /opt/penelope/slack/
 COPY --from=ts-build /src/packages/slack/dist /opt/penelope/slack/dist
 COPY packages/slack/bin/slackctl /usr/local/bin/slackctl
+# The skills that come with the image whatever the deployment: the use of the
+# image's tools and the skills every agent has. The runner lists them after
+# the owner's and the memory's (docs/pod.md, "skill").
+COPY packages/runner/image/skills /opt/penelope/skills
 ENV NODE_ENV=production PENELOPE_VERSION=${VERSION} \
     HOME=/home/agent USER=agent \
     PATH=/home/agent/.local/bin:/home/agent/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
