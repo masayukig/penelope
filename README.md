@@ -13,6 +13,7 @@ sandbox から外へ出る通信は、返事も含めてすべて Sentinel を�
 
 4 つの image は ghcr.io にあります（`ghcr.io/yuanying/penelope-{sentinel,backend,sandbox,receivers}`）。
 Kubernetes で動かす kustomize の見本は [deploy/kubernetes/](deploy/kubernetes/README.md) にあります。
+natsumi のインスタンスから移す手順は [docs/migrate-from-natsumi.md](docs/migrate-from-natsumi.md) にあります。
 
 ## 開発
 
