@@ -52,10 +52,14 @@ export function linksOf(text: string): Part[] {
 
 const isWeb = (href: string) => /^https?:\/\//i.test(href);
 
-/** A link to the web, in a new tab, that hands the page it opens nothing of this one. */
+/**
+ * A link to the web, in a new tab, that hands the page it opens nothing of
+ * this one. It looks as Astryx's Markdown draws a link (styles.css), which
+ * its own component in place of Markdown's would otherwise lose.
+ */
 function WebLink({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer">
+    <a className="web-link" href={href} target="_blank" rel="noopener noreferrer">
       {children}
     </a>
   );

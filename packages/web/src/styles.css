@@ -526,6 +526,11 @@ body {
 .owner-text {
   white-space: pre-wrap;
 }
+/* An address as a link, as Astryx's Markdown draws its own links. */
+.web-link {
+  color: var(--color-text-accent);
+  text-decoration: underline;
+}
 .owner-files {
   display: flex;
   justify-content: flex-end;
