@@ -1,11 +1,17 @@
 // What the screen shows, kept as one state that actions change: the
 // conversation's timeline, what the agent is doing now, and whether the
 // stream is up. Plain functions, so that the tests drive it without a DOM.
-import type { Activity, AgentState, HistoryEntry, StreamEvent, SubAgent } from "@penelope/contract";
+import type { Activity, AgentState, HistoryEntry, OwnerFiles, StreamEvent, SubAgent } from "@penelope/contract";
+
+import { assetUrl } from "./api.ts";
 
 export type Connection = "connecting" | "online" | "offline";
 
-/** A file sent with a message, as this browser still has it. */
+/**
+ * A file sent with a message: as this browser still has it until the backend
+ * takes the message, then as the backend keeps it (ADR-0034), an image by the
+ * URL of its copy.
+ */
 export type LocalFile = { name: string; type: string; size: number; url?: string };
 
 export type OwnerItem = {
@@ -73,7 +79,8 @@ export type Action =
   | { type: "queued"; key: string; at: string; text: string; files: LocalFile[]; duringTurn: boolean }
   | { type: "queued-again"; key: string }
   | { type: "sending"; key: string }
-  | { type: "sent"; key: string; id: string }
+  /** The backend took it, keeping its files as it says. */
+  | ({ type: "sent"; key: string; id: string } & OwnerFiles)
   | { type: "failed"; key: string };
 
 export function reduce(state: State, action: Action): State {
@@ -125,7 +132,8 @@ export function reduce(state: State, action: Action): State {
     case "sent": {
       // The history read again may already hold it under its id.
       const items = state.items.filter((item) => item.id !== action.id || item.key === action.key);
-      return withOwner({ ...state, items }, action.key, { delivery: "sent", id: action.id });
+      const kept = filesOf(action);
+      return withOwner({ ...state, items }, action.key, { delivery: "sent", id: action.id, ...(kept.length === 0 ? {} : { files: kept }) });
     }
     case "failed":
       return withOwner(state, action.key, { delivery: "failed" });
@@ -174,7 +182,15 @@ function withSubAgent(state: State, agent: string, change: (a: SubAgentEntry) =>
 
 function fromHistory(entry: HistoryEntry): TimelineItem {
   if (entry.kind === "agent") return { ...entry, key: entry.id };
-  return { kind: "owner", id: entry.id, key: entry.id, at: entry.at, text: entry.text, files: [], delivery: "sent", duringTurn: false };
+  return { kind: "owner", id: entry.id, key: entry.id, at: entry.at, text: entry.text, files: filesOf(entry), delivery: "sent", duringTurn: false };
+}
+
+/** The files the backend keeps of an owner's message: the copied images first, then the others by name. */
+function filesOf({ images = [], files = [] }: OwnerFiles): LocalFile[] {
+  return [
+    ...images.map((image) => ({ name: image.name, type: image.mime_type, size: image.size, url: assetUrl(image.id) })),
+    ...files.map((file) => ({ name: file.name, type: "", size: file.size })),
+  ];
 }
 
 /** The items with the incoming ones put in, each id once, in time order. */
@@ -187,9 +203,13 @@ function merge(items: TimelineItem[], incoming: TimelineItem[]): TimelineItem[] 
       continue;
     }
     const known = result[at]!;
-    // What only this browser knows of its own message stays: its files and
-    // that it came mid-turn.
-    result[at] = known.kind === "owner" && item.kind === "owner" ? { ...item, key: known.key, files: known.files, duringTurn: known.duringTurn } : { ...item, key: known.key };
+    // What only this browser knows of its own message stays: that it came
+    // mid-turn, and its files when the backend kept none of them (a message
+    // from before it kept them).
+    result[at] =
+      known.kind === "owner" && item.kind === "owner"
+        ? { ...item, key: known.key, files: item.files.length > 0 ? item.files : known.files, duringTurn: known.duringTurn }
+        : { ...item, key: known.key };
   }
   // Messages not yet taken by the backend stay last, in the order written.
   const taken = result.filter((item) => !(item.kind === "owner" && item.delivery !== "sent"));

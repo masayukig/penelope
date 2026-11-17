@@ -11,7 +11,7 @@ import type { AgentResponse, PostMessageResponse, PushResponse, SchedulesRespons
 
 import { isA2APath } from "./a2a/endpoint.ts";
 import type { SubAgents } from "./agents.ts";
-import type { Assets } from "./assets.ts";
+import { AssetStoreError, type Assets } from "./assets.ts";
 import { type AgentSettings, ICON_TYPES } from "./config.ts";
 
 import type { Conversation } from "./conversation.ts";
@@ -171,12 +171,21 @@ export function uiHandler(options: UiOptions): Handler {
           : messageFromJson(await readJson(request, maxBytes));
         if (text === "" && attachments.length === 0) throw new HttpError(400, "a message needs text or files");
         const id = randomUUID();
-        queue.accept(
-          { source: "ui", id, occurred_at: iso(now()), summary: summaryOf(text, attachments.length), payload: { text } },
-          { builtin: true, attachments },
-        );
-        conversation.ownerMessage({ id, text });
-        sendJson(response, 202, { id } satisfies PostMessageResponse);
+        // The event and its line of the history are kept together, with the
+        // copies of its images, or none of them (ADR-0034).
+        let files;
+        try {
+          files = conversation.ownerMessage({ id, text, files: attachments }, () =>
+            queue.accept(
+              { source: "ui", id, occurred_at: iso(now()), summary: summaryOf(text, attachments.length), payload: { text } },
+              { builtin: true, attachments },
+            ),
+          );
+        } catch (error) {
+          if (!(error instanceof AssetStoreError)) throw error;
+          throw new HttpError(500, "not sent: the images could not be kept");
+        }
+        sendJson(response, 202, { id, ...files } satisfies PostMessageResponse);
         return;
       }
       case "GET /api/history": {

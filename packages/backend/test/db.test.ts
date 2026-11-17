@@ -3,7 +3,10 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 
+import { Assets } from "../src/assets.ts";
+import { Conversation } from "../src/conversation.ts";
 import { MIGRATIONS, openDatabase, transaction } from "../src/db.ts";
+import { Feed } from "../src/feed.ts";
 import { tempDir } from "./support.ts";
 
 const version = (db: DatabaseSync) => (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -27,6 +30,27 @@ describe("the database", () => {
     assert.deepEqual(db.prepare("SELECT agent FROM session_rotations").all().map((row) => ({ ...row })), [{ agent: "main" }]);
     assert.deepEqual(db.prepare("SELECT * FROM sub_agents").all(), []);
     assert.deepEqual(db.prepare("SELECT * FROM push_subscriptions").all(), []);
+    db.close();
+  });
+
+  it("is brought up from the version before the owner's images, keeping the images of the replies", (t) => {
+    // Guards against: the images of the replies lost from the history when the table of the copies is made again.
+    const file = path.join(tempDir(t), "a.sqlite");
+    const raw = new DatabaseSync(file);
+    for (const migration of MIGRATIONS.slice(0, 5)) raw.exec(migration);
+    raw.exec("PRAGMA user_version = 5");
+    raw.exec("INSERT INTO history (id, kind, agent, at, text) VALUES ('r-1', 'agent', 'main', 't', 'x')");
+    raw.exec("INSERT INTO assets (id, kind, mime_type, size, name, file, agent, created_at, reply_id, position) VALUES ('a-1', 'image', 'image/png', 4, 'a.png', 'a-1.png', 'main', 't', 'r-1', 0)");
+    raw.close();
+    const db = openDatabase(file);
+    assert.deepEqual(new Conversation(db, new Feed(), { now: Date.now, assets: new Assets(db, tempDir(t), { now: Date.now }) }).page().entries[0], {
+      kind: "agent",
+      id: "r-1",
+      at: "t",
+      text: "x",
+      agent: "main",
+      images: [{ id: "a-1", mime_type: "image/png", size: 4, name: "a.png" }],
+    });
     db.close();
   });
 

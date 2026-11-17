@@ -348,6 +348,37 @@ describe("the UI's API", () => {
       assert.deepEqual(event?.attachments, [{ path: path.join(env.sourcesDir, "ui/files/1-shot.png"), mime_type: "image/png", size: 8 }]);
     });
 
+    it("keeps a copy of each image sent with it, and the names of the other files, in its line of the history", async (t) => {
+      // Guards against: the owner's own images gone from the conversation once the page is read again (ADR-0034).
+      const env = await setup(t);
+      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+      const { body, contentType } = await multipart([
+        ["text", "見て"],
+        ["file", new Blob([png], { type: "image/png" }), "shot.png"],
+        ["file", new Blob(["notes"], { type: "text/plain" }), "notes.txt"],
+      ]);
+      const cookie = env.signIn();
+      const answer = await env.call("/api/messages", cookie, { body, headers: { "content-type": contentType } });
+      assert.equal(answer.status, 202);
+      const sent = answer.json();
+      const [entry] = (await env.call("/api/history", cookie)).json().entries;
+      assert.deepEqual(entry, { kind: "owner", id: sent.id, at: entry.at, text: "見て", images: sent.images, files: sent.files });
+      assert.deepEqual({ ...entry.images[0], id: "" }, { id: "", mime_type: "image/png", size: png.length, name: "shot.png" });
+      assert.deepEqual(entry.files, [{ name: "notes.txt", size: 5 }]);
+      assert.deepEqual((await env.call(`/api/assets/${entry.images[0].id}`, cookie)).body, Buffer.from(png));
+    });
+
+    it("is not sent when its images cannot be kept", async (t) => {
+      // Guards against: a message the agent got while the history lost its images.
+      const env = await setup(t);
+      writeFileSync(env.assets.dir, "not a directory");
+      const { body, contentType } = await multipart([["file", new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])]), "shot.png"]]);
+      const answer = await env.call("/api/messages", env.signIn(), { body, headers: { "content-type": contentType } });
+      assert.equal(answer.status, 500);
+      assert.deepEqual(env.queue.take({ after: 0 }), []);
+      assert.deepEqual(env.conversation.page().entries, []);
+    });
+
     it("is summed up by its first line, cut at 200 characters", async (t) => {
       // Guards against: a long message making a summary that is not one line (docs/ui-api.md).
       const env = await setup(t);
