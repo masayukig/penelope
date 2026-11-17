@@ -15,6 +15,7 @@ export const words = {
   inputPlaceholder: "メッセージを書く",
   attach: "画像やファイルを添付",
   attachments: "添付",
+  dropHere: "ここに落とすと添付になります",
   removeFile: (name: string) => `${name} を外す`,
   openImage: (name: string) => `${name} を大きく見る`,
   duringTurn: "考えている最中に届きました",

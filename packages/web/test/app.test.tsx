@@ -269,6 +269,37 @@ describe("the Web UI", () => {
     );
   });
 
+  it("puts a file dropped anywhere on the conversation into the message's attachments", async () => {
+    // Guards against: a dropped file left out of the message, or opened by the browser in place of the page.
+    const backend = new FakeBackend();
+    backend.history = [{ kind: "agent", id: "r-1", at: new Date().toISOString(), text: "hi", agent: "main" }];
+    start(backend);
+    await backend.connected();
+    await waitFor(() => within(timeline()).getByText("hi"));
+    const file = new File(["a: 1\n"], "values.yaml", { type: "application/yaml" });
+    const dataTransfer = { files: [file], types: ["Files"], dropEffect: "none" };
+    await act(async () => fireEvent.dragEnter(timeline(), { dataTransfer }));
+    const dropped = fireEvent.drop(timeline(), { dataTransfer });
+    assert.equal(dropped, false, "the browser does not open the file");
+    await write("see the file");
+    await waitFor(() => assert.deepEqual(backend.posted, [{ text: "see the file", files: ["values.yaml"] }]));
+  });
+
+  it("shows where to drop only while files are dragged over the conversation", async () => {
+    // Guards against: the sign of a drop shown for text or an image dragged within the page.
+    const backend = new FakeBackend();
+    backend.history = [{ kind: "agent", id: "r-1", at: new Date().toISOString(), text: "hi", agent: "main" }];
+    start(backend);
+    await backend.connected();
+    await waitFor(() => within(timeline()).getByText("hi"));
+    await act(async () => fireEvent.dragEnter(timeline(), { dataTransfer: { files: [], types: ["text/plain"] } }));
+    assert.equal(screen.queryByText("ここに落とすと添付になります"), null);
+    await act(async () => fireEvent.dragEnter(timeline(), { dataTransfer: { files: [], types: ["Files"] } }));
+    assert.ok(screen.getByText("ここに落とすと添付になります"));
+    await act(async () => fireEvent.dragLeave(timeline(), { dataTransfer: { files: [], types: ["Files"] } }));
+    assert.equal(screen.queryByText("ここに落とすと添付になります"), null);
+  });
+
   it("goes back to the login when the owner logs out", async () => {
     const backend = start();
     await backend.connected();

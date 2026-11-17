@@ -86,10 +86,38 @@ body {
   font-size: 16px;
 }
 .talk {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+/*
+ * Files dragged over the conversation (docs/design/README.md, 14): a dashed
+ * frame over all of it with a word in the middle. It takes no pointer, so the
+ * drag goes on being over the conversation under it.
+ */
+.drop-sign {
+  position: absolute;
+  inset: 8px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--color-border-info);
+  border-radius: var(--radius-container);
+  background: color-mix(in srgb, var(--color-background-body) 85%, transparent);
+  pointer-events: none;
+}
+.drop-sign-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: var(--radius-element);
+  background: var(--color-info-muted);
+  color: var(--color-on-info-muted);
+  font-weight: 600;
 }
 .placeholder {
   flex: 1;

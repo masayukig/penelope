@@ -12,9 +12,17 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { AttachIcon, ReconnectIcon } from "./icons.tsx";
 import { sizeOf, words } from "./words.ts";
 
-export function Composer({ offline, strip, onSend }: { offline: boolean; strip?: ReactNode; onSend: (text: string, files: File[]) => void }) {
+export type ComposerProps = {
+  offline: boolean;
+  strip?: ReactNode;
+  /** The files to send along: kept by the conversation, which also takes the ones dropped on it. */
+  files: File[];
+  onFilesChange: (change: (files: File[]) => File[]) => void;
+  onSend: (text: string, files: File[]) => void;
+};
+
+export function Composer({ offline, strip, files, onFilesChange: setFiles, onSend }: ComposerProps) {
   const [text, setText] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
   const picker = useRef<HTMLInputElement>(null);
   const canSend = text.trim() !== "" || files.length > 0;
 
@@ -22,7 +30,7 @@ export function Composer({ offline, strip, onSend }: { offline: boolean; strip?:
     if (!canSend) return;
     onSend(text.trim(), files);
     setText("");
-    setFiles([]);
+    setFiles(() => []);
   };
 
   return (
