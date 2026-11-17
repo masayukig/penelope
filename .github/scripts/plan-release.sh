@@ -12,12 +12,13 @@
 #
 # What does not go into a release is matched by RELEASE_IGNORE, an extended
 # regular expression over the paths `git diff --name-only` prints. Workflows,
-# the Renovate config and documentation change nothing a user runs.
+# the Renovate config, documentation and deploy/ (the Kubernetes example and
+# the migrate manifests, which go into no image) change nothing a user runs.
 
 set -euo pipefail
 
 renovate="renovate[bot]"
-ignore="${RELEASE_IGNORE:-^(\.github/|renovate\.json$|docs/|.*\.md$)}"
+ignore="${RELEASE_IGNORE:-^(\.github/|renovate\.json$|docs/|deploy/|.*\.md$)}"
 
 cd "${1:-.}"
 

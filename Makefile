@@ -109,11 +109,15 @@ vuln: ## Report known vulnerabilities in the code paths the Go module calls.
 ##@ Test
 
 .PHONY: test
-test: test-go test-ts test-renovate test-deploy ## Unit tests, Renovate extraction and deployment example checks. Need nothing but the toolchains.
+test: test-go test-ts test-renovate test-release test-deploy ## Unit tests, Renovate extraction, the weekly release's plan and deployment example checks. Need nothing but the toolchains.
 
 .PHONY: test-renovate
 test-renovate: ## Check the sandbox tools' Renovate extraction and release tag formats.
 	node --test .github/scripts/renovate-tools.test.mjs
+
+.PHONY: test-release
+test-release: ## Check which of Renovate's changes the weekly release releases, on a throwaway git repository.
+	node --test .github/scripts/plan-release.test.mjs
 
 # The Kubernetes example (deploy/kubernetes/) has to stay buildable by
 # kustomize; go test ./... checks that its settings agree with each other.

@@ -265,6 +265,8 @@ restore は Pod を止めてから行う。
 4. `kubectl kustomize <overlay>` で組めることを確かめ、`kubectl apply -k <overlay>` で入れる。StatefulSet が Pod を作り直す。
 5. 「最初の起動と確かめ方」の 2〜6 を見る。
 
+この見本の版（`example` の image、`base` の `distroless-iptables` など）は Renovate が上げるが、`deploy/` だけの変更は週次の release を出さない。次の release に乗る。
+
 ## 見本に無いもの
 
 - クラスタの API を使わせること。使うなら、ServiceAccount `penelope` に RBAC を付け、`kubernetes.default.svc` を `sentinel.yaml` に登録し（鍵は `/run/secrets/penelope-sentinel/kube/token`、`upstream_ca` は同じ場所の `ca.crt`）、サロゲートを持つ kubeconfig を sandbox に置いて `KUBECONFIG` で指す。
