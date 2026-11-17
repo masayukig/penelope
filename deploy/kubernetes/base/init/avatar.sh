@@ -1,8 +1,9 @@
 #!/bin/sh
 # An init container an overlay may add (README.md, "Avatar"): fetches one
 # avatar directory (avatar.json, icons/, slack/, appearance.yaml,
-# sdctl-params.yaml) from a public git repository into an emptyDir, which the
-# backend and the sandbox both mount as PENELOPE_AVATARS_DIR. Only needed for
+# sdctl-params.yaml) from a public git repository into an emptyDir. The
+# backend mounts it as PENELOPE_AVATARS_DIR, and the sandbox mounts the
+# avatar's own directory (subPath) at /etc/penelope/avatar. Only needed for
 # an avatar that is not in the images.
 #
 #   AVATAR_REPO    the repository's URL

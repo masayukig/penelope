@@ -107,7 +107,7 @@ base が決めている場所:
 | `sandbox/surrogates.env` | `SDCTL_URL` | sd-webui の URL |
 | `receivers/config.json`・`connectors/slack.md` | ワークスペース `work` | Slack のワークスペースの短い名前 |
 | `connectors/*.md` | ホスト・token の環境変数・宛先 | その配置のもの |
-| `patches/statefulset.yaml` | `AVATAR_REPO` など | 自分のアバターの置き場（下の「アバター」） |
+| `patches/statefulset.yaml` | `AVATAR_REPO` など、sandbox の mount の `subPath: example` | 自分のアバターの置き場と名前（下の「アバター」） |
 | `patches/statefulset.yaml` | audience `a2a` | A2A の相手が求める token の audience |
 | `ingress.yaml` | `ingressClassName: example`、ホスト、`penelope-tls` | 使う Ingress と証明書 |
 | `skills/skills.list` | 上流の skill | 要る skill（要らなければ ConfigMap ごと消す） |
@@ -159,18 +159,24 @@ kubectl -n "$ns" create secret generic penelope-receivers \
 
 ## アバター
 
-UI の顔（`avatar.json`・`icons/`・`slack/`）と、絵を描くときの姿の素材（`appearance.yaml`・`sdctl-params.yaml`）は、1 つのアバターのディレクトリ `<PENELOPE_AVATARS_DIR>/<PENELOPE_AVATAR>/` にまとまる。backend と sandbox は同じ変数でそれを選ぶ。
+アバターのディレクトリ（`avatar.json`・`icons/`・`slack/`・`appearance.yaml`・`sdctl-params.yaml`）を、backend と sandbox が別の場所で読む。
 
-- **image に入っているアバター**（`penelope`・`natsumi`・`myao`・`aki`）を使うなら、mount は要らない。backend と sandbox の両方の `PENELOPE_AVATAR` に名前を書き、`example/patches/statefulset.yaml` の avatar の部分（init container `avatar`、volume `avatars`、`PENELOPE_AVATARS_DIR`）を消す。
-- **自分のアバター**を使うなら、そのディレクトリを 1 つ用意し、backend と sandbox の両方に同じ場所で mount して、両方に `PENELOPE_AVATARS_DIR` と `PENELOPE_AVATAR` を渡す。そのときは image のアバターは見えない。`avatar.json` の形は [docs/backend.md](../../docs/backend.md) の「設定」。
+- backend は名前と顔（`avatar.json`・`icons/`・`slack/`）を `<PENELOPE_AVATARS_DIR>/<PENELOPE_AVATAR>/` から読む。
+- sandbox は姿の素材（`appearance.yaml`・`sdctl-params.yaml`）を、いつも `/etc/penelope/avatar/` から読む。起動のとき、そこが無ければ image の中の `PENELOPE_AVATAR` のアバターをそこへ写し、在れば触らない。sandbox に `PENELOPE_AVATARS_DIR` は要らない。
+
+置き方は 2 つ。
+
+- **image に入っているアバター**（`penelope`・`natsumi`・`myao`・`aki`）を使うなら、mount は要らない。backend と sandbox の両方の `PENELOPE_AVATAR` に名前を書き、`example/patches/statefulset.yaml` の avatar の部分（init container `avatar`、volume `avatars` とその mount、`PENELOPE_AVATARS_DIR`）を消す。写し先はコンテナの中なので、Pod を作り直すたびに image の版のものになる。
+- **自分のアバター**を使うなら（`example/` の形）、アバターのディレクトリを置いた 1 つの volume を、backend には `PENELOPE_AVATARS_DIR` の場所に、sandbox には `subPath: <アバターの名前>` で `/etc/penelope/avatar` に mount し、両方に同じ `PENELOPE_AVATAR` を渡す。1 つの volume と 1 つの名前なので、名前と顔（backend）と姿（sandbox）がずれない。backend からは image のアバターは見えなくなる。`avatar.json` の形は [docs/backend.md](../../docs/backend.md) の「設定」。
+- `/etc/penelope/avatar` を、PVC `penelope` の上のほかのものと同じ置き場にしない。
 
 画像は ConfigMap の大きさの上限（1 MiB）を超えやすいので、置き方は次から選ぶ。
 
 | 置き方 | やり方 |
 | --- | --- |
 | init で取る（`example/` の形） | public な git のリポジトリに置き、init container が `base/init/avatar.sh` で emptyDir に取る。Pod を作り直すたびに取り直す |
-| PVC | 別の PVC に置いて読み取りで mount する。中身は一度だけ `kubectl cp` などで入れる |
-| image を作る | `ghcr.io/yuanying/penelope-backend` と `-sandbox` を元に、`/app/avatars/<名前>/` を足した image を作る。mount は要らないが、版を上げるたびに作り直す |
+| PVC | アバター専用の PVC に `<名前>/` を置き、上と同じく backend と sandbox に読み取りで mount する。中身は一度だけ `kubectl cp` などで入れる |
+| image を作る | `ghcr.io/yuanying/penelope-backend` と `-sandbox` を元に、image のアバターの置き場に `<名前>/` を足した image を作る。mount は要らないが、版を上げるたびに作り直す |
 
 ## skill
 

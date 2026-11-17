@@ -12,7 +12,8 @@ TZ=Asia/Tokyo
 PENELOPE_SLACK_SOURCES=slack
 # slackctl post --face makes the icon's URL from this (the same as the backend's).
 PENELOPE_PUBLIC_URL=https://penelope.example.com
-# The avatar she draws herself as (README.md, "Avatar"). PENELOPE_AVATARS_DIR is set by patches/statefulset.yaml.
+# The avatar she draws herself as (README.md, "Avatar"); the same as the backend's.
+# patches/statefulset.yaml mounts this avatar at /etc/penelope/avatar.
 PENELOPE_AVATAR=example
 # Where sdctl writes what she draws.
 SDCTL_FORMAT=jpeg
