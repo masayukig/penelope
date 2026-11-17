@@ -42,7 +42,8 @@ RUN npm run build
 
 # The backend's runtime dependencies, without the dev tools. The links npm
 # makes to the workspaces are dropped: the final stage copies the backend's
-# dist, and the contract's package.json and dist in place of its link.
+# dist, and the contract's and the avatar's package.json and dist in place of
+# their links.
 FROM --platform=$BUILDPLATFORM node:24.22.3-trixie-slim AS backend-deps
 WORKDIR /src
 COPY package.json package-lock.json ./
@@ -67,9 +68,9 @@ ENTRYPOINT ["/sentinel"]
 # The backend runs git to commit /memory (ADR-0006). This RUN is the only one
 # in a final stage, so the release builds it for arm64 under QEMU. The
 # warning that node:sqlite is experimental is turned off: there is nothing to
-# act on in it. The built Web UI is served from /app/web and the avatars
-# from /app/avatars, the defaults of PENELOPE_WEB_DIR and
-# PENELOPE_AVATARS_DIR (docs/backend.md).
+# act on in it. The built Web UI is served from /app/web (the default of
+# PENELOPE_WEB_DIR). The repository's avatars are in /app/avatars, which the
+# backend copies the chosen one from into /memory/avatar/ (docs/backend.md).
 FROM node:24.22.3-trixie-slim AS backend
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends git \
@@ -81,6 +82,8 @@ COPY --from=ts-build /src/packages/backend/package.json ./
 COPY --from=backend-deps /src/node_modules ./node_modules
 COPY --from=ts-build /src/packages/contract/package.json ./node_modules/@penelope/contract/
 COPY --from=ts-build /src/packages/contract/dist ./node_modules/@penelope/contract/dist
+COPY --from=ts-build /src/packages/avatar/package.json ./node_modules/@penelope/avatar/
+COPY --from=ts-build /src/packages/avatar/dist ./node_modules/@penelope/avatar/dist
 COPY --from=ts-build /src/packages/backend/dist ./dist
 COPY --from=ts-build /src/packages/web/dist ./web
 COPY assets/avatars ./avatars
@@ -201,7 +204,9 @@ RUN apt-get update \
 COPY --from=sandbox-go /usr/local/go /usr/local/go
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /usr/local/bin/
 COPY --from=sandbox-tools /out/ /usr/local/bin/
-COPY --from=sandbox-sdctl /out/sdctl /usr/local/bin/sdctl
+# sdctl itself is beside the wrapper that gives it her avatar's params.
+COPY --from=sandbox-sdctl /out/sdctl /usr/local/libexec/penelope/sdctl
+COPY packages/runner/image/sdctl /usr/local/bin/sdctl
 COPY --from=sandbox-porkadot /var/lib/gems/ /var/lib/gems/
 COPY --from=sandbox-porkadot /usr/local/bin/porkadot /usr/local/bin/porkadot
 COPY packages/runner/image/entrypoint.sh /usr/local/bin/penelope-sandbox
@@ -222,6 +227,11 @@ COPY packages/slack/bin/slackctl /usr/local/bin/slackctl
 # image's tools and the skills every agent has. The runner lists them after
 # the owner's and the memory's (docs/pod.md, "skill").
 COPY packages/runner/image/skills /opt/penelope/skills
+# `avatar check`, which reads /memory/avatar/ with the backend's own rules
+# (ADR-0036). It has no dependency.
+COPY --from=ts-build /src/packages/avatar/package.json /opt/penelope/avatar/
+COPY --from=ts-build /src/packages/avatar/dist /opt/penelope/avatar/dist
+COPY packages/avatar/bin/avatar /usr/local/bin/avatar
 ENV NODE_ENV=production PENELOPE_VERSION=${VERSION} \
     HOME=/home/agent USER=agent \
     PATH=/home/agent/.local/bin:/home/agent/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \

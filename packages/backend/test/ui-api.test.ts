@@ -8,7 +8,7 @@ import { describe, it } from "node:test";
 
 import { SubAgents } from "../src/agents.ts";
 import { Assets } from "../src/assets.ts";
-import type { AgentSettings } from "../src/config.ts";
+import type { AgentSettings } from "../src/avatar.ts";
 import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
 import { Feed } from "../src/feed.ts";
@@ -68,7 +68,7 @@ async function setup(
   {
     configured = true,
     publicUrl = "http://penelope.example.com",
-    agent = { name: "Iris", icons: {} } as AgentSettings,
+    agent = { name: "Iris", dir: "/nowhere", icons: {} } as AgentSettings,
     a2a = undefined as Handler | undefined,
     web = undefined as Handler | undefined,
     pushKey = undefined as string | undefined,
@@ -112,7 +112,7 @@ async function setup(
       sessions,
       ownerId: settings?.ownerId,
       publicUrl,
-      agent,
+      agent: () => agent,
       now,
       ...(a2a ? { a2a } : {}),
       ...(web ? { web } : {}),
@@ -492,7 +492,7 @@ describe("the UI's API", () => {
   // anyone signs in, and the name comes from the settings (ADR-0001).
   describe("the agent", () => {
     it("is named from the settings, without a session", async (t) => {
-      const env = await setup(t, { agent: { name: "Iris", icons: {} } });
+      const env = await setup(t, { agent: { name: "Iris", dir: "/nowhere", icons: {} } });
       const answer = await env.call("/api/agent", undefined);
       assert.equal(answer.status, 200);
       assert.deepEqual(answer.json(), { name: "Iris" });
@@ -504,8 +504,7 @@ describe("the UI's API", () => {
       const dir = tempDir(t);
       const faces = { neutral: Buffer.from("RIFF-neutral"), happy: Buffer.from("RIFF-happy") };
       for (const [name, body] of Object.entries(faces)) writeFileSync(path.join(dir, `${name}.webp`), body);
-      const icons = { neutral: path.join(dir, "neutral.webp"), happy: path.join(dir, "happy.webp") };
-      const env = await setup(t, { agent: { name: "Iris", icons } });
+      const env = await setup(t, { agent: { name: "Iris", dir, icons: { neutral: "neutral.webp", happy: "happy.webp" } } });
       const agent = (await env.call("/api/agent", undefined)).json();
       assert.deepEqual(Object.keys(agent.icons).sort(), ["happy", "neutral"]);
       const happy = await env.call(agent.icons.happy, undefined);
@@ -521,7 +520,7 @@ describe("the UI's API", () => {
       const dir = tempDir(t);
       writeFileSync(path.join(dir, "happy.PNG"), "PNG-happy");
       writeFileSync(path.join(dir, "odd.name.webp"), "RIFF-odd");
-      const env = await setup(t, { agent: { name: "Iris", icons: { happy: path.join(dir, "happy.PNG"), "odd.name": path.join(dir, "odd.name.webp") } } });
+      const env = await setup(t, { agent: { name: "Iris", dir, icons: { happy: "happy.PNG", "odd.name": "odd.name.webp" } } });
       const agent = (await env.call("/api/agent", undefined)).json();
       assert.deepEqual(agent.icons, { happy: "/api/agent/icons/happy.png", "odd.name": "/api/agent/icons/odd.name.webp" });
       for (const way of ["/api/agent/icons/happy.png", "/api/agent/icons/happy"]) {
@@ -543,7 +542,7 @@ describe("the UI's API", () => {
       writeFileSync(path.join(dir, "happy.png"), "PNG-happy");
       writeFileSync(path.join(dir, "neutral.webp"), "RIFF-neutral");
       const env = await setup(t, {
-        agent: { name: "Iris", icons: { happy: path.join(dir, "happy.webp"), neutral: path.join(dir, "neutral.webp") }, pngIcons: { happy: path.join(dir, "happy.png") } },
+        agent: { name: "Iris", dir, icons: { happy: "happy.webp", neutral: "neutral.webp" }, pngIcons: { happy: "happy.png" } },
       });
       const agent = (await env.call("/api/agent", undefined)).json();
       assert.deepEqual(agent.icons, { happy: "/api/agent/icons/happy.webp", neutral: "/api/agent/icons/neutral.webp" });

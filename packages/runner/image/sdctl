@@ -1,0 +1,13 @@
+#!/bin/sh
+# sdctl in the sandbox. Unless the deployment set SDCTL_PARAMS (even empty),
+# the params of her avatar, /memory/avatar/sdctl-params.yaml, are the
+# default: the entrypoint sets SDCTL_PARAMS to it (docs/pod.md, "アバター").
+# The file is looked for on each call, since the backend may copy it there
+# after the sandbox started; while it is not there, sdctl runs with no params
+# file rather than failing.
+default=/memory/avatar/sdctl-params.yaml
+if [ -z "${SDCTL_PARAMS+set}" ] || [ "$SDCTL_PARAMS" = "$default" ]; then
+  if [ -f "$default" ]; then SDCTL_PARAMS=$default; else SDCTL_PARAMS=; fi
+  export SDCTL_PARAMS
+fi
+exec /usr/local/libexec/penelope/sdctl "$@"

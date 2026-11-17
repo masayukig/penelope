@@ -20,7 +20,7 @@ async function setup(t: { after: (fn: () => void | Promise<void>) => void }, { b
     writeFileSync(path.join(dir, "assets", "app.css"), "body{}");
     writeFileSync(path.join(dir, "icon.svg"), "<svg/>");
   }
-  const server = await listenTcp(webHandler({ dir, agent: { name: "Iris", icons } }), "127.0.0.1", 0);
+  const server = await listenTcp(webHandler({ dir, agent: () => ({ name: "Iris", dir: "/avatars/iris", icons }) }), "127.0.0.1", 0);
   t.after(() => close(server));
   return { target: { port: (server.address() as AddressInfo).port } };
 }
@@ -83,7 +83,7 @@ describe("the Web UI's files", () => {
   });
 
   it("puts the avatar's neutral face in the manifest when there is one", async (t) => {
-    const { target } = await setup(t, { icons: { neutral: "/avatars/iris/icons/neutral.webp", happy: "/avatars/iris/icons/happy.webp" } });
+    const { target } = await setup(t, { icons: { neutral: "icons/neutral.webp", happy: "icons/happy.webp" } });
     const manifest = (await ask(target, "/manifest.webmanifest")).json();
     assert.deepEqual(
       manifest.icons.map((icon: { src: string; type: string }) => [icon.src, icon.type]),

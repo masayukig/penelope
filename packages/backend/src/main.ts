@@ -34,7 +34,16 @@ async function serve(): Promise<void> {
     process.exitCode = 2;
     return;
   }
-  const backend = await startBackend(config);
+  let backend;
+  try {
+    backend = await startBackend(config);
+  } catch (error) {
+    // The chosen avatar is looked for only when it is copied, at the start.
+    if (!(error instanceof ConfigError)) throw error;
+    process.stderr.write(`backend: ${error.message}\n`);
+    process.exitCode = 2;
+    return;
+  }
   const stop = () => {
     backend.close().then(
       () => process.exit(0),

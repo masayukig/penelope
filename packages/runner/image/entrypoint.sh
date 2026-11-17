@@ -19,4 +19,11 @@ if [ "$found" = true ]; then
   cat "$debian" "$ca_dir"/*.crt > "$bundle"
 fi
 
+# sdctl's params are her avatar's unless the deployment set its own
+# (docs/pod.md, "アバター"); the sdctl in the image sees whether the file is there.
+if [ -z "${SDCTL_PARAMS+set}" ]; then
+  SDCTL_PARAMS=/memory/avatar/sdctl-params.yaml
+  export SDCTL_PARAMS
+fi
+
 exec node /opt/penelope/runner/dist/main.js "$@"

@@ -35,6 +35,7 @@
 | 受信の鍵の Secret | — | — | — | 読み取り |
 | オーナーの skill（例 `/skills`、配置が置く） | 読み取り | — | — | — |
 | コネクタの文書（`/etc/penelope/connectors/`、配置が置く） | 読み取り | — | — | — |
+| 配置のアバターの置き場（`PENELOPE_AVATARS_DIR`、任意） | — | 読み取り | — | — |
 
 - Pi のディレクトリ（設定・認証・モデル・skill）とセッションの記録は HOME の下に置く（`/home/agent/.pi/agent/`、セッションは `/home/agent/.pi/agent/sessions/main/`、サブエージェントの記録とセッションは `/home/agent/.pi/agent/sessions/agents/`）。別の volume にはしない。HOME が永続なので足りる。
 - skill は `<名前>/SKILL.md` の並びで、runner は次の 3 か所から並べて読む。同じ名前が 2 か所以上にあれば、この表の上の方が一覧に載る（[ADR-0035](adr/0035-tool-usage-and-shared-skills-as-image-skills.md)）。場所が無ければ、そこの skill は無い。
@@ -54,6 +55,18 @@
 - 管理口の socket も sandbox に mount しない（[ADR-0005](adr/0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md)）。
 - backend の sandbox 向けの口の socket は、backend と Sentinel だけが mount する。Sentinel は backend の登録の `upstream` でこの socket につなぐ（[sentinel-config.md](sentinel-config.md) の「上流」）。
 - コンテナの UID が違うので、配置は Pod の `fsGroup` で、共有する volume を 1 つのグループに置く。backend は sandbox が書いた `/memory` の作業ツリーを読み、`/memory/.git`・SQLite・`/sources` を書く。sandbox は `/sources` を読む。socket は backend が誰でも書ける mode で作るので、見えるかどうかは mount だけで決まる。
+
+## アバター
+
+エージェントのアバターは `/memory/avatar/` にある（[ADR-0036](adr/0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md)、[backend.md](backend.md) の「アバター」）。
+
+- backend は、`/memory/avatar/` が無ければ、選んだアバター（`PENELOPE_AVATAR`）を、配置の置き場（`PENELOPE_AVATARS_DIR`）か image の基本のアバターから写す。配置の置き場を先に探す。そのため backend は `/memory` の作業ツリーの一番上にディレクトリを作れる必要がある（共有のグループに書ける）。
+- sandbox の image にアバターは入っていない。エージェントは `/memory/avatar/` だけを読み書きする。
+- 自分特有のアバターを使う配置は、アバターのディレクトリ（`<名前>/avatar.json` と表情の画像、`appearance.yaml`・`sdctl-params.yaml`）を置いた volume を backend に読み取りで mount し、`PENELOPE_AVATARS_DIR` で指す。写すのは `/memory/avatar/` が無いときの 1 回だけなので、写したあとは mount を外してよい。記憶にすでにアバターがある配置で置き場を替えても、写し直されない。
+- sandbox の `avatar check` は、`/memory/avatar/` を backend と同じ規則で読み、使えないものとその理由を出す（既定の場所は `/memory/avatar`、ほかの場所を引数で渡せる）。
+- 配置が `SDCTL_PARAMS` を置いていなければ（空の値も置いたうちに入る）、sandbox の entrypoint が `SDCTL_PARAMS` を `/memory/avatar/sdctl-params.yaml` にする。image の `sdctl` はそのファイルがあるかを呼ぶたびに見て、無ければ params のファイル無しで動く。sandbox が backend より先に起動しても、写されたあとから効く。
+- 使い方は image の skill `avatar` にある。
+- 記憶の外の姿の置き場（`/etc/penelope/avatar/` など）を、penelope の image は読まない。配置がそこを `SDCTL_PARAMS` やオーナーの skill で指している間は、その配置の道具がそこを読む。
 
 ## 待ち受け
 

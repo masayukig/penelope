@@ -39,9 +39,9 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_INLINE_SOURCES` | `ui,job` | inline の受信元（`,` で区切る）。`control` は書かなくても常に inline。書くと既定を置き換えるので、裏の仕事の終わりを inline のままにするなら `job` も書く。Slack のプラグインの出来事を描いて載せる配置は、その `source` も書く（[events.md](events.md) の「Slack の出来事」） |
 | `PENELOPE_GIT_AUTHOR_NAME` | `penelope-backend` | `/memory` のコミットの作者の名前 |
 | `PENELOPE_GIT_AUTHOR_EMAIL` | `backend@penelope.invalid` | 同じくメールアドレス |
-| `PENELOPE_AVATAR` | なし | UI に出すアバターの名前。`PENELOPE_AVATARS_DIR` の下の、この名前のディレクトリを読む（[ui-api.md](ui-api.md) の「エージェント」）。image に入っているのは `penelope`・`natsumi`・`myao`・`aki` |
-| `PENELOPE_AVATARS_DIR` | `/app/avatars` | アバターの置き場所。image にはリポジトリの `assets/avatars/` が入っている |
-| `PENELOPE_AGENT_NAME` | アバターの名前、それも無ければ `Agent` | UI に出すエージェントの名前。アバターの `avatar.json` の名前より優先する |
+| `PENELOPE_AVATAR` | なし | 選んだアバターの名前。`/memory/avatar/` が無いとき、この名前のアバターを写す（下の「アバター」）。image に入っているのは `penelope`・`natsumi`・`myao`・`aki` |
+| `PENELOPE_AVATARS_DIR` | なし | 配置のアバターの置き場所。写すアバターを、image の `/app/avatars`（リポジトリの `assets/avatars/`）より先にここで探す |
+| `PENELOPE_AGENT_NAME` | アバターの名前、それも無ければ `Agent` | UI に出すエージェントの名前。`/memory/avatar/avatar.json` の名前より優先する |
 | `PENELOPE_WEB_DIR` | `/app/web` | Web UI の build の場所。image ではここに入っている |
 | `PENELOPE_A2A_SENDERS` | なし | A2A の送り手の allow-list。ServiceAccount を `<名前空間>/<名前>` で `,` で区切る。無ければ A2A の受け口は閉じる |
 | `PENELOPE_A2A_AUTH` | なし | 送り手の確かめ方。`gated-assertion`・`tokenreview` のどちらか、または両方を `,` で区切る |
@@ -63,8 +63,24 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - `PENELOPE_A2A_SENDERS` が無ければ、ほかの `PENELOPE_A2A_*` は読まない。
 - Web Push は `PENELOPE_WEB_PUSH_VAPID_KEY_FILE` があるときだけ動く（[ADR-0027](adr/0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md)）。そのときは `PENELOPE_PUBLIC_URL` が要る（VAPID の token の `sub`。Apple の push service に届くには https にする）。鍵が読めない、PEM の秘密鍵でない、P-256 でないときは起動しない。backend は鍵を作らない。
 - VAPID の鍵は配置の Secret として長く保つ。鍵を替えると、それまでの購読には届かなくなる（Web UI は、次に開いたときに購読を作り直す）。作るには `openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out vapid.pem`。
-- アバターのディレクトリは `avatar.json` を持つ。`avatar.json` は、名前（`name`）と、表情ごとのアイコンの画像の場所（`icons`、ディレクトリからの相対の場所）を持つ。画像の拡張子は `.png`・`.jpg`・`.jpeg`・`.gif`・`.webp`・`.svg` のどれかで、ディレクトリの外は指せない。表情ごとの PNG の場所（`pngIcons`、拡張子は `.png`）も持てる。Slack の投稿のアイコンに使う（[ui-api.md](ui-api.md) の「エージェント」）。読めないとき、形が違うときは起動しない。
+- `PENELOPE_AVATAR` が名前の形（小文字・数字・`.`・`_`・`-`）でなければ起動しない。
 - `batch` の待ちは、N・M のほか、`now` の出来事を初めて渡すときにも終わる。そのとき待っている `batch` の出来事は、起きている時間の外でも、`now` の出来事と一緒に渡す（[events.md](events.md) の「いつ渡すか」）。
+
+## アバター
+
+エージェントのアバターは記憶の `/memory/avatar/` にあり、エージェントが育てる（[ADR-0036](adr/0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md)）。
+
+- 起動のとき、`/memory/avatar/` という名前のものが無く、`PENELOPE_AVATAR` があれば、`PENELOPE_AVATARS_DIR` と `/app/avatars` の順に `<名前>/avatar.json` を持つディレクトリを探し、`/memory/avatar/` に写す。どちらにも無ければ起動しない。在れば中身を見ずに触らない。
+- 写すときは、リンクをたどった先のファイルを写し、`..` で始まる名前（Kubernetes の volume の `..data` など）は写さない。ディレクトリは `rwxrwxr-x`（set-group-ID は残す）、ファイルは `rw-rw-r--` にして、sandbox のエージェントが書き換えられるようにする。写したら、`avatar/` だけを `Avatar <名前>`（本文 `Copied from <写し元>`）でコミットする。コミットに失敗しても起動し、次のターンの終わりのコミットに入る。
+- 写せないとき（`/memory` に書けないなど）は、ログに残して起動し、写し元のアバターを出す。次の起動でまた写そうとする。
+- `avatar.json` は JSON の object で、次の項目を読む。ほかの項目は読まずに残す。
+  - `name`: 名前の既定（空でない文字列）。`PENELOPE_AGENT_NAME` が無いときに使う。名前は起動のときに決め、動いている間は変えない。
+  - `icons`: 表情ごとのアイコンの画像の場所（`/memory/avatar/` からの相対の場所）。Web UI・通知・ホーム画面のアイコンに使う（[ui-api.md](ui-api.md) の「エージェント」）。
+  - `pngIcons`: 表情ごとの PNG の場所。Slack の投稿のアイコンに使う。
+- 表情の画像は、拡張子が `.png`・`.jpg`・`.jpeg`・`.gif`・`.webp`・`.svg` のどれか（`pngIcons` は `.png`）で、中身がその種類であり、4 MiB 以下で、リンクをたどった先が `/memory/avatar/` の中の普通のファイルであるもの。`/memory/avatar/` そのものがリンクなら、何も読まない。規則に合わない表情は出さず、ログに残す。`avatar.json` が読めないときはアイコンの無いエージェントとして出す。どちらでも起動は止めない。
+- 規則のコードは `packages/avatar` にあり、sandbox の `avatar check` も同じコードで読む（[pod.md](pod.md) の「アバター」）。
+- `avatar.json` と表情は、起動のときと、`/memory` のコミットが何かをコミットしたあと（ターンの終わり）に読み直す。画像の中身は、配るたびに読む。
+- 姿（`appearance.yaml`）と描画の既定（`sdctl-params.yaml`）も `/memory/avatar/` に置くが、backend は読まない。
 
 ## 状態
 
@@ -106,6 +122,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - メッセージは、1 行目が `Turn <turn_id>`、本文が `Agent: <agent>`。サブエージェントのターンの終わりでは `<agent>` はサブエージェントの名前で、本体のターンの途中の変更も一緒に入る（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)）。
 - ターンの終わりに `.git/HEAD` が無ければ（`.git` が無い、または Pod が別に mount した空の `.git`）、変わったものを見る前に `git init` で `main` を枝にしてリポジトリを作る。変わったものが無くても作る。`HEAD` があれば、そのリポジトリと今の枝をそのまま使う。
 - git は backend の git の設定を読まない。hook も署名も使わない。作業ツリーの持ち主は sandbox のユーザーなので、その場所を `safe.directory` として渡す。
+- このほかに、起動のときにアバターを写したら、`avatar/` だけをコミットする（上の「アバター」）。
 - コミットは 1 つずつ順に行う。
 - コミットに失敗したら、ターンの終わりに `500` で答える。変わったものは作業ツリーに残り、次のターンの終わりにコミットされる。
 

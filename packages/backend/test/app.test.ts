@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { createECDH, generateKeyPairSync } from "node:crypto";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,6 +61,43 @@ describe("the backend", () => {
     const ui = { port: backend.port };
     assert.equal((await ask(ui, "/healthz")).status, 200);
     assert.equal((await ask(ui, "/api/history")).status, 401);
+  });
+});
+
+describe("the backend's avatar", () => {
+  // Guards against: what she changed in her avatar never reaching the UI, or the UI showing it before it is committed.
+  it("serves the faces of /memory/avatar, and what she changed in it once the turn's end commits it", async (t) => {
+    const dir = tempDir(t);
+    writeFileSync(path.join(dir, "token"), "real-token\n");
+    const avatar = path.join(dir, "memory/avatar");
+    mkdirSync(avatar, { recursive: true });
+    const webp = (text: string) => Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from(`WEBP${text}`)]);
+    writeFileSync(path.join(avatar, "neutral.webp"), webp("neutral"));
+    writeFileSync(path.join(avatar, "happy.webp"), webp("happy"));
+    writeFileSync(path.join(avatar, "avatar.json"), JSON.stringify({ name: "Iris", icons: { neutral: "neutral.webp" } }));
+    const config = loadConfig(
+      {
+        PENELOPE_DATABASE: path.join(dir, "state/backend.sqlite"),
+        PENELOPE_SOURCES_DIR: path.join(dir, "sources"),
+        PENELOPE_MEMORY_DIR: path.join(dir, "memory"),
+        PENELOPE_INTAKE_SOCKET: path.join(dir, "intake/backend.sock"),
+        PENELOPE_SANDBOX_SOCKET: path.join(dir, "sandbox/backend.sock"),
+        PENELOPE_LISTEN: "127.0.0.1:0",
+        PENELOPE_SANDBOX_TOKEN_FILE: path.join(dir, "token"),
+      },
+      (file) => execFileSync("cat", [file], { encoding: "utf8" }),
+    );
+    const backend = await startBackend(config, { log: () => {} });
+    t.after(() => backend.close());
+    const ui = { port: backend.port };
+    assert.deepEqual((await ask(ui, "/api/agent")).json(), { name: "Iris", icons: { neutral: "/api/agent/icons/neutral.webp" } });
+    assert.ok((await ask(ui, "/api/agent/icons/neutral")).body.includes("neutral"));
+
+    writeFileSync(path.join(avatar, "avatar.json"), JSON.stringify({ name: "Iris", icons: { neutral: "neutral.webp", happy: "happy.webp" } }));
+    assert.equal((await ask(ui, "/api/agent/icons/happy")).status, 404);
+    const end = await ask({ socketPath: config.sandboxSocket }, "/v1/turns/end", { headers: { authorization: "Bearer real-token" }, json: { agent: "main", turn_id: "t-1" } });
+    assert.equal(end.status, 204);
+    assert.ok((await ask(ui, "/api/agent/icons/happy")).body.includes("happy"));
   });
 });
 

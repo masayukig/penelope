@@ -15,6 +15,8 @@ export class Memory {
   private readonly author: Author;
   /** Commits run one after another; a turn's end waits for the one before. */
   private last: Promise<unknown> = Promise.resolve();
+  /** Called after each commit that made one. */
+  private readonly listeners: (() => void)[] = [];
 
   constructor(dir: string, author: Author) {
     this.dir = dir;
@@ -23,21 +25,36 @@ export class Memory {
 
   /** Commits everything that changed in the work tree. `clean` when nothing did. */
   commit({ agent, turnId }: { agent: string; turnId: string }): Promise<"committed" | "clean"> {
-    const next = this.last.then(
-      () => this.commitNow(agent, turnId),
-      () => this.commitNow(agent, turnId),
-    );
-    this.last = next.catch(() => {});
-    return next;
+    return this.queue(() => this.commitNow([`Turn ${turnId}`, `Agent: ${agent}`]));
   }
 
-  private async commitNow(agent: string, turnId: string): Promise<"committed" | "clean"> {
+  /** Commits what changed under `paths` only, with the paragraphs of `message`. */
+  commitPaths(paths: string[], message: string[]): Promise<"committed" | "clean"> {
+    return this.queue(() => this.commitNow(message, paths));
+  }
+
+  /** `listener` is called after each commit that made one. */
+  afterCommit(listener: () => void): void {
+    this.listeners.push(listener);
+  }
+
+  private queue(commit: () => Promise<"committed" | "clean">): Promise<"committed" | "clean"> {
+    const next = this.last.then(commit, commit);
+    this.last = next.catch(() => {});
+    return next.then((result) => {
+      if (result === "committed") for (const listener of this.listeners) listener();
+      return result;
+    });
+  }
+
+  private async commitNow(message: string[], paths: string[] = []): Promise<"committed" | "clean"> {
     // A Pod mounts .git on its own, so it can be there and empty: a repository has its HEAD.
     if (!existsSync(path.join(this.dir, ".git", "HEAD"))) await this.git("init", "--quiet", "--initial-branch=main");
-    await this.git("add", "--all");
-    const { stdout } = await this.git("status", "--porcelain");
+    const only = paths.length === 0 ? [] : ["--", ...paths];
+    await this.git("add", "--all", ...only);
+    const { stdout } = await this.git("status", "--porcelain", ...only);
     if (stdout === "") return "clean";
-    await this.git("commit", "--quiet", "--no-verify", "--message", `Turn ${turnId}`, "--message", `Agent: ${agent}`);
+    await this.git("commit", "--quiet", "--no-verify", ...message.flatMap((paragraph) => ["--message", paragraph]), ...only);
     return "committed";
   }
 

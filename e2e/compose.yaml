@@ -115,6 +115,8 @@ services:
   backend:
     image: penelope-backend:${PENELOPE_E2E_TAG:?}
     network_mode: service:pod
+    # The group of the shared volumes, as the Pod's supplementalGroups give it.
+    group_add: ["2000"]
     depends_on:
       init: { condition: service_completed_successfully }
       volumes: { condition: service_completed_successfully }
@@ -163,6 +165,7 @@ services:
   sandbox:
     image: penelope-sandbox:${PENELOPE_E2E_TAG:?}
     network_mode: service:pod
+    group_add: ["2000"]
     depends_on:
       init: { condition: service_completed_successfully }
       volumes: { condition: service_completed_successfully }

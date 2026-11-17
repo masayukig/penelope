@@ -38,7 +38,7 @@ export type Config = {
   builtinDelivery: Record<"ui" | "cron" | "a2a" | "self" | "job", Delivery>;
   inline: Set<string>;
   gitAuthor: { name: string; email: string };
-  agent: AgentSettings;
+  avatar: AvatarSettings;
   /** Where the built Web UI is. */
   webDir: string;
   /** The A2A way in (docs/a2a.md); none when no sender is allowed. */
@@ -65,23 +65,15 @@ export const A2A_CHECKS = ["gated-assertion", "tokenreview"] as const;
 const SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount";
 
 /**
- * What the UI shows of the agent: the deployment's, never the code's
- * (ADR-0001). `icons` holds the file of each face of her avatar, by
- * expression; none when no avatar is chosen. `pngIcons` holds a PNG of the
- * faces that have one, for those who may not take the other image (Slack's
- * icon_url).
+ * Who the agent is (ADR-0036). Her name is the deployment's when it gives one
+ * (ADR-0001); else her avatar's. Her avatar is the one in /memory/avatar/:
+ * when it is not there, the backend copies the avatar named `chosen` from the
+ * first place of `from` that has it.
  */
-export type AgentSettings = { name: string; icons: Readonly<Record<string, string>>; pngIcons?: Readonly<Record<string, string>> };
+export type AvatarSettings = { name: string | undefined; chosen: string | undefined; from: string[] };
 
-/** The image types an icon may be, by its extension. */
-export const ICON_TYPES: Readonly<Record<string, string>> = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-  ".svg": "image/svg+xml",
-};
+/** Where the backend's image keeps the avatars of the repository (assets/avatars/). */
+export const IMAGE_AVATARS_DIR = "/app/avatars";
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -175,7 +167,11 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
     };
   }
 
-  const avatar = avatarOf(get("PENELOPE_AVATARS_DIR") ?? "/app/avatars", get("PENELOPE_AVATAR"), readFile);
+  const chosen = get("PENELOPE_AVATAR");
+  if (chosen !== undefined && !/^[a-z0-9][a-z0-9._-]*$/.test(chosen)) {
+    throw new ConfigError("PENELOPE_AVATAR must be the name of a directory: lower-case letters, digits, ., _ and -");
+  }
+  const avatarsDir = get("PENELOPE_AVATARS_DIR");
   const databasePath = get("PENELOPE_DATABASE") ?? "/var/lib/penelope/backend.sqlite";
 
   return {
@@ -214,11 +210,8 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
       name: get("PENELOPE_GIT_AUTHOR_NAME") ?? "penelope-backend",
       email: get("PENELOPE_GIT_AUTHOR_EMAIL") ?? "backend@penelope.invalid",
     },
-    agent: {
-      name: get("PENELOPE_AGENT_NAME") ?? avatar?.name ?? "Agent",
-      icons: avatar?.icons ?? {},
-      ...(avatar === undefined || Object.keys(avatar.pngIcons).length === 0 ? {} : { pngIcons: avatar.pngIcons }),
-    },
+    // The deployment's own avatars come first (ADR-0036).
+    avatar: { name: get("PENELOPE_AGENT_NAME"), chosen, from: avatarsDir === undefined ? [IMAGE_AVATARS_DIR] : [avatarsDir, IMAGE_AVATARS_DIR] },
     webDir: get("PENELOPE_WEB_DIR") ?? "/app/web",
     a2a: a2aOf(get, readFile, publicUrl),
     webPush: webPushOf(secret("PENELOPE_WEB_PUSH_VAPID_KEY_FILE"), publicUrl),
@@ -321,44 +314,6 @@ function a2aOf(get: (name: string) => string | undefined, readFile: (file: strin
     description: get("PENELOPE_A2A_DESCRIPTION") ?? "",
     url: `${publicUrl}/a2a/`,
     limits: { deadlineMs: whole("PENELOPE_A2A_DEADLINE_HOURS", 24) * 3_600_000, maxOpenTasks: whole("PENELOPE_A2A_MAX_OPEN_TASKS", 3) },
-  };
-}
-
-/**
- * The avatar named `id` under `dir`: its avatar.json gives her name, the
- * image of each face and the PNG of the faces that have one, relative to its
- * own directory.
- */
-function avatarOf(
-  dir: string,
-  id: string | undefined,
-  readFile: (file: string) => string,
-): { name: string | undefined; icons: Record<string, string>; pngIcons: Record<string, string> } | undefined {
-  if (id === undefined) return undefined;
-  if (!/^[a-z0-9][a-z0-9._-]*$/.test(id)) throw new ConfigError("PENELOPE_AVATAR must be the name of a directory: lower-case letters, digits, ., _ and -");
-  const root = path.resolve(dir, id);
-  const file = path.join(root, "avatar.json");
-  let avatar: { name?: unknown; icons?: unknown; pngIcons?: unknown };
-  try {
-    avatar = JSON.parse(readFile(file)) as typeof avatar;
-  } catch (error) {
-    throw new ConfigError(`PENELOPE_AVATAR: ${file} cannot be read: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  const images = (field: unknown, what: string, fits: (extension: string) => boolean) => {
-    const found: Record<string, string> = {};
-    for (const [expression, relative] of Object.entries((field ?? {}) as Record<string, unknown>)) {
-      const image = typeof relative === "string" ? path.resolve(root, relative) : "";
-      if (!image.startsWith(`${root}${path.sep}`) || !fits(path.extname(image).toLowerCase())) {
-        throw new ConfigError(`PENELOPE_AVATAR: the ${what} of ${expression} in ${file} must be ${what === "icon" ? "an image" : "a PNG"} inside ${root}`);
-      }
-      found[expression] = image;
-    }
-    return found;
-  };
-  return {
-    name: typeof avatar.name === "string" && avatar.name.trim() !== "" ? avatar.name.trim() : undefined,
-    icons: images(avatar.icons, "icon", (extension) => ICON_TYPES[extension] !== undefined),
-    pngIcons: images(avatar.pngIcons, "PNG icon", (extension) => extension === ".png"),
   };
 }
 
