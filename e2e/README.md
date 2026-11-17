@@ -64,9 +64,9 @@ COMPOSE_PROJECT_NAME=penelope-e2e-<ブランチ名> VERSION=<ブランチ名> ma
 - **volume の持ち主**: Pod は `fsGroup` で共有の volume を 1 つのグループに置く。ここでは `volumes` のコンテナが持ち主を UID ごとに決める。
 - **ServiceAccount の token と kubeconfig**: クラスタが無いので、どのコンテナにも無い。backend の TokenReview のための token は、偽の API server が知っている値（`kube-token`）を mount し、API server の名前と CA は設定で偽物に向ける。
 - **gated**: 前段の gated は置かない。送り手の呼び出しは backend に直に届き、gated の assertion の呼び出しは、テストが偽の gated に署名させた assertion を自分で付ける。
-- **`batch` の待ち**: backend の `PENELOPE_BATCH_QUIET_MINUTES` を、使える最も短い 1 分にする。GitHub の出来事は `batch` だけで届くので、既定の 5 分ではテストが長くなる。
-- **heartbeat**: 既定では切ってある（`PENELOPE_HEARTBEAT_MINUTES` が空）。そのシナリオだけ、backend を作り直して N を使える最も短い 1 分にする。次の夜の切り替えのシナリオで作り直すときに切れる。
-- **夜の切り替え**: テストは最後に backend を作り直し、`PENELOPE_NIGHTLY_CRON` を毎分（`* * * * *`）にして次の切り替えを待つ。起動にかかった時間や今の時刻に左右されない。取り込み口は `control` の出来事を断るので、外から夜を起こす道は無い。
+- **`batch` の待ち**: 既定の 5 分のまま待たない。`batch` の出来事は、後から入れた `now` が連れていく。待ちが明けて渡ることは backend の単体テストが見る。
+- **heartbeat**: 既定では切ってある。そのシナリオだけ、backend を作り直してテスト用の `PENELOPE_HEARTBEAT_SECONDS` で N を 5 秒にする。次の夜の切り替えのシナリオで作り直すときに切れる。2 つめの heartbeat が 1 つめのターンの終わりから数え直すことは、backend の単体テストが見る。
+- **夜の切り替え**: テストは最後に backend を作り直し、`PENELOPE_NIGHTLY_CRON` をテスト用の秒の欄で 20 秒ごと（`*/20 * * * * *`）にして次の切り替えを待つ。起動にかかった時間や今の時刻に左右されない。取り込み口は `control` の出来事を断るので、外から夜を起こす道は無い。
 
 ## 通すシナリオ
 
@@ -81,11 +81,11 @@ COMPOSE_PROJECT_NAME=penelope-e2e-<ブランチ名> VERSION=<ブランチ名> ma
 7. sandbox に本物の鍵が無い。取り込み口の socket が見えない。backend の UI 向けの口に loopback で届いても、ログインを求められる。
 8. receivers から取り込み口へ出来事を入れ、`/sources` に追記される。重複は受けたことになり、`control` は断られる。`batch` は待ち、後から来た `now` が待っている `batch` を連れて 1 つのターンに届く。
 9. Alertmanager の形の POST を Pod の外から receivers の webhook に送る。token が違えば `401` で断られる。`critical` の鳴り始めは `/sources/alertmanager/kubepodcrashlooping/` に追記され、`now` として 1 つのターンに入る。同じ POST の送り直しは重複として落ち、印のラベル（`sender="penelope"`）のアラートは出来事にならない。
-10. GitHub の形の配送（`pull_request` の `review_requested`）を Pod の外から receivers の webhook に送る。署名が違えば `401` で断られ、`ping` と `authors` に無い作者の PR は出来事にならない。署名の合う依頼は `/sources/github/example-org.example-repo/` に `batch` として追記され、同じ `X-GitHub-Delivery` の送り直しは重複として落ちる。PR の本文は残らない。`batch` の待ちの後、その出来事だけで 1 つのターンに入る。
+10. GitHub の形の配送（`pull_request` の `review_requested`）を Pod の外から receivers の webhook に送る。署名が違えば `401` で断られ、`ping` と `authors` に無い作者の PR は出来事にならない。署名の合う依頼は `/sources/github/example-org.example-repo/` に `batch` として追記され、同じ `X-GitHub-Delivery` の送り直しは重複として落ちる。PR の本文は残らない。後から来た `now` が、その `batch` を連れて 1 つのターンに届く。
 11. receivers の Slack のプラグインが Socket Mode でつなぐ（app-level token で `apps.connections.open`、bot の token で `auth.test`）。Slack が求めたつなぎ直しの後に、離れていた間の発言が取り直されて `/sources/slack/work.dev/` に入る。画像の付いたメンションの封筒は、取り込み口が受けてから ack され、画像が bot の token で取られて添付になる。Slack の送り直しは重複として落ちる。メンションは `now` として、取り直した発言を連れて 1 つのターンに入る。backend は `slack` を inline にし、runner は `PENELOPE_SLACK_SOURCES` で描くので、メンションの行は取り直した発言を `(earlier)` で添えた文を、取り直した発言の `batch` のまとめはその発言を描いた文を、`text` に持つ。メンションは inline なので、その画像は画像としても入力に入る（台本のモデルは画像を受けないので、Pi が入力の後ろにそう書き添える）。sandbox の `slackctl history work.dev` が、そのチャンネルを今の姿で描く。
 12. sandbox の `slackctl post` が、本文（日本語の複数行）を `#dev` のスレッドに、表情 `happy` のアイコンと画像 1 枚を添えて投稿する。チャンネルは名前から `users.conversations` で ID になり、`chat.postMessage` と `files.completeUploadExternal` には Sentinel が差し替えた本物の bot の token が届き、本文はそのまま、画像の共有も同じスレッドと同じアイコンである。画像のアップロード先（`files.slack.com/upload/`）には token が付かない。アイコンの URL は backend の公開の URL の `/api/agent/icons/happy.webp` で、Pod の外から取れる。`slackctl faces` が同じ URL を出す。
 13. ほかのエージェントが A2A で頼む。token なしで Agent Card が読める。allow-list に無い ServiceAccount は、TokenReview でも gated の assertion でも断られる。送り手が ServiceAccount の token で頼み（TokenReview）、ターンが `reply_to_agent` で聞き返し、送り手が gated の assertion で答え、ターンが閉じた答えを送り手が `GetTask` で読む。依頼と答えは `/sources/a2a/claude/` に追記され、API server には backend 自身の token で尋ねている。
 14. 本体がサブエージェントを起こす（`subagent_start`）。サブエージェントは自分のシステムプロンプトと作業の場所で、本体の道具（`reply`・`reply_to_agent`・`self_event`・`subagent_*`）を持たずに走り、`/memory` に書いて問いで止まる。その地の文が `self` の出来事として本体に届き（`/sources/self/<名前>/`）、本体が続きを送り（`subagent_send`）、同じセッションで続いたサブエージェントの結果を受けて閉じる（`subagent_close`）。サブエージェントの書いたものは、そのターンの終わりに `Agent: <名前>` でコミットされる。UI の流れには起こした・閉じたことと途中経過が乗り、閉じたサブエージェントは `/api/agents` に載らない。
 15. 本体が裏の仕事を起こす（`job_start`）。道具は仕事の ID と出力のファイルを返し、コマンドの出力は返さない。コマンドが終わると、終わり方・コマンド・出力の末尾が inline の `job` の出来事として新しいターンに入り（`/sources/job/`）、出力の全文は `~/jobs/<ID>/output.log` にある。
-16. heartbeat を 1 分で入れた backend に作り直すと、何もないまま 1 分たって heartbeat の出来事だけで 1 つのターンが始まる（`delivery` は `now`、中身は `/sources/heartbeat/` にある）。偽のモデルは地の文もツールも無しで終え、畳む前の頼みは送られない。そのターンが終わってから 1 分たって、次の heartbeat が入る。
+16. heartbeat を 5 秒で入れた backend に作り直すと、何もないまま 5 秒たって heartbeat の出来事だけで 1 つのターンが始まる（`delivery` は `now`、中身は `/sources/heartbeat/` にある）。偽のモデルは地の文もツールも無しで終え、畳む前の頼みは送られない。
 17. 夜の制御の出来事で、振り返り → 整理係 → 新しいセッションが回り、`handoff.md` と整理係の変えたものがコミットされる。新しいセッションのシステムプロンプトに `handoff.md` が入り、前の日の会話は無い。次の切り替えの後も、ターンは回り続ける。

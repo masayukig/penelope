@@ -29,11 +29,12 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_OWNER_GITHUB_ID` | なし | オーナーの GitHub の数値の user ID |
 | `PENELOPE_TIME_ZONE` | `TZ`、それも無ければ `UTC` | 時間帯。`/sources` の日付、起きている時間、cron の式に使う |
 | `PENELOPE_AWAKE_HOURS` | `07:00-23:00` | 起きている時間（`HH:MM-HH:MM`、始まりを含み終わりを含まない。日をまたいでよい。始まりと終わりが同じならいつも起きている） |
-| `PENELOPE_NIGHTLY_CRON` | `0 4 * * *` | 夜の切り替えの時刻（5 欄の cron の式） |
+| `PENELOPE_NIGHTLY_CRON` | `0 4 * * *` | 夜の切り替えの時刻（5 欄の cron の式）。テスト用に、先頭に秒の欄を足した 6 欄も受ける（例: `*/20 * * * * *`） |
 | `PENELOPE_BATCH_QUIET_MINUTES` | `5` | `batch` の N（最後の 1 件から待つ分） |
 | `PENELOPE_BATCH_MAX_MINUTES` | `30` | `batch` の M（最初の 1 件から待つ最長の分） |
 | `PENELOPE_REDELIVER_MINUTES` | `5` | 渡して ack の無い出来事をもう一度渡すまでの分 |
 | `PENELOPE_HEARTBEAT_MINUTES` | なし | heartbeat の N（本体の最後のターンの終わりから待つ分）。無ければ heartbeat は無い（下の「heartbeat」） |
+| `PENELOPE_HEARTBEAT_SECONDS` | なし | テスト用。heartbeat の N を秒で決める。`PENELOPE_HEARTBEAT_MINUTES` と一緒には置けない |
 | `PENELOPE_DELIVERY_UI`・`_CRON`・`_A2A`・`_SELF`・`_JOB` | `now` | backend の中の受信元の `delivery` の既定 |
 | `PENELOPE_INLINE_SOURCES` | `ui,job` | inline の受信元（`,` で区切る）。`control` は書かなくても常に inline。書くと既定を置き換えるので、裏の仕事の終わりを inline のままにするなら `job` も書く。Slack のプラグインの出来事を描いて載せる配置は、その `source` も書く（[events.md](events.md) の「Slack の出来事」） |
 | `PENELOPE_GIT_AUTHOR_NAME` | `penelope-backend` | `/memory` のコミットの作者の名前 |
@@ -112,6 +113,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 [ADR-0007](adr/0007-one-session-switched-nightly-with-a-one-turn-curator.md) と [sandbox-api.md](sandbox-api.md) の「セッションの切り替えの知らせ」の、backend の役目を決める。
 
 - `PENELOPE_NIGHTLY_CRON` の時刻に、`source` が `control`、`id` が `nightly@<時刻>`、`payload` が `{kind: "nightly"}` の出来事を列に入れる。backend が止まっていて時刻を過ぎたものは、後から入れない。次の夜を待つ。
+- 時刻は 15 秒ごとに確かめる。テスト用の秒の欄で夜どうしの間が 1 分より短いときは、1 秒ごとに確かめる。
 - backend は切り替えの段を数えない。制御の出来事も、ほかの出来事と同じく、ack が無ければ `PENELOPE_REDELIVER_MINUTES` の後にもう一度渡すだけである。
 - 切り替えの知らせ（`POST /v1/sessions/rotated`）は記録に残す。
 - 切り替えの途中で runner が止まったときにどこからやり直すか、整理係のターンが失敗したときにどうするかは、runner が決める。
@@ -120,8 +122,8 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 
 [ADR-0031](adr/0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md) の、backend が何もない時間に入れる出来事の細部を決める。形は [events.md](events.md) の「heartbeat の出来事」。
 
-- `PENELOPE_HEARTBEAT_MINUTES` があるときだけ動く。既定は無し（切ってある）。
-- backend は 15 秒ごとに確かめ、次のすべてが揃えば heartbeat の出来事を 1 件入れる。遅れは最大で 15 秒である。
+- `PENELOPE_HEARTBEAT_MINUTES`（テストでは `PENELOPE_HEARTBEAT_SECONDS`）があるときだけ動く。既定は無し（切ってある）。
+- backend は 15 秒ごとに確かめ、次のすべてが揃えば heartbeat の出来事を 1 件入れる。遅れは最大で 15 秒である。N が 1 分より短いとき（テストだけ）は 1 秒ごとに確かめる。
   - 今が起きている時間（`PENELOPE_AWAKE_HOURS`）の中である。
   - 本体（`main`）が待っている。途中経過の記録の最後が `turn_end` か、まだ記録が無い（「状態」）。
   - その `turn_end` の時刻から N 分以上たっている。まだターンが無ければ、backend が立ち上がった時刻から数える。

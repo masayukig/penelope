@@ -59,8 +59,8 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 
 - 起きている時間に、本体の最後のターンの終わりから決めた時間がたつと、backend が `source` が `heartbeat` の出来事を 1 件入れる（[ADR-0031](adr/0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md)）。いつ入れるか、入れないかは [backend.md](backend.md) の「heartbeat」。
 - `id` は `heartbeat@<入れた時刻>`、`occurred_at` は入れた時刻、`stream` は無い。`delivery` はいつも `now` で、待っている `batch` の出来事を連れていく。
-- `summary` は `no turn for <N> minutes`（N が 1 なら `minute`）。
-- `payload` は `since`（数え始めた時刻。最後のターンの終わり、まだターンが無ければ backend が立ち上がった時刻）と `quiet_minutes`（N）（型は `HeartbeatPayload`）。何をすべきかは書かない。
+- `summary` は `no turn for <N> minutes`（N が 1 なら `minute`）。N をテスト用に秒で決めて分で割り切れないときは `no turn for <秒> seconds`。
+- `payload` は `since`（数え始めた時刻。最後のターンの終わり、まだターンが無ければ backend が立ち上がった時刻）と `quiet_minutes`（N。テスト用の秒では端数になる）（型は `HeartbeatPayload`）。何をすべきかは書かない。
 - inline ではない。ターンには要約と場所だけが入る。
 - この出来事だけで始まり、ツールを 1 つも呼ばずに終わったターンでは、runner は畳む前の頼みを送らない。途中でほかの出来事が入ったターン、ほかの出来事と一緒に渡されたターンは、ほかのターンと同じく頼む（[ADR-0015](adr/0015-fold-ended-turns-before-they-are-sent.md)）。
 

@@ -62,7 +62,8 @@ export type CronPayload = { schedule_id: string; reason: string };
 /**
  * The payload of a `heartbeat` event (ADR-0031): the awake hours went
  * `quiet_minutes` with no turn, counted from `since` (when her last turn
- * ended, or when the backend started if she has had none).
+ * ended, or when the backend started if she has had none). A fraction only
+ * when the tests set the quiet time in seconds.
  */
 export type HeartbeatPayload = { since: string; quiet_minutes: number };
 

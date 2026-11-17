@@ -57,3 +57,11 @@ export class AwakeHours {
 }
 
 export const iso = (ms: number): string => new Date(ms).toISOString();
+
+/**
+ * How often a clock ticks that watches for a time `everyMs` apart: every
+ * 15 s, or every second when that is under a minute, as only the tests set.
+ */
+export function tickMs(everyMs: number): number {
+  return everyMs < 60_000 ? 1_000 : 15_000;
+}

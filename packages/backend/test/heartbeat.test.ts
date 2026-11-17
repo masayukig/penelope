@@ -16,7 +16,10 @@ import { FakeClock, tempDir } from "./support.ts";
 
 const QUIET_MINUTES = 60;
 
-function setup(t: { after: (fn: () => void) => void }, { start = "2026-11-16T09:00:00Z", awake = "07:00-23:00" } = {}) {
+function setup(
+  t: { after: (fn: () => void) => void },
+  { start = "2026-11-16T09:00:00Z", awake = "07:00-23:00", quietMs = QUIET_MINUTES * 60_000 } = {},
+) {
   const dir = tempDir(t);
   const clock = new FakeClock(start);
   const db = openDatabase(path.join(dir, "backend.sqlite"));
@@ -31,7 +34,7 @@ function setup(t: { after: (fn: () => void) => void }, { start = "2026-11-16T09:
     redeliverMs: 5 * 60_000,
   });
   const conversation = new Conversation(db, new Feed(), { now: clock.now });
-  const heartbeat = new Heartbeat(queue, conversation, { now: clock.now, quietMs: QUIET_MINUTES * 60_000, awake: awakeHours, log: () => {} });
+  const heartbeat = new Heartbeat(queue, conversation, { now: clock.now, quietMs, awake: awakeHours, log: () => {} });
   let turns = 0;
   /** The runner's blocks of one turn: its start, or its end. */
   const turn = (kind: "turn_start" | "turn_end") => {
@@ -79,6 +82,22 @@ describe("the heartbeat", () => {
     // The payload is not handed over (heartbeat is not inline); it is in /sources.
     const line = JSON.parse(readFileSync(appended.path, "utf8").split("\n")[appended.lines[0] - 1]!);
     assert.deepEqual(line.payload, { since: "2026-11-16T09:00:00.000Z", quiet_minutes: QUIET_MINUTES });
+  });
+
+  it("says its seconds when they are not whole minutes (the tests'), and ticks every second for them", (t) => {
+    // Guards against: a heartbeat of the tests' seconds named as 0 minutes, or left for the 15 s tick.
+    t.mock.timers.enable({ apis: ["setInterval"] });
+    const { clock, queue, heartbeat, turn } = setup(t, { quietMs: 5_000 });
+    turn("turn_start");
+    turn("turn_end");
+    const stop = heartbeat.start();
+    t.after(stop);
+    clock.ms += 5_000;
+    t.mock.timers.tick(1_000);
+    const { summary, appended } = queue.take({ after: 0 })[0]!;
+    assert.equal(summary, "no turn for 5 seconds");
+    const line = JSON.parse(readFileSync(appended.path, "utf8").split("\n")[appended.lines[0] - 1]!);
+    assert.deepEqual(line.payload, { since: "2026-11-16T09:00:00.000Z", quiet_minutes: 5 / 60 });
   });
 
   it("is not queued while a turn runs", (t) => {

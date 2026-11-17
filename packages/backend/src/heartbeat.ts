@@ -5,7 +5,7 @@ import type { HeartbeatPayload } from "@penelope/contract";
 
 import type { Conversation } from "./conversation.ts";
 import type { Queue } from "./queue.ts";
-import { type AwakeHours, iso } from "./time.ts";
+import { type AwakeHours, iso, tickMs } from "./time.ts";
 
 export class Heartbeat {
   private readonly queue: Queue;
@@ -48,11 +48,10 @@ export class Heartbeat {
     if (now - from < this.quietMs) return;
     if (this.queue.hasUnacked()) return;
     const at = iso(now);
-    const minutes = Math.round(this.quietMs / 60_000);
-    const payload: HeartbeatPayload = { since: iso(from), quiet_minutes: minutes };
+    const payload: HeartbeatPayload = { since: iso(from), quiet_minutes: this.quietMs / 60_000 };
     try {
       this.queue.accept(
-        { source: "heartbeat", id: `heartbeat@${at}`, occurred_at: at, summary: `no turn for ${minutes} minute${minutes === 1 ? "" : "s"}`, payload },
+        { source: "heartbeat", id: `heartbeat@${at}`, occurred_at: at, summary: `no turn for ${quietText(this.quietMs)}`, payload },
         { builtin: true },
       );
     } catch (error) {
@@ -61,11 +60,17 @@ export class Heartbeat {
     }
   }
 
-  /** Ticks every `everyMs` until stopped. */
-  start(everyMs = 15_000): () => void {
+  /** Ticks every `everyMs` until stopped: by default as often as the quiet time asks. */
+  start(everyMs = tickMs(this.quietMs)): () => void {
     this.tick();
     this.timer = setInterval(() => this.tick(), everyMs);
     this.timer.unref();
     return () => clearInterval(this.timer);
   }
+}
+
+/** The quiet time in minutes, or in seconds when it is not whole minutes (the tests'). */
+function quietText(ms: number): string {
+  const [count, unit] = ms % 60_000 === 0 ? [ms / 60_000, "minute"] : [Math.round(ms / 1_000), "second"];
+  return `${count} ${unit}${count === 1 ? "" : "s"}`;
 }

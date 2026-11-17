@@ -148,6 +148,15 @@ describe("the configuration", () => {
     assert.equal(loadConfig({ PENELOPE_HEARTBEAT_MINUTES: "60" }, read).heartbeatMs, 60 * 60_000);
   });
 
+  it("takes the heartbeat in seconds for the tests, but not with its minutes too", () => {
+    assert.equal(loadConfig({ PENELOPE_HEARTBEAT_SECONDS: "5" }, read).heartbeatMs, 5_000);
+    assert.throws(() => loadConfig({ PENELOPE_HEARTBEAT_MINUTES: "1", PENELOPE_HEARTBEAT_SECONDS: "5" }, read), ConfigError);
+  });
+
+  it("takes a nightly cron with a field of seconds first, for the tests", () => {
+    assert.equal(loadConfig({ PENELOPE_NIGHTLY_CRON: "*/10 * * * * *" }, read).nightly, "*/10 * * * * *");
+  });
+
   it("refuses values it cannot use", () => {
     for (const env of [
       { PENELOPE_LISTEN: "8080" },
@@ -157,6 +166,9 @@ describe("the configuration", () => {
       { PENELOPE_BATCH_QUIET_MINUTES: "-1" },
       { PENELOPE_HEARTBEAT_MINUTES: "0" },
       { PENELOPE_HEARTBEAT_MINUTES: "an hour" },
+      { PENELOPE_HEARTBEAT_SECONDS: "0" },
+      { PENELOPE_HEARTBEAT_SECONDS: "1.5" },
+      { PENELOPE_NIGHTLY_CRON: "0 0 4 * * * *" },
       { PENELOPE_DELIVERY_UI: "later" },
       { PENELOPE_OWNER_GITHUB_ID: "someone" },
       { PENELOPE_PUBLIC_URL: "not a url" },
