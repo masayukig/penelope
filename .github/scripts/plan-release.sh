@@ -105,10 +105,24 @@ version="$(next_version)"
 # A run started again after a newer release finds that release's tag beyond
 # its HEAD: the version is taken, and releasing it would push images over
 # the ones that tag names. The checkout has every tag; origin is asked too,
-# for one pushed since.
-if git rev-parse --quiet --verify "refs/tags/${version}" > /dev/null \
-  || { git remote get-url origin > /dev/null 2>&1 \
-    && git ls-remote --exit-code --tags origin "refs/tags/${version}" > /dev/null; }; then
+# for one pushed since. Not reaching origin tells nothing either way, so the
+# plan fails then (ls-remote exits 2 only when no ref matches).
+tagged=false
+if git rev-parse --quiet --verify "refs/tags/${version}" > /dev/null; then
+  tagged=true
+elif git remote get-url origin > /dev/null 2>&1; then
+  status=0
+  git ls-remote --exit-code --tags origin "refs/tags/${version}" > /dev/null || status=$?
+  case "${status}" in
+    0) tagged=true ;;
+    2) ;;
+    *)
+      echo "error: could not ask origin whether ${version} is tagged (git ls-remote exited ${status})" >&2
+      exit 1
+      ;;
+  esac
+fi
+if [[ "${tagged}" == "true" ]]; then
   no_release "${version} is already tagged, on a commit HEAD does not reach"
   exit 0
 fi

@@ -118,3 +118,16 @@ test("the next version is not released when its tag already exists elsewhere", (
   git("checkout", "--quiet", "-");
   assert.match(plan(dir), /^no release: v0\.1\.1 is already tagged/);
 });
+
+// Not reaching origin says nothing about whether the version is tagged
+// there, so the plan fails rather than releasing a version that may be taken.
+test("the plan fails without releasing when origin cannot be reached", (t) => {
+  const dir = repositoryChanging(["packages/backend/package.json"]);
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  execFileSync("git", ["remote", "add", "origin", join(dir, "missing")], { cwd: dir, env });
+  const output = join(dir, "output");
+  assert.throws(() =>
+    execFileSync("bash", [script, dir], { env: { ...env, GITHUB_OUTPUT: output }, stdio: "pipe" }),
+  );
+  assert.doesNotMatch(readFileSync(output, { encoding: "utf8", flag: "a+" }), /^version=v/m);
+});

@@ -70,11 +70,22 @@ jobs:
       # pushing would overwrite that release's images.
       - name: The version is not tagged yet
         if: inputs.version != ''
+        # ls-remote exits 2 only when no ref matches. Any other failure says
+        # nothing about the tag, and stops the release too.
         run: |
-          if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" > /dev/null; then
-            echo "::error::${VERSION} is already tagged on origin; nothing is pushed"
-            exit 1
-          fi
+          status=0
+          git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" > /dev/null || status=$?
+          case "${status}" in
+            2) ;;
+            0)
+              echo "::error::${VERSION} is already tagged on origin; nothing is pushed"
+              exit 1
+              ;;
+            *)
+              echo "::error::could not ask origin whether ${VERSION} is tagged (git ls-remote exited ${status}); nothing is pushed"
+              exit 1
+              ;;
+          esac
       # The build stages run on the runner's own platform and the arm64
       # images only copy their output, but two final stages run commands of
       # their platform: the backend's installs git and the sandbox's installs
