@@ -6,6 +6,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test \"test/**/*.test.ts\" \"test/**/*.test.tsx\"",
+    "test-browser": "node --test \"browser/**/*.test.ts\"",
     "build": "node build.ts"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
     "@testing-library/react": "16.3.3",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "playwright-core": "1.58.2"
   }
 }
