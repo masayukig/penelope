@@ -1,19 +1,21 @@
-// Her schedules (docs/ui-api.md, "予約"), in the place of the events: each
-// with how it comes and when it comes next, and a button that removes it once
-// the owner confirms. She is not told; nothing here adds one.
+// Her schedules (docs/ui-api.md, "予約"; docs/design/README.md, 12), in the
+// place of the events and the schedules: by when they come next, a day at a
+// time, each with its time, its reason as a lead and the rest, how it comes
+// again, and a button that removes it once the owner confirms. She is not
+// told; nothing here adds one.
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Code } from "@astryxdesign/core/Code";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
-import { Item } from "@astryxdesign/core/Item";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 
 import type { ScheduleEntry } from "@penelope/contract";
 
 import { type Api, Refused, Unauthorized } from "../model/api.ts";
-import { dueOf, words } from "./words.ts";
+import { RepeatIcon } from "./icons.tsx";
+import { dueOf, rhythmOf, scheduleDayOf, splitReason, timeOf, words } from "./words.ts";
 
 export type SchedulesProps = {
   api: Api;
@@ -22,11 +24,34 @@ export type SchedulesProps = {
   topInset?: boolean;
 };
 
+/** A schedule as the screen shows it. */
+type Row = { schedule: ScheduleEntry; lead: string; rest?: string; rhythm?: string };
+
+function rowOf(schedule: ScheduleEntry): Row {
+  const rhythm = schedule.cron === undefined ? undefined : rhythmOf(schedule.cron);
+  return { schedule, ...splitReason(schedule.reason), ...(rhythm === undefined ? {} : { rhythm }) };
+}
+
+/** By when they come next, under the day they come on. */
+function daysOf(schedules: ScheduleEntry[]): Array<{ label: string; rows: Row[] }> {
+  const sorted = [...schedules].sort((a, b) => Date.parse(a.next_at) - Date.parse(b.next_at));
+  const days: Array<{ label: string; rows: Row[] }> = [];
+  for (const schedule of sorted) {
+    const label = scheduleDayOf(schedule.next_at);
+    const last = days.at(-1);
+    if (last?.label === label) last.rows.push(rowOf(schedule));
+    else days.push({ label, rows: [rowOf(schedule)] });
+  }
+  return days;
+}
+
 export function Schedules({ api, onUnauthorized, topInset = false }: SchedulesProps) {
   const [schedules, setSchedules] = useState<ScheduleEntry[] | undefined>(undefined);
   const [failed, setFailed] = useState<string | undefined>(undefined);
-  const [asked, setAsked] = useState<ScheduleEntry | undefined>(undefined);
+  const [asked, setAsked] = useState<Row | undefined>(undefined);
   const [removing, setRemoving] = useState(false);
+  const [opened, setOpened] = useState<string | undefined>(undefined);
+  const id = useId();
 
   const fail = useCallback(
     (error: unknown, word: string) => {
@@ -62,28 +87,44 @@ export function Schedules({ api, onUnauthorized, topInset = false }: SchedulesPr
     }
   };
 
+  const days = schedules === undefined ? [] : daysOf(schedules);
+  const next = days[0]?.rows[0];
+
   return (
     <div className={topInset ? "page page-inset" : "page"}>
-      <section className="page-body" aria-labelledby="schedules-heading">
-        <Heading level={1}>
-          <span id="schedules-heading">{words.schedules}</span>
-        </Heading>
+      <section className="page-body schedules-page" aria-labelledby={`${id}-heading`}>
+        <div className="schedules-head">
+          <Heading level={1}>
+            <span id={`${id}-heading`}>{words.schedules}</span>
+          </Heading>
+          {next === undefined || schedules === undefined ? null : (
+            <span className="schedules-summary">
+              {words.scheduleCount(schedules.length)} ・ {words.scheduleNext} {dueOf(next.schedule.next_at)}
+            </span>
+          )}
+        </div>
         {failed === undefined ? null : <Banner status="error" title={failed} />}
         {schedules === undefined ? null : schedules.length === 0 ? (
           <EmptyState title={words.schedulesNone} description={words.schedulesNoneBody} headingLevel={2} />
         ) : (
-          <ul className="schedules" aria-label={words.schedules}>
-            {schedules.map((schedule) => (
-              <Item
-                key={schedule.id}
-                as="li"
-                label={schedule.reason}
-                labelLines={2}
-                description={<When schedule={schedule} />}
-                endContent={<Button label={words.scheduleRemove} variant="secondary" size="sm" onClick={() => setAsked(schedule)} />}
-              />
-            ))}
-          </ul>
+          days.map((day, index) => (
+            <section key={day.label} className="schedule-day" aria-labelledby={`${id}-day-${index}`}>
+              <h2 id={`${id}-day-${index}`} className="schedule-day-label">
+                {day.label}
+              </h2>
+              <ul className="schedules" aria-labelledby={`${id}-day-${index}`}>
+                {day.rows.map((row) => (
+                  <ScheduleRow
+                    key={row.schedule.id}
+                    row={row}
+                    open={opened === row.schedule.id}
+                    onToggle={() => setOpened((now) => (now === row.schedule.id ? undefined : row.schedule.id))}
+                    onRemove={() => setAsked(row)}
+                  />
+                ))}
+              </ul>
+            </section>
+          ))
         )}
       </section>
       <AlertDialog
@@ -92,35 +133,42 @@ export function Schedules({ api, onUnauthorized, topInset = false }: SchedulesPr
           if (!open && !removing) setAsked(undefined);
         }}
         title={words.scheduleConfirm}
-        description={asked === undefined ? "" : words.scheduleConfirmBody(asked.reason)}
+        description={asked === undefined ? "" : words.scheduleConfirmBody(asked.lead, asked.rhythm, asked.schedule.cron)}
         actionLabel={words.scheduleRemove}
         cancelLabel={words.scheduleKeep}
         isActionLoading={removing}
         onAction={() => {
-          if (asked !== undefined) void remove(asked);
+          if (asked !== undefined) void remove(asked.schedule);
         }}
       />
     </div>
   );
 }
 
-/** A cron one: its expression and when next. A one-time one: when. */
-function When({ schedule }: { schedule: ScheduleEntry }) {
-  if (schedule.cron !== undefined) {
-    return (
-      <span className="schedule-when">
-        <Code color="inherit">{schedule.cron}</Code>
-        <span>
-          {words.scheduleNext} {dueOf(schedule.next_at)}
-        </span>
-      </span>
-    );
-  }
+/** One schedule: its time, the lead and the rest (whole when open), how it comes, and the button that removes it. */
+function ScheduleRow({ row, open, onToggle, onRemove }: { row: Row; open: boolean; onToggle: () => void; onRemove: () => void }) {
+  const { schedule } = row;
   return (
-    <span className="schedule-when">
-      <span>
-        {words.scheduleOnce} {dueOf(schedule.next_at)}
-      </span>
-    </span>
+    <li className="schedule">
+      <span className="schedule-time">{timeOf(schedule.next_at)}</span>
+      <button type="button" className="schedule-open" aria-expanded={open} onClick={onToggle}>
+        <span className="schedule-lead">{row.lead}</span>
+        {row.rest === undefined ? null : <span className={open ? "schedule-rest open" : "schedule-rest"}>{row.rest}</span>}
+        <span className="schedule-how">
+          {schedule.cron === undefined ? (
+            <span>{words.scheduleOnce}</span>
+          ) : (
+            <>
+              <RepeatIcon width={14} height={14} />
+              {row.rhythm === undefined ? null : <span>{row.rhythm}</span>}
+              <Code color="inherit">{schedule.cron}</Code>
+            </>
+          )}
+        </span>
+      </button>
+      <Button className="schedule-remove" label={words.scheduleRemoveOf(row.lead)} variant="ghost" onClick={onRemove}>
+        {words.scheduleRemove}
+      </Button>
+    </li>
   );
 }
