@@ -178,10 +178,22 @@ body {
   flex-direction: column;
   gap: 4px;
 }
+/* A very long first sentence is cut at two lines until the row is opened. */
 .schedule-lead {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
   font-size: 15px;
   font-weight: 600;
   text-wrap: pretty;
+}
+.schedule-open[aria-expanded="true"] .schedule-lead {
+  display: block;
+  -webkit-line-clamp: none;
+  line-clamp: none;
+  overflow: visible;
 }
 .schedule-rest {
   overflow: hidden;
