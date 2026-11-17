@@ -1,8 +1,15 @@
 # Once a week, releases the next patch version when every commit since the
-# latest vX.Y.Z tag, merge commits aside, is Renovate's and they changed
-# something that goes into a release. .github/scripts/plan-release.sh decides
-# and logs why; otherwise the run ends without a release, and the release is
-# left to a tag pushed by hand.
+# latest vX.Y.Z tag, merge commits aside, is a bot's (Renovate's or the
+# vulnerability responder's) and they changed something that goes into a
+# release. .github/scripts/plan-release.sh decides and logs why; otherwise
+# the run ends without a release, and the release is left to a tag pushed by
+# hand.
+#
+# The same release is made at once when a pull request of the vulnerability
+# responder's (a branch vuln-responder/... of this repository) is merged into
+# main, so that a fix does not wait for Monday. When a person's commit holds
+# it back, the job's summary lists the commits and the commands to release by
+# hand (ADR 0037).
 #
 # A tag pushed with the run's GITHUB_TOKEN starts no workflow, so this calls
 # release.yml itself with the version. release.yml builds from this commit and
@@ -14,17 +21,34 @@ on:
   schedule:
     - cron: "0 0 * * 1" # Monday 09:00 JST
   workflow_dispatch:
+  pull_request:
+    types: [closed]
+    branches: [main]
 
 permissions: {}
 
-# Two runs at once would both try to release the same version.
+# Two releases at once would both try to release the same version, so the
+# weekly and the at-once release share one group. Every other pull request
+# that is closed runs alone and does nothing: in the group it would cancel a
+# release waiting for its turn. A fix waiting is cancelled only by a later
+# one, whose merge commit carries the earlier fix too.
 concurrency:
-  group: ${{ github.workflow }}
+  group: >-
+    ${{ (github.event_name != 'pull_request'
+    || (github.event.pull_request.merged && startsWith(github.event.pull_request.head.ref, 'vuln-responder/')))
+    && 'weekly-release' || format('weekly-release-skipped-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
   plan:
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    # On a pull request, only a merged one of the vulnerability responder's,
+    # from a branch of this repository: a fork's is not released.
+    if: >-
+      (github.event_name != 'pull_request'
+      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+      || (github.event.pull_request.merged
+      && startsWith(github.event.pull_request.head.ref, 'vuln-responder/')
+      && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -39,8 +63,22 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # release.yml builds the images and tags github.sha. For a merged pull
+      # request that has to be the commit the merge left on main; nothing is
+      # released if it is not.
+      - name: The merge commit is checked out
+        if: github.event_name == 'pull_request'
+        env:
+          MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          if [ "${MERGE_COMMIT}" != "${GITHUB_SHA}" ] || [ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]; then
+            echo "::error::the merge commit ${MERGE_COMMIT} is not the commit checked out, ${GITHUB_SHA}"
+            exit 1
+          fi
       - id: plan
-        run: .github/scripts/plan-release.sh
+        env:
+          TRIGGER: ${{ github.event_name == 'pull_request' && '--vuln-fix' || '' }}
+        run: .github/scripts/plan-release.sh ${TRIGGER}
 
   release:
     needs: plan
