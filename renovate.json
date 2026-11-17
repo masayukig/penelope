@@ -125,6 +125,12 @@
       "enabled": false
     },
     {
+      "description": "The kustomize examples (deploy/kubernetes/example/ and migrate/) name the images of one release, always the same version. Grouping them moves the four on one branch, so the example is never left with two versions",
+      "matchManagers": ["kustomize"],
+      "matchPackageNames": ["ghcr.io/yuanying/penelope-*"],
+      "groupName": "penelope images"
+    },
+    {
       "description": "@types/node describes the Node the code runs on, and its major follows Node's. A new major of it arrives before that Node is an LTS release the images can take, and type-checking against it would accept APIs the runtime lacks. Its major is raised by hand together with the node group",
       "matchPackageNames": ["@types/node"],
       "matchUpdateTypes": ["major"],

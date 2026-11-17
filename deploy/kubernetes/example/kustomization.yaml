@@ -19,13 +19,13 @@ components:
 # The four images of one release, always the same version.
 images:
 - name: ghcr.io/yuanying/penelope-sentinel
-  newTag: v0.8.0
+  newTag: v0.9.1
 - name: ghcr.io/yuanying/penelope-backend
-  newTag: v0.8.0
+  newTag: v0.9.1
 - name: ghcr.io/yuanying/penelope-sandbox
-  newTag: v0.8.0
+  newTag: v0.9.1
 - name: ghcr.io/yuanying/penelope-receivers
-  newTag: v0.8.0
+  newTag: v0.9.1
 
 configMapGenerator:
 - name: penelope-backend-env

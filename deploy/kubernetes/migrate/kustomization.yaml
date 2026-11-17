@@ -15,7 +15,7 @@ resources:
 # replace: the same version as the deployment's images.
 images:
 - name: ghcr.io/yuanying/penelope-sandbox
-  newTag: v0.8.0
+  newTag: v0.9.1
 
 configMapGenerator:
 - name: penelope-migrate

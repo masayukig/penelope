@@ -3,7 +3,8 @@
 penelope の Pod（[docs/pod.md](../../docs/pod.md)）を Kubernetes で動かすための、kustomize の見本である。
 1 人のエージェントを 1 つの名前空間に、1 つの StatefulSet（replicas 1）で置く。
 
-- 対象の版は **v0.9.0 以降**。v0.9.0 から、道具の使い方と誰にも同じ skill（`self-portrait`・`goals` など）が sandbox の image の skill に入り（[ADR-0035](../../docs/adr/0035-tool-usage-and-shared-skills-as-image-skills.md)）、アバターは記憶の `/memory/avatar/` で育つ（[ADR-0036](../../docs/adr/0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md)）。配置が渡すのは、その配置だけのことである。
+- 対象の版は **v0.9.1 以降**。v0.9.0 から、道具の使い方と誰にも同じ skill（`self-portrait`・`goals` など）が sandbox の image の skill に入り（[ADR-0035](../../docs/adr/0035-tool-usage-and-shared-skills-as-image-skills.md)）、アバターは記憶の `/memory/avatar/` で育つ（[ADR-0036](../../docs/adr/0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md)）。配置が渡すのは、その配置だけのことである。
+- v0.9.0 は使わない。v0.9.0 の backend が記憶に写したアバターは、`/memory` の set-group-ID が効かない配置では backend のグループのまま残り、エージェントが上書きできない。v0.9.1 から、写したものを `/memory` のグループにする（[docs/backend.md](../../docs/backend.md) の「アバター」）。アバターは最初の起動で 1 回だけ写されるので、v0.9.0 で写した後に版を上げても直らない。
 - natsumi のインスタンスから移すなら、[natsumi からの移行の手引き](../../docs/migrate-from-natsumi.md)に沿って、この見本から新しい配置を作る。
 - `example/` の値はすべて作りものである。そのままでは動かない。下の「置き換える値」を自分のものにする。
 
@@ -31,7 +32,7 @@ components:
 - https://github.com/yuanying/penelope//deploy/kubernetes/components/backup?ref=v0.9.1
 images:
 - name: ghcr.io/yuanying/penelope-sentinel
-  newTag: v0.9.0
+  newTag: v0.9.1
 # backend・sandbox・receivers も同じ版にする
 ```
 
@@ -97,7 +98,7 @@ base が決めている場所:
 | 場所 | 値 | 置き換えるもの |
 | --- | --- | --- |
 | `kustomization.yaml` | `namespace: penelope`、`namespace.yaml` | 名前空間 |
-| `kustomization.yaml` | `newTag: v0.8.0` | 使う版（v0.9.0 以降）。4 つとも同じ版 |
+| `kustomization.yaml` | `images` の `newTag` | 使う版（v0.9.1 以降）。4 つとも同じ版 |
 | `backend.env`・`sandbox/env` | `https://penelope.example.com` | backend に届く公開の URL |
 | `backend.env` | `PENELOPE_GITHUB_CLIENT_ID`・`PENELOPE_OWNER_GITHUB_ID` | GitHub の OAuth App の client ID と、オーナーの数値の user ID（`gh api users/<名前> --jq .id`） |
 | `backend.env` | `PENELOPE_TIME_ZONE`・`PENELOPE_AWAKE_HOURS`・`PENELOPE_NIGHTLY_CRON`・`PENELOPE_HEARTBEAT_MINUTES` | 時間帯、起きている時間、夜の切り替え、heartbeat |
