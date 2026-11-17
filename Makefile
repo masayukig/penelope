@@ -117,9 +117,12 @@ test-renovate: ## Check the sandbox tools' Renovate extraction and release tag f
 
 # The Kubernetes example (deploy/kubernetes/) has to stay buildable by
 # kustomize; go test ./... checks that its settings agree with each other.
+# The migrate Pod and its tool for natsumi's schedules are checked here too.
 .PHONY: test-deploy
-test-deploy: ## Build the Kubernetes example with kustomize.
+test-deploy: ## Build the Kubernetes example and the migrate Pod with kustomize, and test the migrate tool.
 	$(GO) tool kustomize build deploy/kubernetes/example > /dev/null
+	$(GO) tool kustomize build deploy/kubernetes/migrate > /dev/null
+	node --test deploy/kubernetes/migrate/move-schedules.test.mjs
 
 .PHONY: test-go
 test-go: ## Unit tests of the Go module.

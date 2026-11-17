@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The migrate Pod, for moving from natsumi (docs/migrate-from-natsumi.md).
+# Applied only for the copy and deleted after it; the deployment's overlay
+# does not list it.
+#
+# replace: the namespace of natsumi's PVC. A Pod mounts PVCs of its own
+# namespace only, so the new deployment is in the same one.
+namespace: penelope
+
+resources:
+- pod.yaml
+
+# replace: the same version as the deployment's images.
+images:
+- name: ghcr.io/yuanying/penelope-sandbox
+  newTag: v0.8.0
+
+configMapGenerator:
+- name: penelope-migrate
+  files:
+  - copy.sh
+  - check.sh
+  - move-schedules.mjs
