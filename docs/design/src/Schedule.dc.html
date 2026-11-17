@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>予約の一覧</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="--color-background-body: light-dark(#f1f1f1, #1b1b1b); --color-text-primary: light-dark(#000000, #ffffff); --color-text-secondary: light-dark(#474747, #9e9e9e); --color-border: light-dark(#00000014, #ffffff1A); --color-neutral: light-dark(#0000000F, #ffffff1A); width: 100%; box-sizing: border-box; padding: {{pad}} 20px 48px; background: var(--color-background-body); color: var(--color-text-primary); font-family: Figtree, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif; font-size: 14px; line-height: 1.6">
+<div style="width: 100%; max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px">
+
+<div style="display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap">
+<h1 style="margin: 0; font-size: 28px; font-weight: 600; line-height: 1.3">予約</h1>
+<span style="color: var(--color-text-secondary)">7 件 ・ 次は 明日 6:00</span>
+</div>
+
+<sc-for list="{{days}}" as="day" hint-placeholder-count="3">
+<section style="display: flex; flex-direction: column">
+<h2 style="margin: 0; padding-bottom: 8px; border-bottom: 1px solid var(--color-border); font-size: 12px; font-weight: 600; color: var(--color-text-secondary)">{{day.label}}</h2>
+<ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">
+<sc-for list="{{day.items}}" as="it" hint-placeholder-count="2">
+<li style="display: flex; align-items: flex-start; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--color-border)">
+<span style="flex: 0 0 56px; padding-top: 10px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums">{{it.time}}</span>
+<button type="button" onClick="{{it.toggle}}" aria-expanded="{{it.openStr}}" style="flex: 1 1 160px; min-width: 0; min-height: 44px; padding: 8px 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 15px; font-weight: 600; text-wrap: pretty">{{it.lead}}</span>
+<sc-if value="{{it.closed}}" hint-placeholder-val="{{ true }}">
+<span style="overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; color: var(--color-text-secondary)">{{it.rest}}</span>
+</sc-if>
+<sc-if value="{{it.open}}" hint-placeholder-val="{{ false }}">
+<span style="font-size: 13px; color: var(--color-text-secondary); overflow-wrap: anywhere">{{it.rest}}</span>
+</sc-if>
+<span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--color-text-secondary)">
+<sc-if value="{{it.repeat}}" hint-placeholder-val="{{ true }}">
+<svg aria-hidden="true" style="flex: none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l4 4-4 4"/><path d="M3 11V9a2 2 0 0 1 2-2h16"/><path d="M7 21l-4-4 4-4"/><path d="M21 13v2a2 2 0 0 1-2 2H3"/></svg>
+</sc-if>
+<span>{{it.rhythm}}</span>
+<sc-if value="{{it.repeat}}" hint-placeholder-val="{{ true }}">
+<code style="padding: 1px 6px; border-radius: 0.375rem; background: var(--color-neutral); font-family: ui-monospace, 'SF Mono', Monaco, Consolas, monospace; font-size: 11px">{{it.cron}}</code>
+</sc-if>
+</span>
+</button>
+<button type="button" aria-label="{{it.cancelLabel}}" style="flex: none; min-height: 44px; padding: 0 14px; border: 1px solid var(--color-border); border-radius: 0.625rem; background: transparent; color: var(--color-text-secondary); font: inherit; font-size: 13px; cursor: pointer">取り消す</button>
+</li>
+</sc-for>
+</ul>
+</section>
+</sc-for>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"pad":{"editor":"text","default":"24px"},"$preview":{"width":760,"height":980}}'>
+class Component extends DCLogic {
+renderVals() {
+const s = this.state || {};
+const days = [
+{ label: '明日 ・ 11月18日(水)', items: [
+{ id: 'cal', time: '6:00', lead: '朝の予定を確かめる', rest: 'カレンダー係に今日の予定を聞いて、気になるものがあればまとめて知らせる。', rhythm: '毎日 6:00', cron: '0 6 * * *' },
+{ id: 'patrol', time: '7:00', lead: '朝のクラスタの見回り', rest: 'ノードと Pod の様子を確かめ、再起動が続いているものや容量が足りないものがあれば、手順と合わせて知らせる。', rhythm: '毎日 7:00', cron: '0 7 * * *' },
+{ id: 'news', time: '8:00', lead: 'ニュースを集める', rest: 'Kubernetes と関心のある話題を優先して、多くても 20 件にまとめて知らせる。', rhythm: '毎日 8:00', cron: '0 8 * * *' }
+] },
+{ label: '11月19日(木)', items: [
+{ id: 'r1', time: '9:00', lead: '読書会の前日に知らせる', rest: '日時と場所を添える。知らせる前に、予定が変わっていないかを確かめる。', rhythm: '1 回だけ', cron: '' }
+] },
+{ label: '11月20日(金)', items: [
+{ id: 'r2', time: '9:00', lead: '読書会の当日に知らせる', rest: '時刻と場所を添える。', rhythm: '1 回だけ', cron: '' }
+] },
+{ label: '11月22日(日)', items: [
+{ id: 'tidy', time: '18:00', lead: '週ごとの片付け', rest: '作業の場所の古いファイルを日付ごとにまとめて移す。使っているファイルは残す。', rhythm: '毎週 日曜 18:00', cron: '0 18 * * 0' }
+] },
+{ label: '2027年1月5日(火)', items: [
+{ id: 'year', time: '9:00', lead: '使っていない鍵を洗い出して知らせる', rest: '1 年使っていないものがあれば、消す手順と合わせて伝える。', rhythm: '毎年 1月5日 9:00', cron: '0 9 5 1 *' }
+] }
+];const openId = s.openId ?? null;
+return {
+pad: this.props.pad ?? '24px',
+days: days.map((d) => ({ label: d.label, items: d.items.map((it) => ({
+time: it.time, lead: it.lead, rest: it.rest, rhythm: it.rhythm, cron: it.cron,
+repeat: it.cron !== '',
+open: openId === it.id,
+closed: openId !== it.id,
+openStr: openId === it.id ? 'true' : 'false',
+cancelLabel: it.lead + ' を取り消す',
+toggle: () => this.setState({ openId: openId === it.id ? null : it.id })
+})) }))
+};
+}
+}
+</script>
+</body>
+</html>
