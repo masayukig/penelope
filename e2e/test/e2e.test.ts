@@ -507,7 +507,7 @@ describe("the Pod end to end", () => {
 
   it("takes GitHub's request for a review in the receivers, and brings it into a turn as a batch", track(async () => {
     // Guards against: a delivery reaching the agent without GitHub's signature, a request for a review not reaching a
-    // turn after its batch wait, a redelivery written twice, or a pull request outside the authors coming in.
+    // turn as a batch, a redelivery written twice, or a pull request outside the authors coming in.
     const secret = readFileSync(join(RUN_DIR, "github-webhook-secret"), "utf8").trim();
     const url = new URL("/v1/webhooks/github", pod.url);
     url.port = "8081";
@@ -552,12 +552,16 @@ describe("the Pod end to end", () => {
     assert.deepEqual([lines[0].id, lines[0].payload.delivery, lines[0].payload.reviewer, lines[0].payload.author], [delivery, delivery, "example-operator", "renovate[bot]"]);
     assert.equal(JSON.stringify(lines[0]).includes("This PR contains"), false, "the body of the pull request is left out");
 
-    // A batch waits for its quiet minute, then reaches a turn of its own.
-    await replied("E2E-REPLY-GITHUB", 180_000);
+    // The batch waits for its quiet minutes; a now brings it along, as the receiver's batch was brought, rather than
+    // the test waiting them out. The batch's own wait is the queue's unit tests'.
+    assert.equal(intake({ source: "e2e", stream: "github", id: "github-now", occurred_at: new Date().toISOString(), summary: "E2E-GITHUB-NOW ping", delivery: "now", payload: {} }), "202");
+    await replied("E2E-REPLY-GITHUB");
     const calls = await callsFor("E2E-GITHUB", 0);
-    assert.equal(calls.length, 1, "one turn for the request");
-    const [line] = eventLines(where(calls[0]!).input);
-    assert.ok(line && line.kind === "batch", JSON.stringify(line));
+    assert.equal(calls.length, 1, "one turn for the request and the now");
+    const turn = eventLines(where(calls[0]!).input);
+    assert.ok(turn.some((line) => line.kind === undefined && line.summary === "E2E-GITHUB-NOW ping"), JSON.stringify(turn));
+    const line = turn.find((line) => line.kind === "batch");
+    assert.ok(line && line.kind === "batch", JSON.stringify(turn));
     assert.deepEqual(
       [line.source, line.stream, line.count, line.summary, line.appended],
       ["github", "example-org.example-repo", 1, "[review requested] example-org/example-repo#7: E2E-GITHUB Update dependency example to v1.2.3", [{ path: file, lines: [1, 1] }]],
@@ -876,51 +880,42 @@ describe("the Pod end to end", () => {
     assert.equal(textOf(list.messages.findLast((message) => message.role === "tool")!.content), "[]");
   }));
 
-  it("makes a turn of a heartbeat after the quiet minutes, and asks nothing before folding it", track(async () => {
+  it("makes a turn of a heartbeat after the quiet time, and asks nothing before folding it", track(async () => {
     // Guards against: no heartbeat after a quiet stretch (ADR-0031), a heartbeat that carries more than the fact,
-    // a second one queued before the first one's turn has ended, or a heartbeat's turn with no tool costing a
-    // second call for the request before folding.
-    // The backend is made again with a heartbeat after one quiet minute; the next scenario makes it again without.
-    composeEnv.PENELOPE_E2E_HEARTBEAT_MINUTES = "1";
+    // or a heartbeat's turn with no tool costing a second call for the request before folding. That a second one
+    // is counted again from the end of the first one's turn is the backend's unit tests' (test/heartbeat.test.ts).
+    // The backend is made again with a heartbeat after a few quiet seconds; the next scenario makes it again without.
+    composeEnv.PENELOPE_E2E_HEARTBEAT_SECONDS = "5";
     try {
       stream.close();
       compose(["up", "--detach", "--no-deps", "backend"]);
       await eventually("the backend's health", async () => ((await browser.request("/healthz")).status === 200 ? true : undefined));
 
-      // The second heartbeat comes only after the first one's turn has ended and a quiet minute has gone.
       const isHeartbeat = (call: ModelCall) => where(call).input.includes('"source":"heartbeat"');
-      const [first, second] = await eventually(
-        "two heartbeats' turns",
-        async () => {
-          const calls = (await outside.modelCalls()).filter(isHeartbeat);
-          return calls.length >= 2 ? calls : undefined;
-        },
-        240_000,
-      );
-      assert.ok(Date.parse(second!.at) - Date.parse(first!.at) >= 60_000, "counted again from the end of the first one's turn");
+      const first = await eventually("a heartbeat's turn", async () => (await outside.modelCalls()).find(isHeartbeat));
 
       const lines = eventLines(where(first!).input);
       assert.equal(lines.length, 1, "the heartbeat alone");
       const [line] = lines as (TurnLine & Record<string, unknown>)[];
       assert.equal(line!.source, "heartbeat");
       assert.equal(line!.delivery, "now");
-      assert.equal(line!.summary, "no turn for 1 minute");
+      assert.equal(line!.summary, "no turn for 5 seconds");
       assert.match(String((line!.appended as { path: string }).path), /^\/sources\/heartbeat\/\d{4}-\d{2}-\d{2}\.jsonl$/);
       assert.ok(where(first!).system.includes("`heartbeat`"), "the system prompt says what a heartbeat is");
 
       // No turn of the test is asked (outside/model.ts), so any request before folding is the heartbeat's.
       assert.ok(!(await outside.modelCalls()).some((call) => where(call).input.includes("about to be folded")), "no request before folding");
     } finally {
-      delete composeEnv.PENELOPE_E2E_HEARTBEAT_MINUTES;
+      delete composeEnv.PENELOPE_E2E_HEARTBEAT_SECONDS;
     }
   }));
 
-  // Last, as from here on a night comes every minute.
+  // Last, as from here on a night comes every 20 seconds.
   it("switches the session at night: reflection, curator, a new session, and handoff.md committed", track(async () => {
     // Guards against: the nightly switch not running through, or the new session not starting from handoff.md.
-    // The backend is made again with a night every minute, so that the test waits for the next minute
+    // The backend is made again with a night every 20 seconds, so that the test waits for the next one
     // whatever time it is and however long the start took.
-    composeEnv.PENELOPE_E2E_NIGHTLY_CRON = "* * * * *";
+    composeEnv.PENELOPE_E2E_NIGHTLY_CRON = "*/20 * * * * *";
     stream.close();
     compose(["up", "--detach", "--no-deps", "backend"]);
     await eventually("the backend's health", async () => ((await browser.request("/healthz")).status === 200 ? true : undefined));
