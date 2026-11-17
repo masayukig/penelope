@@ -1,0 +1,76 @@
+# The Pod that copies one natsumi into the two PVCs of a penelope deployment
+# (docs/migrate-from-natsumi.md, "写す"). It takes natsumi's volume read-only
+# and only waits as root; the copy is run by hand with kubectl exec:
+#
+#   sh /migrate/copy.sh     memory (with its history) and the work place
+#   sh /migrate/check.sh    the counts of both sides, side by side
+#   node --no-warnings /migrate/move-schedules.mjs export ...   the schedules
+#
+# A PVC attaches to one node only. Make it while natsumi is stopped and
+# before the new StatefulSet is in, and delete it when the copy is done:
+# while it holds the PVCs, the new Pod cannot start on another node.
+#
+# The values to replace are marked "replace" (docs/migrate-from-natsumi.md,
+# "置き換える値").
+apiVersion: v1
+kind: Pod
+metadata:
+  name: penelope-migrate
+  labels:
+    app.kubernetes.io/name: penelope
+    app.kubernetes.io/component: migrate
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  containers:
+  - name: migrate
+    # The sandbox image has what the copy needs: cp, git, find and Node with
+    # node:sqlite. Its own command (the runner) is not used.
+    image: ghcr.io/yuanying/penelope-sandbox
+    command:
+    - sleep
+    - infinity
+    securityContext:
+      runAsUser: 0
+      runAsNonRoot: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 1Gi
+    volumeMounts:
+    # natsumi's data directory (--data-dir): memory/ (the work tree and .git),
+    # work/ (natsumi's /work), home/ (/home/natsumi), .natsumi/state.sqlite.
+    # Read only.
+    - name: natsumi
+      mountPath: /old
+      # replace: where the data directory is in natsumi's volume. Leave it
+      # out when it is the volume's top.
+      subPath: data
+      readOnly: true
+    # The new PVCs, as base/ names them: penelope holds home/ (/home/agent),
+    # backend/ and sources/; penelope-memory holds memory/ (/memory and .git).
+    - name: state
+      mountPath: /new/state
+    - name: memory
+      mountPath: /new/memory
+    - name: scripts
+      mountPath: /migrate
+      readOnly: true
+  volumes:
+  - name: natsumi
+    persistentVolumeClaim:
+      # replace: natsumi's PVC.
+      claimName: natsumi-data
+      readOnly: true
+  - name: state
+    persistentVolumeClaim:
+      claimName: penelope
+  - name: memory
+    persistentVolumeClaim:
+      claimName: penelope-memory
+  - name: scripts
+    configMap:
+      name: penelope-migrate

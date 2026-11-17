@@ -4,6 +4,7 @@ penelope の Pod（[docs/pod.md](../../docs/pod.md)）を Kubernetes で動か�
 1 人のエージェントを 1 つの名前空間に、1 つの StatefulSet（replicas 1）で置く。
 
 - 対象の版は **v0.9.0 以降**。v0.9.0 から、道具の使い方と誰にも同じ skill（`self-portrait`・`goals` など）が sandbox の image の skill に入り（[ADR-0035](../../docs/adr/0035-tool-usage-and-shared-skills-as-image-skills.md)）、アバターは記憶の `/memory/avatar/` で育つ（[ADR-0036](../../docs/adr/0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md)）。配置が渡すのは、その配置だけのことである。
+- natsumi のインスタンスから移すなら、[natsumi からの移行の手引き](../../docs/migrate-from-natsumi.md)に沿って、この見本から新しい配置を作る。
 - `example/` の値はすべて作りものである。そのままでは動かない。下の「置き換える値」を自分のものにする。
 
 ## 置き場
@@ -13,6 +14,7 @@ penelope の Pod（[docs/pod.md](../../docs/pod.md)）を Kubernetes で動か�
 | `base/` | 誰にも同じもの。StatefulSet（4 つのコンテナと init container）、init の台本（`init/`）、PVC 2 つ、Service、ServiceAccount |
 | `components/backup/` | 任意の部品。1 日 1 回の backup の CronJob（下の「backup」） |
 | `example/` | 1 人分の overlay の例。設定の ConfigMap、Ingress、名前空間、image の版、Slack・A2A・sd-webui・自分のアバターの例 |
+| `migrate/` | natsumi から移すときに 1 回だけ使う、作業用の Pod と予約を移す道具（[natsumi からの移行の手引き](../../docs/migrate-from-natsumi.md)） |
 | `example_test.go` | `example/` の設定どうしが合っていることの確かめ（`make test`） |
 
 `base/` はそれだけでは組めない。overlay が下の「overlay が渡すもの」を揃えて初めて組める。
@@ -46,7 +48,7 @@ ConfigMap には中身のハッシュが名前に付くので、設定を変え�
 
 ## 名前
 
-名前空間ごとに 1 人で、`base/` の名前は変えない。natsumi からの移行の手引きもこの名前を指す。
+名前空間ごとに 1 人で、`base/` の名前は変えない。[natsumi からの移行の手引き](../../docs/migrate-from-natsumi.md)もこの名前を指す。
 
 | 種類 | 名前 | 中身 |
 | --- | --- | --- |
