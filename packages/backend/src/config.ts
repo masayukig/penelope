@@ -110,6 +110,14 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
     if (!/^\d+$/.test(value) || Number(value) <= 0) throw new ConfigError(`${name} must be a whole number of minutes above 0`);
     return Number(value) * MINUTE;
   };
+  // The heartbeat's quiet time, in minutes, or in seconds for the tests (e2e/README.md); never both.
+  const heartbeatOf = () => {
+    const inSeconds = get("PENELOPE_HEARTBEAT_SECONDS");
+    if (inSeconds === undefined) return get("PENELOPE_HEARTBEAT_MINUTES") === undefined ? undefined : minutes("PENELOPE_HEARTBEAT_MINUTES", 0);
+    if (get("PENELOPE_HEARTBEAT_MINUTES") !== undefined) throw new ConfigError("PENELOPE_HEARTBEAT_MINUTES and PENELOPE_HEARTBEAT_SECONDS are not both set");
+    if (!/^\d+$/.test(inSeconds) || Number(inSeconds) <= 0) throw new ConfigError("PENELOPE_HEARTBEAT_SECONDS must be a whole number of seconds above 0");
+    return Number(inSeconds) * 1_000;
+  };
   const delivery = (name: string): Delivery => {
     const value = get(name) ?? "now";
     if (value !== "now" && value !== "batch") throw new ConfigError(`${name} must be now or batch`);
@@ -130,7 +138,7 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
   }
   const nightly = get("PENELOPE_NIGHTLY_CRON") ?? "0 4 * * *";
   try {
-    cronOf(nightly, timeZone);
+    cronOf(nightly, timeZone, { seconds: true });
   } catch (error) {
     throw new ConfigError(`PENELOPE_NIGHTLY_CRON: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -187,7 +195,7 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
     nightly,
     batch: { quietMs: minutes("PENELOPE_BATCH_QUIET_MINUTES", 5), maxMs: minutes("PENELOPE_BATCH_MAX_MINUTES", 30) },
     redeliverMs: minutes("PENELOPE_REDELIVER_MINUTES", 5),
-    heartbeatMs: get("PENELOPE_HEARTBEAT_MINUTES") === undefined ? undefined : minutes("PENELOPE_HEARTBEAT_MINUTES", 0),
+    heartbeatMs: heartbeatOf(),
     builtinDelivery: {
       ui: delivery("PENELOPE_DELIVERY_UI"),
       cron: delivery("PENELOPE_DELIVERY_CRON"),

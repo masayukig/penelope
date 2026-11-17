@@ -148,6 +148,27 @@ describe("the scheduler", () => {
     assert.deepEqual(queue.take({ after: 1 }), []);
   });
 
+  it("queues the nightly control event on the second with a field of seconds, ticking every second (the tests')", (t) => {
+    // Guards against: a night of the tests' seconds left for the 15 s tick, so that the test waits on the tick.
+    t.mock.timers.enable({ apis: ["setInterval"] });
+    const { clock, queue } = setup(t, "2026-11-14T08:30:00Z");
+    const db = openDatabase(":memory:");
+    t.after(() => db.close());
+    const scheduler = new Scheduler(new Schedules(db, { now: clock.now, timeZone: "UTC" }), queue, {
+      now: clock.now,
+      timeZone: "UTC",
+      nightly: "*/10 * * * * *",
+      log: () => {},
+    });
+    const stop = scheduler.start();
+    t.after(stop);
+    assert.deepEqual(queue.take({ after: 0 }), []);
+    clock.set("2026-11-14T08:30:10Z");
+    t.mock.timers.tick(1_000);
+    const [nightly] = queue.take({ after: 0 });
+    assert.equal(nightly?.id, "nightly@2026-11-14T08:30:10.000Z");
+  });
+
   it("does not make up a nightly switch the backend was down for", (t) => {
     const { clock, queue } = setup(t, "2026-11-14T03:00:00Z");
     // Started after the nightly time: the next one is tomorrow's.

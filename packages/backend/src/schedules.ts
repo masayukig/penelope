@@ -8,21 +8,26 @@ import { Cron } from "croner";
 
 import { isTime } from "./envelope.ts";
 import type { Queue } from "./queue.ts";
-import { iso } from "./time.ts";
+import { iso, tickMs } from "./time.ts";
 
 /** A schedule that cannot be made, answered with 400. */
 export class ScheduleError extends Error {}
 
 type Row = { id: string; agent: string; reason: string; cron: string | null; at: string | null; next_ms: number };
 
-/** A five-field cron expression in the time zone. Throws ScheduleError when it is not one. */
-export function cronOf(expression: string, timeZone: string): Cron {
+/**
+ * A five-field cron expression in the time zone, or with `seconds` one of six
+ * fields whose first is the second. Throws ScheduleError when it is not one.
+ */
+export function cronOf(expression: string, timeZone: string, { seconds = false } = {}): Cron {
   try {
-    return new Cron(expression, { timezone: timeZone, paused: true, mode: "5-part" });
+    return new Cron(expression, { timezone: timeZone, paused: true, mode: seconds ? "5-or-6-parts" : "5-part" });
   } catch (error) {
-    throw new ScheduleError(`cron must be a five-field cron expression: ${error instanceof Error ? error.message : String(error)}`);
+    const fields = seconds ? "five- or six-field" : "five-field";
+    throw new ScheduleError(`cron must be a ${fields} cron expression: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
+
 
 export class Schedules {
   private readonly db: DatabaseSync;
@@ -119,7 +124,8 @@ export class Scheduler {
     this.queue = queue;
     this.now = options.now;
     this.log = options.log ?? console.error;
-    this.nightly = cronOf(options.nightly, options.timeZone);
+    // A field of seconds is for the tests, to have a night come in seconds.
+    this.nightly = cronOf(options.nightly, options.timeZone, { seconds: true });
     this.nextNightly = this.nightly.nextRun(new Date(this.now()))?.getTime();
   }
 
@@ -141,12 +147,18 @@ export class Scheduler {
     }
   }
 
-  /** Ticks every `everyMs` until stopped. */
-  start(everyMs = 15_000): () => void {
+  /** Ticks every `everyMs` until stopped: by default as often as the nights come for. */
+  start(everyMs = tickMs(this.nightlyGapMs())): () => void {
     this.tick();
     this.timer = setInterval(() => this.tick(), everyMs);
     this.timer.unref();
     return () => clearInterval(this.timer);
+  }
+
+  /** The time between the next two nights. */
+  private nightlyGapMs(): number {
+    const [first, second] = this.nightly.nextRuns(2, new Date(this.now()));
+    return first && second ? second.getTime() - first.getTime() : Infinity;
   }
 
   private queueEvent(event: { source: string; id: string; occurred_at: string; summary: string; payload: unknown }): boolean {
