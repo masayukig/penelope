@@ -71,7 +71,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 エージェントのアバターは記憶の `/memory/avatar/` にあり、エージェントが育てる（[ADR-0036](adr/0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md)）。
 
 - 起動のとき、`/memory/avatar/` という名前のものが無く、`PENELOPE_AVATAR` があれば、`PENELOPE_AVATARS_DIR` と `/app/avatars` の順に `<名前>/avatar.json` を持つディレクトリを探し、`/memory/avatar/` に写す。どちらにも無ければ起動しない。在れば中身を見ずに触らない。
-- 写すときは、リンクをたどった先のファイルを写し、`..` で始まる名前（Kubernetes の volume の `..data` など）は写さない。ディレクトリは `rwxrwxr-x`（set-group-ID は残す）、ファイルは `rw-rw-r--` にして、sandbox のエージェントが書き換えられるようにする。写したら、`avatar/` だけを `Avatar <名前>`（本文 `Copied from <写し元>`）でコミットする。コミットに失敗しても起動し、次のターンの終わりのコミットに入る。
+- 写すときは、リンクをたどった先のファイルを写し、`..` で始まる名前（Kubernetes の volume の `..data` など）は写さない。写したディレクトリとファイルのグループを `/memory` のグループ（Pod の共有のグループ）にし、ディレクトリは `rwxrwsr-x`（set-group-ID を付ける）、ファイルは `rw-rw-r--` にして、sandbox のエージェントが書き換えられるようにする。グループは設定を持たず、`/memory` のものを使う。写し元の持ち主と権限、`/memory` の set-group-ID が引き継がれるかには頼らない。写したら、`avatar/` だけを `Avatar <名前>`（本文 `Copied from <写し元>`）でコミットする。コミットに失敗しても起動し、次のターンの終わりのコミットに入る。
 - 写せないとき（`/memory` に書けないなど）は、ログに残して起動し、写し元のアバターを出す。次の起動でまた写そうとする。
 - `avatar.json` は JSON の object で、次の項目を読む。ほかの項目は読まずに残す。
   - `name`: 名前の既定（空でない文字列）。`PENELOPE_AGENT_NAME` が無いときに使う。名前は起動のときに決め、動いている間は変えない。

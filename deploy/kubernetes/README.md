@@ -26,9 +26,9 @@ penelope の Pod（[docs/pod.md](../../docs/pod.md)）を Kubernetes で動か�
 ```yaml
 # kustomization.yaml（自分のリポジトリ）
 resources:
-- https://github.com/yuanying/penelope//deploy/kubernetes/base?ref=v0.9.0
+- https://github.com/yuanying/penelope//deploy/kubernetes/base?ref=v0.9.1
 components:
-- https://github.com/yuanying/penelope//deploy/kubernetes/components/backup?ref=v0.9.0
+- https://github.com/yuanying/penelope//deploy/kubernetes/components/backup?ref=v0.9.1
 images:
 - name: ghcr.io/yuanying/penelope-sentinel
   newTag: v0.9.0
