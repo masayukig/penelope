@@ -63,8 +63,8 @@ The `Makefile` is the entry point for both languages, and CI only calls its targ
 
 ### Versions
 
-- Development tools are versioned by the repository: golangci-lint and govulncheck in go.mod's `tool` directive,
-  TypeScript in the root's `devDependencies`. Nothing is installed globally.
+- Development tools are versioned by the repository: golangci-lint, govulncheck and kustomize in go.mod's `tool`
+  directive, TypeScript in the root's `devDependencies`. Nothing is installed globally.
 - The Node of the Dockerfile and of `setup-node` in the workflows are the same version, and so are the Go of the
   Dockerfile and go.mod's `go` directive. Renovate keeps each pair in one group; change them together.
 

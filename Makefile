@@ -9,9 +9,9 @@
 # an outside service) go behind a target or a build tag of their own, so that
 # `make test` never picks them up.
 #
-# golangci-lint and govulncheck are declared in go.mod's tool directive and run
-# through `go tool`, so every checkout runs the same version and nothing is
-# installed globally.
+# golangci-lint, govulncheck and kustomize are declared in go.mod's tool
+# directive and run through `go tool`, so every checkout runs the same version
+# and nothing is installed globally.
 
 SHELL := /usr/bin/env bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -109,11 +109,17 @@ vuln: ## Report known vulnerabilities in the code paths the Go module calls.
 ##@ Test
 
 .PHONY: test
-test: test-go test-ts test-renovate ## Unit tests and Renovate extraction checks. Need nothing but the toolchains.
+test: test-go test-ts test-renovate test-deploy ## Unit tests, Renovate extraction and deployment example checks. Need nothing but the toolchains.
 
 .PHONY: test-renovate
 test-renovate: ## Check the sandbox tools' Renovate extraction and release tag formats.
 	node --test .github/scripts/renovate-tools.test.mjs
+
+# The Kubernetes example (deploy/kubernetes/) has to stay buildable by
+# kustomize; go test ./... checks that its settings agree with each other.
+.PHONY: test-deploy
+test-deploy: ## Build the Kubernetes example with kustomize.
+	$(GO) tool kustomize build deploy/kubernetes/example > /dev/null
 
 .PHONY: test-go
 test-go: ## Unit tests of the Go module.

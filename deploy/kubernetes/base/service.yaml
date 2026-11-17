@@ -1,0 +1,19 @@
+# http: the backend's UI API and A2A endpoint. webhooks: the receivers'
+# webhook endpoint (docs/receivers.md, "HTTP の口"), for a plugin that is
+# called from outside (Alertmanager, GitHub). Slack needs neither: it is
+# received over Socket Mode.
+apiVersion: v1
+kind: Service
+metadata:
+  name: penelope
+spec:
+  selector:
+    app.kubernetes.io/name: penelope
+    app.kubernetes.io/component: agent
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+  - name: webhooks
+    port: 8081
+    targetPort: webhooks

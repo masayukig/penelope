@@ -1,0 +1,4 @@
+# The deployment's own skills (base/init/skills.sh): <git URL> <branch> <skill>...
+# The skills that come with the sandbox image are not listed here.
+https://github.com/yuanying/anima-skills main anima-prompt illustrious-prompt moss-prompt
+https://github.com/yuanying/sdctl main sd-generate

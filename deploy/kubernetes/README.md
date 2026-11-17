@@ -1,0 +1,269 @@
+# Kubernetes の配置の見本
+
+penelope の Pod（[docs/pod.md](../../docs/pod.md)）を Kubernetes で動かすための、kustomize の見本である。
+1 人のエージェントを 1 つの名前空間に、1 つの StatefulSet（replicas 1）で置く。
+
+- 対象の版は **v0.9.0 以降**。v0.9.0 から、道具の使い方と誰にも同じ skill（`self-portrait`・`goals` など）が sandbox の image の skill に入り（[ADR-0035](../../docs/adr/0035-tool-usage-and-shared-skills-as-image-skills.md)）、アバターは記憶の `/memory/avatar/` で育つ（[ADR-0036](../../docs/adr/0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md)）。配置が渡すのは、その配置だけのことである。
+- `example/` の値はすべて作りものである。そのままでは動かない。下の「置き換える値」を自分のものにする。
+
+## 置き場
+
+| 場所 | 中身 |
+| --- | --- |
+| `base/` | 誰にも同じもの。StatefulSet（4 つのコンテナと init container）、init の台本（`init/`）、PVC 2 つ、Service、ServiceAccount |
+| `components/backup/` | 任意の部品。1 日 1 回の backup の CronJob（下の「backup」） |
+| `example/` | 1 人分の overlay の例。設定の ConfigMap、Ingress、名前空間、image の版、Slack・A2A・sd-webui・自分のアバターの例 |
+| `example_test.go` | `example/` の設定どうしが合っていることの確かめ（`make test`） |
+
+`base/` はそれだけでは組めない。overlay が下の「overlay が渡すもの」を揃えて初めて組める。
+
+## 組み方
+
+`example/` を自分の配置のリポジトリに写し、`base/` は版を指して読む。
+
+```yaml
+# kustomization.yaml（自分のリポジトリ）
+resources:
+- https://github.com/yuanying/penelope//deploy/kubernetes/base?ref=v0.9.0
+components:
+- https://github.com/yuanying/penelope//deploy/kubernetes/components/backup?ref=v0.9.0
+images:
+- name: ghcr.io/yuanying/penelope-sentinel
+  newTag: v0.9.0
+# backend・sandbox・receivers も同じ版にする
+```
+
+`base/` を写して使ってもよい。そのときは版を上げるたびに、その版の `base/` と見比べる。
+
+組んで確かめ、入れる:
+
+```sh
+kubectl kustomize <overlay>            # 組めることを確かめる
+kubectl apply -k <overlay>
+```
+
+ConfigMap には中身のハッシュが名前に付くので、設定を変えて入れ直すと Pod が作り直される。
+
+## 名前
+
+名前空間ごとに 1 人で、`base/` の名前は変えない。natsumi からの移行の手引きもこの名前を指す。
+
+| 種類 | 名前 | 中身 |
+| --- | --- | --- |
+| StatefulSet | `penelope` | Pod は `penelope-0` |
+| PersistentVolumeClaim | `penelope` | subPath `home/`（sandbox の `/home/agent`。Pi の設定とセッション）・`backend/`（backend の SQLite と画像の写し）・`sources/`（`/sources`） |
+| PersistentVolumeClaim | `penelope-memory` | subPath `memory/`（`/memory` の作業ツリーと `.git`） |
+| Service | `penelope` | `http`（80 → backend の 8080）・`webhooks`（8081 → receivers） |
+| ServiceAccount | `penelope` | RBAC は付けない |
+| CronJob・PVC（backup） | `penelope-backup` | `components/backup/` を使うときだけ |
+
+PVC の大きさ（`penelope` 20Gi、`penelope-memory` 5Gi）と StorageClass は、overlay の patch で変える。Go と Node のキャッシュが HOME に溜まるので、`penelope` は大きめにしてある。
+
+## overlay が渡すもの
+
+| 種類 | 名前 | 使うコンテナ | 中身 |
+| --- | --- | --- | --- |
+| ConfigMap | `penelope-backend-env` | backend | 環境変数（[docs/backend.md](../../docs/backend.md) の「設定」）。例は `example/backend.env` |
+| ConfigMap | `penelope-sandbox-env` | sandbox | 環境変数。名前・役目・オーナー・モデル・サロゲート・宛先。例は `example/sandbox/env` と `example/sandbox/surrogates.env` |
+| ConfigMap | `penelope-models` | sandbox（init が HOME に書く） | Pi の `models.json` |
+| ConfigMap | `penelope-sentinel` | Sentinel | `sentinel.yaml`（[docs/sentinel-config.md](../../docs/sentinel-config.md)） |
+| ConfigMap | `penelope-connectors` | sandbox | その配置だけのコネクタの文書 `<名前>.md` |
+| ConfigMap | `penelope-receivers` | receivers | `config.json`（[docs/receivers.md](../../docs/receivers.md)）。受けるものが無ければ `{"plugins": []}` |
+| ConfigMap | `penelope-skills` | init container skills | 任意。その配置だけの skill（下の「skill」） |
+| Secret | `penelope-sentinel-ca` | Sentinel、sandbox（証明書だけ） | Sentinel の CA（`kubernetes.io/tls`） |
+| Secret | `penelope-sentinel` | Sentinel | 本物の鍵。キーごとに `/run/secrets/penelope-sentinel/keys/<キー>` |
+| Secret | `penelope-backend` | backend | `github-client-secret`、Web Push を使うなら `web-push-vapid-key` |
+| Secret | `penelope-receivers` | receivers | 任意。受信の鍵。キーごとに `/run/secrets/penelope-receivers/<キー>` |
+
+base が決めている場所:
+
+| 場所 | 中身 |
+| --- | --- |
+| backend `PENELOPE_LISTEN` | `[::]:8080` |
+| backend `PENELOPE_DATABASE` | `/var/lib/penelope/backend.sqlite` |
+| backend `PENELOPE_GITHUB_CLIENT_SECRET_FILE` | `/run/secrets/penelope-backend/github-client-secret` |
+| sandbox `PENELOPE_BACKEND_URL` | `https://backend.penelope.internal`（Pod の `hostAliases`。Sentinel が backend の socket へつなぐ） |
+| sandbox `PENELOPE_CONNECTORS_DIR` | `/etc/penelope/connectors` |
+| sandbox `PENELOPE_OWNER_SKILLS_DIR` | `/skills` |
+| Sentinel の受け口 | `15001`（TCP）・`15053`（名前解決）。`sentinel.yaml` の `listen` をこれに合わせる |
+| Sentinel の API server 向けの token | `/run/secrets/penelope-sentinel/kube/token`・`ca.crt`（`kubernetes.default.svc` を登録するときに使う） |
+
+## 置き換える値
+
+`example/` の作りものの値と、置き換えるもの:
+
+| 場所 | 値 | 置き換えるもの |
+| --- | --- | --- |
+| `kustomization.yaml` | `namespace: penelope`、`namespace.yaml` | 名前空間 |
+| `kustomization.yaml` | `newTag: v0.8.0` | 使う版（v0.9.0 以降）。4 つとも同じ版 |
+| `backend.env`・`sandbox/env` | `https://penelope.example.com` | backend に届く公開の URL |
+| `backend.env` | `PENELOPE_GITHUB_CLIENT_ID`・`PENELOPE_OWNER_GITHUB_ID` | GitHub の OAuth App の client ID と、オーナーの数値の user ID（`gh api users/<名前> --jq .id`） |
+| `backend.env` | `PENELOPE_TIME_ZONE`・`PENELOPE_AWAKE_HOURS`・`PENELOPE_NIGHTLY_CRON`・`PENELOPE_HEARTBEAT_MINUTES` | 時間帯、起きている時間、夜の切り替え、heartbeat |
+| `backend.env` | `PENELOPE_AVATAR=example`、`PENELOPE_AGENT_NAME` | 最初に写すアバターと、UI に出す名前（下の「アバター」） |
+| `sandbox/env` | `PENELOPE_NAME` | システムプロンプトに入る名前。`PENELOPE_AGENT_NAME` と同じにする |
+| `sandbox/env` | `PENELOPE_ROLE`・`PENELOPE_OWNER` | 役目とオーナー（システムプロンプトに入る） |
+| `sandbox/env`・`sandbox/models.json` | `PENELOPE_MODEL=openai/gpt-5.5`、provider `openai` | Pi の provider とモデル |
+| `sandbox/surrogates.env`・`sandbox/models.json`・`sentinel/sentinel.yaml` | `surrogate-example-*` | 自分のサロゲート（下の「サロゲート」） |
+| `sentinel/sentinel.yaml` | `api.openai.com`・`sd-webui.example.com`・`helper.agents.example.com` | 鍵を差し替えるホスト |
+| `sandbox/surrogates.env` | `SDCTL_URL` | sd-webui の URL |
+| `receivers/config.json`・`connectors/slack.md` | ワークスペース `work` | Slack のワークスペースの短い名前 |
+| `connectors/*.md` | ホスト・token の環境変数・宛先 | その配置のもの |
+| `patches/statefulset.yaml` | `AVATAR_REPO` など | 自分のアバターの置き場と名前（下の「アバター」） |
+| `patches/statefulset.yaml` | audience `a2a` | A2A の相手が求める token の audience |
+| `ingress.yaml` | `ingressClassName: example`、ホスト、`penelope-tls` | 使う Ingress と証明書 |
+| `skills/skills.list` | 上流の skill | 要る skill（要らなければ ConfigMap ごと消す） |
+
+## サロゲート
+
+sandbox には本物の鍵を置かず、サロゲート（代わりの値）を置く。Sentinel が登録したホストへの要求で、サロゲートを本物の鍵に差し替える（[ADR-0004](../../docs/adr/0004-the-sentinel-keeps-the-keys-through-a-replaceable-source.md)）。
+
+- 1 つの鍵に 1 つのサロゲートを決め、sandbox の置き場（`sandbox/surrogates.env` か `sandbox/models.json`）と `sentinel/sentinel.yaml` の `surrogate` の両方に同じ値を書く。
+- 16 バイト以上で、登録ごとに違う値にする（同じ値が 2 つあると Sentinel は起動しない）。例: `echo "surrogate-model-$(openssl rand -hex 16)"`。
+- サロゲートは秘密ではないが、見本の値は使い回さない。
+- 揃っていることは `example_test.go` が `example/` について確かめている。自分の overlay にも同じ確かめを置くとよい。
+
+## Secret の作り方
+
+鍵の値はリポジトリに書かない。名前空間を作ってから、`kubectl create secret` で作る（sealed-secrets・SOPS などで置くなら、同じ名前とキーにする）。
+
+```sh
+ns=penelope
+kubectl create namespace "$ns"
+
+# Sentinel の CA。Pod を作り直しても変わらないよう、作ったら長く保つ。
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
+  -subj "/CN=penelope sentinel CA" -addext basicConstraints=critical,CA:TRUE \
+  -addext keyUsage=critical,keyCertSign,cRLSign -keyout ca.key -out ca.crt
+kubectl -n "$ns" create secret tls penelope-sentinel-ca --cert=ca.crt --key=ca.key
+
+# Sentinel が差し替える本物の鍵。キーの名前は sentinel.yaml の source の file と揃える。
+kubectl -n "$ns" create secret generic penelope-sentinel \
+  --from-file=model-api-key=./model-api-key \
+  --from-file=slack-bot-token=./slack-bot-token \
+  --from-file=sd-webui-token=./sd-webui-token
+
+# backend。VAPID の鍵は Web Push を使うときだけ（docs/backend.md）。
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out vapid.pem
+kubectl -n "$ns" create secret generic penelope-backend \
+  --from-file=github-client-secret=./github-client-secret \
+  --from-file=web-push-vapid-key=./vapid.pem
+
+# receivers。キーの名前は receivers/config.json の *_file と揃える。
+kubectl -n "$ns" create secret generic penelope-receivers \
+  --from-file=slack-work-app-token=./slack-work-app-token \
+  --from-file=slack-work-bot-token=./slack-work-bot-token
+```
+
+- Slack の bot の token は、receivers（受ける）と Sentinel（`slackctl post` で送る）の両方が使うので、2 つの Secret に同じ値を入れる。Slack App の用意は [docs/receivers.md](../../docs/receivers.md) の「Slack App の用意」。
+- GitHub の OAuth App の callback は `<公開の URL>/auth/github/callback`。
+- 鍵を変えたら Pod を作り直す（`kubectl -n "$ns" rollout restart statefulset/penelope`）。receivers は鍵を起動のときにだけ読む。
+
+## アバター
+
+アバター（名前、表情の画像、姿の `appearance.yaml`、描画の既定の `sdctl-params.yaml`）は記憶の `/memory/avatar/` にあり、エージェントが育てる（[ADR-0036](../../docs/adr/0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md)、[docs/backend.md](../../docs/backend.md) の「アバター」）。
+
+- backend は起動のとき、`/memory/avatar/` が無ければ、`PENELOPE_AVATAR` の名前のアバターを、`PENELOPE_AVATARS_DIR`（あれば）、image の基本のアバターの順に探して写し、コミットする。**写すのは最初の 1 回だけ**で、`/memory/avatar/` があれば触らない。置き場や `PENELOPE_AVATAR` を後から替えても、写し直されない。
+- UI に出す名前は `PENELOPE_AGENT_NAME`。無ければ `/memory/avatar/avatar.json` の名前。
+- sandbox には何も mount しない。sdctl の描画の既定は、配置が `SDCTL_PARAMS` を書かなければ `/memory/avatar/sdctl-params.yaml` になる。
+
+置き方は 2 つ。
+
+- **image に入っているアバター**（`penelope`・`natsumi`・`myao`・`aki`）を使うなら、backend の `PENELOPE_AVATAR` に名前を書くだけでよい。`example/patches/statefulset.yaml` の avatar の部分（init container `avatar`、volume `avatars` とその mount、`PENELOPE_AVATARS_DIR`）を消す。
+- **自分のアバター**を使うなら（`example/` の形）、`<名前>/` にアバターのディレクトリ（`avatar.json` と表情の画像、`appearance.yaml`・`sdctl-params.yaml`）を置いた volume を、**backend にだけ**読み取りで mount して `PENELOPE_AVATARS_DIR` で指し、`PENELOPE_AVATAR` をその名前にする。写したあとは mount を外してよい。
+
+画像は ConfigMap の大きさの上限（1 MiB）を超えやすいので、置き方は次から選ぶ。
+
+| 置き方 | やり方 |
+| --- | --- |
+| init で取る（`example/` の形） | public な git のリポジトリに置き、init container が `base/init/avatar.sh` で emptyDir に取る。Pod を作り直すたびに取り直す |
+| PVC | アバター専用の PVC に `<名前>/` を置き、backend に読み取りで mount する。中身は一度だけ `kubectl cp` などで入れる |
+| image を作る | `ghcr.io/yuanying/penelope-backend` を元に、`/app/avatars/<名前>/` を足した image を作る。mount は要らないが、版を上げるたびに作り直す |
+
+## skill
+
+image に入っている skill（道具の使い方の `slack`・`sd-webui`・`a2a`・`github`・`avatar` と、`self-portrait`・`goals`）は、配置の設定なしで効く。init container `skills`（`base/init/skills.sh`）が置くのは、その配置だけの skill である。同じ名前があれば、配置の skill が image の skill より先に一覧に載る（[docs/pod.md](../../docs/pod.md) の「volume」）。
+
+- ConfigMap `penelope-skills` の `<名前>.SKILL.md` は `/skills/<名前>/SKILL.md` になる。
+- `skills.list` の 1 行は `<git の URL> <枝> <skill>...` で、そのリポジトリの `skills/<skill>/` を写す。リポジトリは public であること（向け直しの前に、鍵なしで取る）。
+- 取れなかった skill は飛ばして Pod は起動する。ログに出る（`kubectl -n penelope logs penelope-0 -c skills`）。
+
+## コネクタの文書
+
+`penelope-connectors` に置くのは、その配置だけのこと（ホスト、token の環境変数、ワークスペース、宛先）である。`slackctl`・`sdctl`・`a2a` などの道具の使い方は image の skill にある。
+
+- 文書の `hosts` は `sentinel.yaml` の登録の `name` と同じにし、鍵を差し替える登録はどれかの文書の `hosts` に入れる（[docs/sentinel-config.md](../../docs/sentinel-config.md) の「コネクタの文書」）。
+- `example/connectors/` にあるのは、Slack（`slack.md`）、A2A の相手（`agents.md`）、sd-webui（`sd-webui.md`）、モデル（`model.md`）、backend（`backend.md`。runner が使う。どの配置にも要る）。
+
+## A2A
+
+- **送る**（`example/` の形）: 相手のホストを `sentinel.yaml` に登録し、ServiceAccount `penelope` の token に差し替える。token は `patches/statefulset.yaml` が Sentinel にだけ projected で渡す（audience `a2a`）。audience は相手が求めるものにする。相手の側で、この ServiceAccount（`system:serviceaccount:<名前空間>:penelope`）を許す。
+- **受ける**（見本には無い）: backend の `PENELOPE_A2A_*` を `penelope-backend-env` に書く（[docs/a2a.md](../../docs/a2a.md)・[docs/backend.md](../../docs/backend.md)）。`tokenreview` で確かめるなら、backend に API server の audience の token を projected で mount し、ServiceAccount `penelope` に `system:auth-delegator` を付け、Ingress に `/a2a` を足す。
+
+## volume と持ち主
+
+4 つのコンテナは UID が違う（[docs/pod.md](../../docs/pod.md) の「コンテナ」）。共有する volume は、Pod の `supplementalGroups` のグループ 2000 に置き、setgid のディレクトリにする。`fsGroup` は使わない。kubelet が PVC の中身を丸ごとグループに開けてしまい、backend の SQLite と sandbox の HOME を 0700 に保てないためである。
+
+init container `volumes`（`base/init/volumes.sh`）が、無いディレクトリだけを持ち主と権限を付けて作る。あるものは触らない。ほかから写した中身を置くときは、同じ持ち主と権限にする。
+
+| 場所 | 持ち主 | 権限 |
+| --- | --- | --- |
+| `penelope` の `home/` | 1000:1000 | 0700 |
+| `penelope` の `backend/` | 1001:1001 | 0700 |
+| `penelope` の `sources/` | 1001:2000 | 2770 |
+| `penelope-memory` の `memory/` | 1000:2000 | 2770。backend もグループで書く（`/memory/avatar/` を写すため） |
+| `penelope-memory` の `memory/.git` | 1001:2000 | 2770 |
+
+init container `redirect` は NET_ADMIN で iptables（nft）の規則を張る。ノードが nftables を使えることが要る。
+
+## 最初の起動と確かめ方
+
+1. 上の Secret を作り、`kubectl apply -k <overlay>` で入れる。
+2. Pod が `Running` で 4 つとも Ready になるのを待つ: `kubectl -n penelope get pod penelope-0 -w`。
+3. init container の記録を見る:
+   - `kubectl -n penelope logs penelope-0 -c volumes` — 置き場の持ち主と権限
+   - `kubectl -n penelope logs penelope-0 -c redirect` — 張った規則
+   - `kubectl -n penelope logs penelope-0 -c skills`・`-c avatar` — 取った skill とアバター
+4. Sentinel の記録（1 通信 1 行の JSON）で、モデルの API が `open` になっていることを見る: `kubectl -n penelope logs penelope-0 -c sentinel | grep api.openai.com`。
+5. sandbox から外へ出られることを見る: `kubectl -n penelope exec penelope-0 -c sandbox -- curl -sI https://github.com`。
+6. 公開の URL を開き、GitHub でログインして話しかける。返事が来れば、`/memory` にコミットが積まれる: `kubectl -n penelope exec penelope-0 -c sandbox -- git -C /memory log --oneline -3`。
+7. Slack を使うなら、receivers の起動の 1 行（`receivers: listening on ...; connections: slack ...`）を見て、bot を入れたチャンネルで話しかける。
+
+設定の誤りがあると、そのコンテナが起動せずに理由を 1 行書いて終わる（backend・receivers は終了コード 2、Sentinel は標準エラー）。`kubectl -n penelope logs penelope-0 -c <コンテナ> --previous` で見る。
+
+## backup
+
+`components/backup/` は、1 日 1 回（既定は 05:30、夜の切り替えの後）、Pod を止めずに 2 つの PVC を写す。
+
+- backend の SQLite は、そのまま写すと書きかけや WAL の分を落とし得るので、SQLite の online backup（`sqlite3` の `.backup` と同じ仕組み）で整合したコピーを取る（`sqlite-backup.mjs`。backend の image の Node で動く）。
+- `penelope` は SQLite の本体と作り直せるキャッシュ（`~/.cache`・`~/go/pkg/mod`・`~/.npm`・`node_modules`・`~/.kube/cache`）を除いて tar に、`penelope-memory` はそのまま tar にする。持ち主と権限は数値のまま残る。
+- 置き場は `<UTC の時刻>/`（`backend.sqlite`・`state.tar.gz`・`memory.tar.gz`）で、14 日分を残す（`KEEP_DAYS`）。
+- 置き場の volume は、見本では同じクラスタの PVC `penelope-backup` である。同じストレージの故障では一緒に失うので、patch で NFS などの別の場所に向ける。
+- PVC は ReadWriteOnce なので、Job は agent の Pod と同じノードで動く。Pod を止めている間は Pending のまま期限で終わる。
+
+手で取るとき（版を上げる前など）:
+
+```sh
+kubectl -n penelope create job --from=cronjob/penelope-backup penelope-backup-manual
+kubectl -n penelope wait --for=condition=complete job/penelope-backup-manual --timeout=1h
+```
+
+restore は Pod を止めてから行う。
+
+1. `kubectl -n penelope scale statefulset/penelope --replicas=0`
+2. 2 つの PVC と backup の置き場を mount した root の Pod を立て、`penelope` に `state.tar.gz`、`penelope-memory` に `memory.tar.gz` を `tar --numeric-owner -xzf` で戻す。
+3. `backend.sqlite` を `penelope` の `backend/backend.sqlite` に置き、同じ場所の `backend.sqlite-wal`・`backend.sqlite-shm` を消す。持ち主は 1001:1001、権限は 0600。
+4. その Pod を消して `kubectl -n penelope scale statefulset/penelope --replicas=1`。
+
+## 版の上げ方
+
+1. 上げる版の Release の説明と、`base/` の差分を読む（`git diff vA.B.C vX.Y.Z -- deploy/kubernetes/`）。overlay が渡すものが増えていれば足す。
+2. **backend の SQLite の migration は一方通行である**（[docs/backend.md](../../docs/backend.md) の「状態」。backend は自分より新しい版のファイルを開かない）。migration のある版に上げる前に、手で backup を取る（上の「backup」）。戻すときは、その backup の SQLite ごと戻す。
+3. overlay の `images` の 4 つを同じ版にし、`base/` を版で指しているならその `ref` も同じ版にする。
+4. `kubectl kustomize <overlay>` で組めることを確かめ、`kubectl apply -k <overlay>` で入れる。StatefulSet が Pod を作り直す。
+5. 「最初の起動と確かめ方」の 2〜6 を見る。
+
+## 見本に無いもの
+
+- クラスタの API を使わせること。使うなら、ServiceAccount `penelope` に RBAC を付け、`kubernetes.default.svc` を `sentinel.yaml` に登録し（鍵は `/run/secrets/penelope-sentinel/kube/token`、`upstream_ca` は同じ場所の `ca.crt`）、サロゲートを持つ kubeconfig を sandbox に置いて `KUBECONFIG` で指す。
+- Alertmanager・GitHub の webhook。使うなら、`receivers/config.json` に足し、Ingress に `/v1/webhooks/` → Service の `webhooks` を足す。
+- Sentinel の既定を `passthrough` 以外にすること（[ADR-0003](../../docs/adr/0003-all-egress-through-the-sentinel-passthrough-by-default.md)）。

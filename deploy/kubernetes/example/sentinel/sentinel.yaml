@@ -1,0 +1,54 @@
+# The Sentinel's settings (docs/sentinel-config.md). Every name and surrogate is
+# made up. By default everything passes through and is only recorded; the hosts
+# below are opened, and the surrogate the sandbox sends is replaced by the real key.
+# Each surrogate is also written where the sandbox reads it (sandbox/surrogates.env,
+# sandbox/models.json), and each is different (the Sentinel does not start otherwise).
+#
+# Where the keys are (all mounted in the Sentinel only; base/statefulset.yaml and
+# patches/statefulset.yaml):
+#   /run/secrets/penelope-sentinel/ca/      Secret penelope-sentinel-ca (tls.crt, tls.key)
+#   /run/secrets/penelope-sentinel/keys/    Secret penelope-sentinel (model-api-key, slack-bot-token, sd-webui-token)
+#   /run/secrets/penelope-sentinel/a2a/     the ServiceAccount's token with the audience a2a
+#   /run/penelope/backend-token/            the backend's sandbox API token, made for each Pod
+listen:
+  proxy: ["0.0.0.0:15001", "[::]:15001"]
+  dns: ["0.0.0.0:15053", "[::]:15053"]
+ca:
+  cert: /run/secrets/penelope-sentinel/ca/tls.crt
+  key: /run/secrets/penelope-sentinel/ca/tls.key
+default: passthrough
+hosts:
+  # The model (Pi's provider openai; sandbox/models.json).
+  - name: api.openai.com
+    credentials:
+      - place: bearer
+        surrogate: surrogate-example-model-0001
+        source: { file: /run/secrets/penelope-sentinel/keys/model-api-key }
+  # Slack's Web API (the bot of the workspace work). Its upload host
+  # (files.slack.com) is not registered: slackctl sends no token there.
+  - name: slack.com
+    credentials:
+      - place: bearer
+        surrogate: surrogate-example-slack-0001
+        source: { file: /run/secrets/penelope-sentinel/keys/slack-bot-token }
+  # Stable Diffusion WebUI behind a bearer token.
+  - name: sd-webui.example.com
+    credentials:
+      - place: bearer
+        surrogate: surrogate-example-sd-webui-0001
+        source: { file: /run/secrets/penelope-sentinel/keys/sd-webui-token }
+  # An A2A agent that checks its callers' ServiceAccount tokens by TokenReview.
+  - name: helper.agents.example.com
+    credentials:
+      - place: bearer
+        surrogate: surrogate-example-helper-agent-0001
+        source: { file: /run/secrets/penelope-sentinel/a2a/token }
+  # The backend's sandbox API (a Unix socket in the Pod). The name is the Pod's
+  # hostAliases (base/statefulset.yaml).
+  - name: backend.penelope.internal
+    upstream: unix:///run/penelope/sandbox/backend.sock
+    credentials:
+      - place: bearer
+        surrogate: surrogate-example-backend-0001
+        source: { file: /run/penelope/backend-token/token }
+allow: []

@@ -1,0 +1,62 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# One deployment of the Pod, as an example (README.md). Every value is made
+# up; README.md, "Values to replace", lists them. One deployment per
+# namespace: the names of the base (StatefulSet penelope, PVCs penelope and
+# penelope-memory) are kept as they are.
+namespace: penelope
+
+resources:
+- namespace.yaml
+- ../base
+- ingress.yaml
+
+components:
+# The daily backup (optional; README.md, "Backup").
+- ../components/backup
+
+# The four images of one release, always the same version.
+images:
+- name: ghcr.io/yuanying/penelope-sentinel
+  newTag: v0.8.0
+- name: ghcr.io/yuanying/penelope-backend
+  newTag: v0.8.0
+- name: ghcr.io/yuanying/penelope-sandbox
+  newTag: v0.8.0
+- name: ghcr.io/yuanying/penelope-receivers
+  newTag: v0.8.0
+
+configMapGenerator:
+- name: penelope-backend-env
+  envs:
+  - backend.env
+- name: penelope-sandbox-env
+  envs:
+  - sandbox/env
+  - sandbox/surrogates.env
+# Written into the sandbox's ~/.pi/agent/models.json on every start.
+- name: penelope-models
+  files:
+  - sandbox/models.json
+- name: penelope-sentinel
+  files:
+  - sentinel/sentinel.yaml
+# Only what is this deployment's (hosts, token variables, the workspace,
+# the agents). How to use the tools comes with the sandbox image.
+- name: penelope-connectors
+  files:
+  - connectors/agents.md
+  - connectors/backend.md
+  - connectors/model.md
+  - connectors/sd-webui.md
+  - connectors/slack.md
+- name: penelope-receivers
+  files:
+  - receivers/config.json
+- name: penelope-skills
+  files:
+  - skills/skills.list
+
+patches:
+- path: patches/statefulset.yaml

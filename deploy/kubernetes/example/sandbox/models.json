@@ -1,0 +1,7 @@
+{
+  "providers": {
+    "openai": {
+      "apiKey": "surrogate-example-model-0001"
+    }
+  }
+}

@@ -9,6 +9,11 @@ sandbox から外へ出る通信は、返事も含めてすべて Sentinel を�
 
 設計の判断は [docs/adr/](docs/adr/README.md) にあります。
 
+## 動かす
+
+4 つの image は ghcr.io にあります（`ghcr.io/yuanying/penelope-{sentinel,backend,sandbox,receivers}`）。
+Kubernetes で動かす kustomize の見本は [deploy/kubernetes/](deploy/kubernetes/README.md) にあります。
+
 ## 開発
 
 入口は `Makefile` です。ターゲットの一覧は `make help` で出ます。
