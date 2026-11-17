@@ -134,6 +134,14 @@ test-netns: ## Go tests that redirect with iptables. Need root (through sudo); r
 	done
 	$(SUDO) unshare --net sh -eu -c 'ip link set lo up; for pkg in $(NETNS_PKGS); do t="bin/netns/$${pkg##*/}.test"; echo "== $$t"; "$$t" -test.count=1; done'
 
+# The widths of the Web UI, measured in Chromium over a stub of the backend:
+# happy-dom lays nothing out (packages/web/browser/). It needs a Chromium or
+# Chrome, given as CHROMIUM, so `make test` never runs it.
+.PHONY: test-browser
+test-browser: node_modules/.package-lock.json ## Measure the Web UI's layout in Chromium. Needs CHROMIUM=<path to chrome>.
+	$(NPM) run build --workspace=@penelope/web
+	CHROMIUM="$(CHROMIUM)" $(NPM) run test-browser --workspace=@penelope/web
+
 # The end-to-end test lays the four containers of the Pod out with Docker
 # Compose, with fakes for the model and GitHub, and drives them from the UI's
 # API (e2e/README.md). It needs Docker, so `make test` never runs it.
