@@ -446,10 +446,23 @@ body {
 /* The name's line (docs/design/README.md, 13): the avatar, the name and the
    face, then the mark of what made her speak in the rest of the line. The
    mark's room is at least half the line, so it goes below once the name
-   takes more; there, it has the whole width. All is cut on one line. */
+   takes more; there, it has the whole width. All is cut on one line.
+   Astryx puts the name in an item of a column that aligns its items to the
+   start, so the item takes the width of what it holds; and what holds a mark
+   that is not wrapped is as wide as all its words. So the box Astryx puts the
+   name in (the bubble's [data-chat-name], or the message's name without a
+   bubble) is stretched to the width of the column instead, and the mark is cut
+   within it. Above a bubble, it goes no wider than the bubble may
+   (ChatMessageBubble's max(80%, 280px)). happy-dom measures no width; the
+   widths are measured in Chromium (packages/web/browser/, make test-browser). */
+:has(> .reply-name) {
+  align-self: stretch;
+  min-width: 0;
+}
 [data-chat-name]:has(> .reply-name) {
   height: auto;
   min-height: 20px;
+  max-width: max(80%, 280px);
 }
 .reply-name {
   display: flex;
