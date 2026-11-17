@@ -16,6 +16,8 @@ export interface Places {
   home: string;
   /** The owner's skills, read-only; left out when there are none. */
   ownerSkills?: string;
+  /** The skills that come with the image; left out, none are named. */
+  imageSkills?: string;
 }
 
 /** The memory files the system prompt carries, in this order. */
@@ -48,19 +50,27 @@ export async function readPromptFiles(memoryDir: string, maxBytes: number): Prom
 }
 
 /** `owner` is how the prompt names the owner: "your owner" for her, the name for the curator. */
-const MEMORY_SHAPE = ({ memory, ownerSkills }: Places, owner: string) => `- personality.md: the personality and the way of talking.
+const MEMORY_SHAPE = (places: Places, owner: string) => `- personality.md: the personality and the way of talking.
 - always.md: what is kept in mind at all times.
 - handoff.md: what one session leaves for the next.
 - INDEX.md: the index of the memory.
 - diary/YYYY-MM-DD.md: what happened on each day.
 - archive/: older facts, in summaries.
-- skills/<name>/SKILL.md: skills. Those in ${memory}/skills/ are listed at the end of the system prompt of each new session.${
-  ownerSkills
-    ? ` So are ${owner}'s skills, in ${ownerSkills}/, which is read-only; where a name is in both, the one listed is ${owner}'s.`
-    : ""
-}
+- skills/<name>/SKILL.md: skills. Those in ${places.memory}/skills/ are listed at the end of the system prompt of each new session.${otherSkills(places, owner)}
 - agents/<role>.md: the roles of sub-agents, one file each, with \`name\` and \`description\` in its front matter. When a sub-agent is started with a role, the body of its file follows the sub-agent's system prompt; without one, the body of agents/default.md does.
 - Any other file: one topic each.`;
+
+/** The skills listed beside the memory's, and which one of a name is listed (pi.ts reads them in this order). */
+function otherSkills({ ownerSkills, imageSkills }: Places, owner: string): string {
+  const others = [
+    ...(ownerSkills ? [`${owner}'s skills, in ${ownerSkills}/, which is read-only`] : []),
+    ...(imageSkills ? [`the skills that come with the image, in ${imageSkills}/`] : []),
+  ];
+  if (others.length === 0) return "";
+  const order = [...(ownerSkills ? [`${owner}'s`] : []), "the memory's", ...(imageSkills ? ["the image's"] : [])];
+  const where = others.length === 1 ? "in both" : "in more than one";
+  return ` So are ${others.join(", and ")}; where a name is ${where}, the one listed is ${order.join(", then ")}.`;
+}
 
 function appended(files: PromptFile[]): string {
   return files
@@ -200,7 +210,8 @@ export function subAgentSystemPrompt(
   options: { connectors?: { dir: string; list: Connector[] } } = {},
 ): string {
   const { name } = identity;
-  const skills = places.ownerSkills ? `${places.memory}/skills/ and ${places.ownerSkills}/` : `${places.memory}/skills/`;
+  const dirs = [`${places.memory}/skills/`, ...(places.ownerSkills ? [`${places.ownerSkills}/`] : []), ...(places.imageSkills ? [`${places.imageSkills}/`] : [])];
+  const skills = dirs.length === 1 ? dirs[0] : `${dirs.slice(0, -1).join(", ")} and ${dirs.at(-1)}`;
   const prompt = `You are a sub-agent of ${name}, ${identity.role}, whose owner is ${identity.owner}. ${name} started you, named \`${agent.name}\`, for this purpose: ${agent.purpose}
 
 Your requests come from ${name} alone: the first one when you were started, and more words when ${name} sends them after you have stopped. You stop when you answer without calling a tool. Then the text of that last answer reaches ${name} in full, as an event; nothing else of your run reaches ${name}, and nothing of it reaches ${identity.owner}. You can stop with a question; ${name}'s answer comes as more words, and you go on in this session.

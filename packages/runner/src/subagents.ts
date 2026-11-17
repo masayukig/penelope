@@ -148,6 +148,7 @@ export class SubAgents {
       sources: options.config.sourcesDir,
       home: options.config.home,
       ...(options.config.ownerSkillsDir ? { ownerSkills: options.config.ownerSkillsDir } : {}),
+      imageSkills: options.config.imageSkillsDir,
     };
   }
 

@@ -31,6 +31,7 @@ test("the required settings and the defaults", () => {
     pollWaitSeconds: 30,
     turnFold: true,
     slack: { sources: [], maxChars: 6000 },
+    imageSkillsDir: "/opt/penelope/skills",
   });
 });
 
