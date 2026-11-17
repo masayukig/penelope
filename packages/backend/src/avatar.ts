@@ -4,7 +4,7 @@
 // reads it at the start and again after each commit of /memory, and does
 // not check it: what it cannot use is left out, and `avatar check` tells
 // the agent why.
-import { chmodSync, cpSync, existsSync, lstatSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { chmodSync, chownSync, cpSync, existsSync, lstatSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 
 import { type Avatar, readAvatar, readInside } from "@penelope/avatar";
@@ -52,8 +52,8 @@ export async function seedAvatar(
     rmSync(copying, { recursive: true, force: true });
     // A volume's files are links into its hidden ..data; the files are copied, not the links.
     cpSync(source, copying, { recursive: true, dereference: true, filter: (from) => from === source || !path.basename(from).startsWith("..") });
-    // She edits it from the sandbox, a user of the Pod's shared group (docs/pod.md).
-    groupWritable(copying);
+    // She edits it from the sandbox, a user of the Pod's shared group, the group of /memory (docs/pod.md).
+    groupWritable(copying, statSync(memoryDir).gid);
     renameSync(copying, dest);
   } catch (error) {
     // The faces are still shown, from where they were found; the copy is tried again at the next start.
@@ -118,12 +118,21 @@ function exists(file: string): boolean {
   }
 }
 
-/** Every directory rwxrwxr-x and every file rw-rw-r--, a directory's set-group-ID kept. */
-function groupWritable(dir: string): void {
-  chmodSync(dir, (lstatSync(dir).mode & 0o2000) | 0o775);
+/**
+ * Every directory and file in group `gid`, the directories rwxrwsr-x and the
+ * files rw-rw-r--, whatever the source's owner and mode were and whether or
+ * not /memory's set-group-ID was passed on. The group is changed before the
+ * mode, since a change of group may clear the set-group-ID.
+ */
+function groupWritable(dir: string, gid: number): void {
+  chownSync(dir, -1, gid);
+  chmodSync(dir, 0o2775);
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const file = path.join(dir, entry.name);
-    if (entry.isDirectory()) groupWritable(file);
-    else chmodSync(file, 0o664);
+    if (entry.isDirectory()) groupWritable(file, gid);
+    else {
+      chownSync(file, -1, gid);
+      chmodSync(file, 0o664);
+    }
   }
 }

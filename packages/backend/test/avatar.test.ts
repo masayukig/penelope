@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, chownSync, existsSync, lstatSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { userInfo } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -55,6 +56,31 @@ describe("copying the avatar into /memory", () => {
     const from = [path.join(root, "deployment"), path.join(root, "image")];
     await seedAvatar({ name: undefined, chosen: "iris", from }, memoryDir, new Memory(memoryDir, author), quiet);
     assert.match(readFileSync(path.join(memoryDir, "avatar/avatar.json"), "utf8"), /of the deployment/);
+  });
+
+  // Guards against her being unable to overwrite the copied avatar from the sandbox, which shares only /memory's group
+  // with the backend: the copy must not keep the backend's own group, whatever the source's owner or /memory's set-group-ID.
+  it("gives the copy /memory's group, writable by the group, its directories set-group-ID", async (t) => {
+    const shared = (process.getgroups?.() ?? []).find((gid) => gid !== userInfo().gid);
+    if (shared === undefined) return t.skip("no supplementary group to stand for the Pod's shared group");
+    const root = tempDir(t);
+    const memoryDir = path.join(root, "memory");
+    mkdirSync(memoryDir);
+    chownSync(memoryDir, -1, shared);
+    avatarIn(path.join(root, "image"), "iris", "Iris");
+    chmodSync(path.join(root, "image/iris/avatar.json"), 0o644);
+    chmodSync(path.join(root, "image/iris/icons"), 0o755);
+    await seedAvatar({ name: undefined, chosen: "iris", from: [path.join(root, "image")] }, memoryDir, new Memory(memoryDir, author), quiet);
+    const modes = ["avatar", "avatar/icons", "avatar/avatar.json", "avatar/icons/neutral.webp"].map((file) => {
+      const stat = statSync(path.join(memoryDir, file));
+      return [file, stat.gid, (stat.mode & 0o7777).toString(8)];
+    });
+    assert.deepEqual(modes, [
+      ["avatar", shared, "2775"],
+      ["avatar/icons", shared, "2775"],
+      ["avatar/avatar.json", shared, "664"],
+      ["avatar/icons/neutral.webp", shared, "664"],
+    ]);
   });
 
   // A Kubernetes volume's files are links into a hidden ..data directory.

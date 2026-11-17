@@ -60,7 +60,7 @@
 
 エージェントのアバターは `/memory/avatar/` にある（[ADR-0036](adr/0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md)、[backend.md](backend.md) の「アバター」）。
 
-- backend は、`/memory/avatar/` が無ければ、選んだアバター（`PENELOPE_AVATAR`）を、配置の置き場（`PENELOPE_AVATARS_DIR`）か image の基本のアバターから写す。配置の置き場を先に探す。そのため backend は `/memory` の作業ツリーの一番上にディレクトリを作れる必要がある（共有のグループに書ける）。
+- backend は、`/memory/avatar/` が無ければ、選んだアバター（`PENELOPE_AVATAR`）を、配置の置き場（`PENELOPE_AVATARS_DIR`）か image の基本のアバターから写す。配置の置き場を先に探す。そのため backend は `/memory` の作業ツリーの一番上にディレクトリを作れる必要がある（共有のグループに書ける）。写したものは `/memory` のグループにし、グループが書けるようにする（ディレクトリには set-group-ID を付ける）。そのため backend は `/memory` のグループに入っている必要がある。
 - sandbox の image にアバターは入っていない。エージェントは `/memory/avatar/` だけを読み書きする。
 - 自分特有のアバターを使う配置は、アバターのディレクトリ（`<名前>/avatar.json` と表情の画像、`appearance.yaml`・`sdctl-params.yaml`）を置いた volume を backend に読み取りで mount し、`PENELOPE_AVATARS_DIR` で指す。写すのは `/memory/avatar/` が無いときの 1 回だけなので、写したあとは mount を外してよい。記憶にすでにアバターがある配置で置き場を替えても、写し直されない。
 - sandbox の `avatar check` は、`/memory/avatar/` を backend と同じ規則で読み、使えないものとその理由を出す（既定の場所は `/memory/avatar`、ほかの場所を引数で渡せる）。
