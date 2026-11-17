@@ -1,13 +1,15 @@
 // The owner's messages on their way to the backend. Written while the
 // stream is down, a message is held and sent once it is back, in the order
 // written: the notice of the offline screen says so.
+import type { PostMessageResponse } from "@penelope/contract";
+
 import { Unauthorized, Unreachable } from "./api.ts";
 import type { Action, LocalFile } from "./store.ts";
 
 type Waiting = { key: string; text: string; files: File[] };
 
 export class Outbox {
-  private readonly send: (text: string, files: File[]) => Promise<{ id: string }>;
+  private readonly send: (text: string, files: File[]) => Promise<PostMessageResponse>;
   private readonly dispatch: (action: Action) => void;
   private readonly now: () => number;
   private readonly waiting: Waiting[] = [];
@@ -15,7 +17,7 @@ export class Outbox {
   private flushing = false;
   private count = 0;
 
-  constructor(options: { send: (text: string, files: File[]) => Promise<{ id: string }>; dispatch: (action: Action) => void; now?: () => number }) {
+  constructor(options: { send: (text: string, files: File[]) => Promise<PostMessageResponse>; dispatch: (action: Action) => void; now?: () => number }) {
     this.send = options.send;
     this.dispatch = options.dispatch;
     this.now = options.now ?? Date.now;
@@ -45,9 +47,9 @@ export class Outbox {
         const next = this.waiting[0]!;
         this.dispatch({ type: "sending", key: next.key });
         try {
-          const { id } = await this.send(next.text, next.files);
+          const taken = await this.send(next.text, next.files);
           this.waiting.shift();
-          this.dispatch({ type: "sent", key: next.key, id });
+          this.dispatch({ type: "sent", key: next.key, ...taken });
         } catch (error) {
           if (error instanceof Unreachable) {
             this.dispatch({ type: "queued-again", key: next.key });

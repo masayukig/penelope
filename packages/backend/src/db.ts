@@ -154,6 +154,35 @@ export const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX assets_reply ON assets (reply_id, position) WHERE reply_id IS NOT NULL;
   `,
+  `
+  -- The owner's images are copied too (ADR-0034): a copy belongs to a line of
+  -- the history, a reply or one of the owner's messages, and an owner's copy
+  -- has no agent. SQLite cannot loosen NOT NULL in place, so the table is
+  -- made again with the rows it had.
+  CREATE TABLE assets_next (
+    row        INTEGER PRIMARY KEY AUTOINCREMENT,
+    id         TEXT NOT NULL UNIQUE,
+    kind       TEXT NOT NULL CHECK (kind IN ('image')),
+    mime_type  TEXT NOT NULL,
+    size       INTEGER NOT NULL,
+    name       TEXT NOT NULL,
+    file       TEXT NOT NULL,
+    -- The agent that made it; NULL for what the owner sent.
+    agent      TEXT,
+    created_at TEXT NOT NULL,
+    -- The line of the history it was sent with, and its place among that line's images.
+    message_id TEXT REFERENCES history (id),
+    position   INTEGER
+  );
+  INSERT INTO assets_next (row, id, kind, mime_type, size, name, file, agent, created_at, message_id, position)
+    SELECT row, id, kind, mime_type, size, name, file, agent, created_at, reply_id, position FROM assets;
+  DROP TABLE assets;
+  ALTER TABLE assets_next RENAME TO assets;
+  CREATE INDEX assets_message ON assets (message_id, position) WHERE message_id IS NOT NULL;
+
+  -- The owner's files that are not copied: their names and sizes, as JSON.
+  ALTER TABLE history ADD COLUMN files TEXT;
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

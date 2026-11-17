@@ -1,16 +1,17 @@
-// What the agents made, copied by the backend (ADR-0032): for now the images
-// of the replies. A copy is a file under its own directory, apart from
-// /sources and /memory, and a row of `assets` with its kind, type, size, time
-// and the reply it came with, so that a list of all of them can be made
-// later. A copy never changes and is never removed.
+// What the agents made, copied by the backend (ADR-0032), and the images the
+// owner sent (ADR-0034): for now only images, each tied to its line of the
+// history. A copy is a file under its own directory, apart from /sources and
+// /memory, and a row of `assets` with its kind, type, size, time, who made it
+// and the line it came with, so that a list of all of them can be made later.
+// A copy never changes and is never removed.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
-import { type AgentId, REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX, type ReplyImage } from "@penelope/contract";
+import { type AgentId, type OwnerFile, REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX, type ReplyImage } from "@penelope/contract";
 
-import { imageTypeOf } from "./sources.ts";
+import { type Attachment, imageTypeOf } from "./sources.ts";
 import { iso } from "./time.ts";
 
 /** An image a reply carries, checked: its name, its type from its first bytes, and its bytes. */
@@ -59,6 +60,24 @@ export function checkImages(value: unknown): CheckedImage[] {
     if (mimeType === undefined) throw new ImageRefusal(`${called} is not a PNG, JPEG, GIF or WebP image`);
     return { name, mime_type: mimeType, data: bytes };
   });
+}
+
+/**
+ * The files the owner sent, split into the images to copy and the rest, each
+ * in the order sent. An image is told from its first bytes and has at most
+ * REPLY_IMAGE_MAX_BYTES, as a reply's (ADR-0034); one that is bigger is kept
+ * by name like any other file. The message is never refused for its files.
+ */
+export function splitOwnerFiles(files: readonly Attachment[]): { images: CheckedImage[]; others: OwnerFile[] } {
+  const images: CheckedImage[] = [];
+  const others: OwnerFile[] = [];
+  for (const file of files) {
+    const name = file.name.split(/[/\\]/).pop()!.slice(0, NAME_MAX) || "file";
+    const mimeType = file.data.byteLength <= REPLY_IMAGE_MAX_BYTES ? imageTypeOf(file.data) : undefined;
+    if (mimeType === undefined) others.push({ name, size: file.data.byteLength });
+    else images.push({ name, mime_type: mimeType, data: file.data });
+  }
+  return { images, others };
 }
 
 /** Removes a file if it can: what is left of a failed write is only an unused file. */
@@ -113,13 +132,17 @@ export class Assets {
     return stored;
   }
 
-  /** Records the written copies as the images of the reply, in their order. Run in the reply's transaction. */
-  record(replyId: string, agent: AgentId, stored: readonly StoredImage[]): void {
+  /**
+   * Records the written copies as the images of a line of the history, in
+   * their order: a reply, made by its agent, or one of the owner's messages,
+   * by none. Run in that line's transaction.
+   */
+  record(messageId: string, agent: AgentId | undefined, stored: readonly StoredImage[]): void {
     const insert = this.db.prepare(
-      "INSERT INTO assets (id, kind, mime_type, size, name, file, agent, created_at, reply_id, position) VALUES (?, 'image', ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO assets (id, kind, mime_type, size, name, file, agent, created_at, message_id, position) VALUES (?, 'image', ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     const at = iso(this.now());
-    stored.forEach((image, position) => insert.run(image.id, image.mime_type, image.size, image.name, image.file, agent, at, replyId, position));
+    stored.forEach((image, position) => insert.run(image.id, image.mime_type, image.size, image.name, image.file, agent ?? null, at, messageId, position));
   }
 
   /** Removes the files of copies that were not recorded. */
@@ -127,20 +150,20 @@ export class Assets {
     for (const image of stored) removeQuietly(path.join(this.dir, image.file));
   }
 
-  /** The images of each of the replies, in their order; a reply with none is not in the map. */
-  ofReplies(replyIds: readonly string[]): Map<string, ReplyImage[]> {
+  /** The images of each of the lines of the history, in their order; a line with none is not in the map. */
+  ofMessages(messageIds: readonly string[]): Map<string, ReplyImage[]> {
     const found = new Map<string, ReplyImage[]>();
-    if (replyIds.length === 0) return found;
+    if (messageIds.length === 0) return found;
     const rows = this.db
       .prepare(
-        `SELECT reply_id, id, mime_type, size, name FROM assets
-          WHERE reply_id IN (${replyIds.map(() => "?").join(", ")}) ORDER BY reply_id, position`,
+        `SELECT message_id, id, mime_type, size, name FROM assets
+          WHERE message_id IN (${messageIds.map(() => "?").join(", ")}) ORDER BY message_id, position`,
       )
-      .all(...replyIds) as Array<ReplyImage & { reply_id: string }>;
-    for (const { reply_id: replyId, id, mime_type, size, name } of rows) {
-      const list = found.get(replyId) ?? [];
+      .all(...messageIds) as Array<ReplyImage & { message_id: string }>;
+    for (const { message_id: messageId, id, mime_type, size, name } of rows) {
+      const list = found.get(messageId) ?? [];
       list.push({ id, mime_type, size, name });
-      found.set(replyId, list);
+      found.set(messageId, list);
     }
     return found;
   }

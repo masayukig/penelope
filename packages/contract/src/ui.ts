@@ -6,14 +6,18 @@ import type { Activity, AgentId, ScheduleWhen, SubAgentStatus } from "./sandbox.
 
 /** `POST /api/messages` (JSON, or multipart with files). */
 export type PostMessageRequest = { text: string };
-/** The id of the `ui` event the message became. */
-export type PostMessageResponse = { id: string };
+/**
+ * The id of the `ui` event the message became, with what the history keeps of
+ * its files: the same as its line of the history.
+ */
+export type PostMessageResponse = { id: string } & OwnerFiles;
 
 /** The event a reply answers: where it came from and its one line. Never its payload. */
 export type Trigger = { source: Source; summary: string };
 
 /**
- * An image the backend copied when a reply carried it (ADR-0032). Its bytes are
+ * An image the backend copied when a reply carried it (ADR-0032), or when the
+ * owner sent it with a message (ADR-0034). Its bytes are
  * `GET /api/assets/<id>`, and never change.
  */
 export type ReplyImage = {
@@ -26,9 +30,28 @@ export type ReplyImage = {
   name: string;
 };
 
+/**
+ * A file the owner sent that the backend keeps no copy of: what is not an
+ * image it copies (ADR-0034). Only its name and size are kept.
+ */
+export type OwnerFile = {
+  /** The name the browser gave, without its directory. */
+  name: string;
+  /** Bytes. */
+  size: number;
+};
+
+/** What the history keeps of the files of one of the owner's messages, in the order sent. */
+export type OwnerFiles = {
+  /** The images copied (ADR-0034). Missing when there are none. */
+  images?: ReplyImage[];
+  /** The other files, by name. Missing when there are none. */
+  files?: OwnerFile[];
+};
+
 /** One line of the conversation. */
 export type HistoryEntry =
-  | { kind: "owner"; id: string; at: string; text: string; agent?: never }
+  | ({ kind: "owner"; id: string; at: string; text: string; agent?: never } & OwnerFiles)
   | {
       kind: "agent";
       id: string;

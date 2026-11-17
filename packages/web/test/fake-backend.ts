@@ -69,17 +69,21 @@ export class FakeBackend {
     }
     if (method === "POST" && url.pathname === "/api/messages") {
       let text = "";
-      let files: string[] = [];
+      let sent: File[] = [];
       if (init.body instanceof FormData) {
         text = String(init.body.get("text") ?? "");
-        files = init.body.getAll("file").map((file) => (file as File).name);
+        sent = init.body.getAll("file") as File[];
       } else {
         text = (JSON.parse(String(init.body)) as { text: string }).text;
       }
-      this.posted.push({ text, files });
+      this.posted.push({ text, files: sent.map((file) => file.name) });
       const id = `m-${this.posted.length}`;
-      this.history.push({ kind: "owner", id, at: new Date().toISOString(), text });
-      return json(202, { id });
+      // As the backend does (ADR-0034): the images are copied, the other files kept by name.
+      const images = sent.filter((file) => file.type.startsWith("image/")).map((file, i) => ({ id: `${id}-a-${i + 1}`, mime_type: file.type, size: file.size, name: file.name }));
+      const others = sent.filter((file) => !file.type.startsWith("image/")).map((file) => ({ name: file.name, size: file.size }));
+      const kept = { ...(images.length === 0 ? {} : { images }), ...(others.length === 0 ? {} : { files: others }) };
+      this.history.push({ kind: "owner", id, at: new Date().toISOString(), text, ...kept });
+      return json(202, { id, ...kept });
     }
     if (url.pathname === "/api/stream") {
       this.streamHeaders.push(new Headers(init.headers));

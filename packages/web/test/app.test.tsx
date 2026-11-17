@@ -232,6 +232,43 @@ describe("the Web UI", () => {
     await waitFor(() => assert.deepEqual(backend.posted, [{ text: "see the file", files: ["values.yaml"] }]));
   });
 
+  it("shows the images the owner sent, read again from the history, and one large when it is pressed", async () => {
+    // Guards against: the owner's own images gone once the page is read again (ADR-0034).
+    const backend = new FakeBackend();
+    backend.history = [
+      {
+        kind: "owner",
+        id: "m-1",
+        at: new Date().toISOString(),
+        text: "見て",
+        images: [{ id: "a-1", mime_type: "image/png", size: 10, name: "shot.png" }],
+        files: [{ name: "notes.txt", size: 5 }],
+      },
+    ];
+    start(backend);
+    await backend.connected();
+    const shot = await within(timeline()).findByRole("button", { name: /shot\.png/ });
+    assert.ok(within(timeline()).getByText("notes.txt"));
+    await act(async () => fireEvent.click(shot));
+    const dialog = await screen.findByRole("dialog");
+    assert.ok([...dialog.querySelectorAll("img")].some((img) => img.getAttribute("src") === "/api/assets/a-1"));
+  });
+
+  it("shows an image the owner just sent from the backend's copy once the message is taken", async () => {
+    // Guards against: the image looking otherwise right after it is sent than after the page is read again.
+    const backend = start();
+    await backend.connected();
+    const picker = (await screen.findAllByLabelText("画像やファイルを添付")).find((element) => element instanceof HTMLInputElement)!;
+    await act(async () => fireEvent.change(picker, { target: { files: [new File(["x"], "shot.png", { type: "image/png" })] } }));
+    await write("見て");
+    await waitFor(() =>
+      assert.deepEqual(
+        [...timeline().querySelectorAll("img")].map((img) => img.getAttribute("src")),
+        ["/api/assets/m-1-a-1"],
+      ),
+    );
+  });
+
   it("goes back to the login when the owner logs out", async () => {
     const backend = start();
     await backend.connected();

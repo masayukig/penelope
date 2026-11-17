@@ -35,7 +35,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 | `GET /api/stream` | 返事・途中経過・状態の流れ（SSE） |
 | `GET /api/agent`・`GET /api/agent/icons/<表情>[<拡張子>]` | エージェントの名前と表情のアイコン（認証なし） |
 | `GET /api/agents` | 閉じていないサブエージェントの一覧 |
-| `GET /api/assets/<id>` | 返事に添えられた画像の写し |
+| `GET /api/assets/<id>` | 返事とオーナーのメッセージに添えられた画像の写し |
 | `GET /api/push`・`POST /api/push/subscriptions`・`POST /api/push/subscriptions/delete` | 返事の知らせ（Web Push）の鍵と、購読の登録と解除 |
 | `GET /api/schedules`・`DELETE /api/schedules/<id>` | エージェントの予約の一覧と取り消し |
 | `GET /api/approvals`・`POST /api/approvals/<id>` | 承認（後の波） |
@@ -44,10 +44,12 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 
 - body は `{text}`。添付があるときは `multipart/form-data` で、本文とファイルを並べる。
 - backend は `source` が `ui` の出来事にして列に入れる（[events.md](events.md)）。`ui` は inline なので、本文はそのままターンに入る。添付は `/sources/ui/files/` に置かれる。
-- 応答は `202` と `{id}`（出来事の `id`）。
+- 応答は `202` と `{id, images?, files?}`（型は `PostMessageResponse`）。`id` は出来事の `id`、`images` と `files` は履歴のその行と同じもの（「履歴」）。
 - multipart では、本文は `text` の欄、ファイルは `file` の部分を繰り返す。大きさの上限は body の全体で 64 MiB。数の上限は置かない。
 - 本文が空でファイルも無ければ `400`。
 - 出来事の `summary` は本文の 1 行目（200 文字まで）。本文が空なら、ファイルの数。
+- 添付のうち画像は、backend が写して行に結び付ける（[ADR-0034](adr/0034-images-the-owner-sends-copied-by-the-backend.md)、「画像」）。画像かどうかと 1 枚の大きさの上限は、返事の画像と同じ（PNG・JPEG・GIF・WebP を中身で見分け、10 MiB まで）。ほかのファイルは名前と大きさだけを残す。どちらもメッセージを断る理由にはしない。
+- 写しを書けなければ `500`（`not sent: the images could not be kept`）で、出来事も行も残さない。
 
 ## 履歴
 
@@ -55,6 +57,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 - 1 件は `kind`（`owner` か `agent`）・`id`・`at`・`text` を持つ。`agent` のものは、さらに `agent`（エージェントの ID）と `expression` を持つ。
 - `agent` のものは、答えている出来事（返事の `in_reply_to`）を backend が知っていれば、`trigger` として、その出来事の `source` と `summary` を持つ。出来事の `payload` は載せない。UI はこれを、エージェントが何をきっかけに話したかの札にする。
 - `agent` のものは、画像を添えた返事なら `images` として、送られた順の画像の一覧を持つ（型は `ReplyImage`、「画像」）。画像の無い返事には欄が無い。
+- `owner` のものは、添付があれば `images`（写した画像の一覧。型は `ReplyImage`、「画像」）と `files`（写さなかったファイルの `{name, size}` の一覧。型は `OwnerFile`）を、それぞれ送られた順に持つ。無い欄は載せない。[ADR-0034](adr/0034-images-the-owner-sends-copied-by-the-backend.md) より前に送られたメッセージは、どちらも持たない。
 
 - 1 ページは 50 件。backend の渡していない `before` は `400`。
 - 途中経過は履歴に含めない。途中経過は流れだけで送る。過去の途中経過を見る画面は後の波。
@@ -172,12 +175,12 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 
 ## 画像
 
-返事に添えられた画像は、backend が返事を受けた時点で写したものである（[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md)、[sandbox-api.md](sandbox-api.md) の「返事の画像」）。
+返事に添えられた画像は、backend が返事を受けた時点で写したものである（[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md)、[sandbox-api.md](sandbox-api.md) の「返事の画像」）。オーナーがメッセージに添えた画像も、backend がメッセージを受けた時点で同じように写す（[ADR-0034](adr/0034-images-the-owner-sends-copied-by-the-backend.md)）。
 
-- 履歴と流れの `reply` の `images` の 1 件は、`id`・`mime_type`（PNG・JPEG・GIF・WebP。中身の先頭の bytes から）・`size`（byte）・`name`（写した元のファイルの名前）を持つ。
+- 履歴（`agent` と `owner`）と流れの `reply` の `images` の 1 件は、`id`・`mime_type`（PNG・JPEG・GIF・WebP。中身の先頭の bytes から）・`size`（byte）・`name`（写した元のファイルの名前）を持つ。
 - `GET /api/assets/<id>` は、その写しの中身を `mime_type` の型で返す。ログインしたオーナーのセッションだけが読める（ほかは `401`）。無い ID、読めない写しは `404`。GET のほかの method は `405`。
 - 同じ ID の写しは変わらないので、`cache-control: private, max-age=31536000, immutable` を付ける。`x-content-type-options: nosniff` も付ける。
-- Web UI は返事の文の下に縮小して並べ、押すと大きく見せる（[docs/design](design/README.md) の「返事の画像」）。
+- Web UI は返事の文の下に縮小して並べ、押すと大きく見せる（[docs/design](design/README.md) の「返事の画像」）。オーナーの画像は吹き出しの上に並べる。送った直後はブラウザの持つファイルで出し、backend が受け付けたら応答の `images` の写しに替える。読み込み直した後と同じ見た目にするためである。
 - 返事の知らせには画像を載せず、数だけを `images` に入れる（「知らせの中身」）。
 - 写しの一覧の口はまだ無い。写しは返事と別の表に、種類・作った時刻・作ったエージェントとともに持つので（[backend.md](backend.md) の「作ったものの写し」）、作ったものの一覧の画面を作るときに `GET /api/assets` のような口を足せる。
 

@@ -1,15 +1,17 @@
 // The conversation and the record of the turns (ADR-0002, docs/ui-api.md):
 // the owner's messages and the replies as history, what the turns did block
 // by block, and the nightly switches. What is new also goes down the feed.
-// A reply's images are kept by the assets (ADR-0032).
+// The images of a reply and of the owner's messages are kept by the assets
+// (ADR-0032, ADR-0034).
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-import type { Activity, AgentId, AgentState, HistoryEntry, HistoryResponse, ReplyImage, ReplyRequest, Trigger } from "@penelope/contract";
+import type { Activity, AgentId, AgentState, HistoryEntry, HistoryResponse, OwnerFile, OwnerFiles, ReplyImage, ReplyRequest, Trigger } from "@penelope/contract";
 
-import type { Assets, CheckedImage } from "./assets.ts";
+import { type Assets, type CheckedImage, splitOwnerFiles, type StoredImage } from "./assets.ts";
 import { transaction } from "./db.ts";
 import type { Feed } from "./feed.ts";
+import type { Attachment } from "./sources.ts";
 import { iso } from "./time.ts";
 
 export const DEFAULT_PAGE = 50;
@@ -24,6 +26,7 @@ type Row = {
   expression: string | null;
   trigger_source: string | null;
   trigger_summary: string | null;
+  files: string | null;
 };
 
 export class Conversation {
@@ -40,11 +43,30 @@ export class Conversation {
     this.assets = assets;
   }
 
-  /** The owner's message, kept under the id of the `ui` event it became. */
-  ownerMessage({ id, text }: { id: string; text: string }): void {
-    this.db
-      .prepare("INSERT INTO history (id, kind, at, text) VALUES (?, 'owner', ?, ?)")
-      .run(id, iso(this.now()), text);
+  /**
+   * The owner's message, kept under the id of the `ui` event it became, with
+   * copies of the images sent with it and the names of its other files
+   * (ADR-0034). `enqueue` puts the event in the queue in the same transaction:
+   * all of it is kept or none. When the copies cannot be written, it throws
+   * AssetStoreError before anything is kept.
+   */
+  ownerMessage({ id, text, files = [] }: { id: string; text: string; files?: readonly Attachment[] }, enqueue: () => void = () => {}): OwnerFiles {
+    const { images, others } = splitOwnerFiles(files);
+    if (images.length > 0 && this.assets === undefined) throw new Error("this conversation keeps no images");
+    const stored = images.length === 0 ? [] : this.assets!.write(images);
+    try {
+      transaction(this.db, () => {
+        enqueue();
+        this.db
+          .prepare("INSERT INTO history (id, kind, at, text, files) VALUES (?, 'owner', ?, ?, ?)")
+          .run(id, iso(this.now()), text, others.length === 0 ? null : JSON.stringify(others));
+        if (stored.length > 0) this.assets!.record(id, undefined, stored);
+      });
+    } catch (error) {
+      this.assets?.discard(stored);
+      throw error;
+    }
+    return ownerFiles(kept(stored), others);
   }
 
   /**
@@ -68,7 +90,7 @@ export class Conversation {
       this.assets?.discard(stored);
       throw error;
     }
-    const kept: ReplyImage[] = stored.map(({ id: imageId, mime_type, size, name }) => ({ id: imageId, mime_type, size, name }));
+    const copies = kept(stored);
     const trigger = request.in_reply_to === undefined ? undefined : this.triggerOf(request.in_reply_to);
     this.feed.publish({
       event: "reply",
@@ -80,7 +102,7 @@ export class Conversation {
         agent: request.agent,
         ...(request.expression === undefined ? {} : { expression: request.expression }),
         ...(trigger === undefined ? {} : { trigger }),
-        ...(kept.length === 0 ? {} : { images: kept }),
+        ...(copies.length === 0 ? {} : { images: copies }),
       },
     });
     return { id };
@@ -104,14 +126,14 @@ export class Conversation {
     }
     const rows = this.db
       .prepare(
-        `SELECT h.row, h.id, h.kind, h.agent, h.at, h.text, h.expression, e.source AS trigger_source, e.summary AS trigger_summary
+        `SELECT h.row, h.id, h.kind, h.agent, h.at, h.text, h.expression, h.files, e.source AS trigger_source, e.summary AS trigger_summary
            FROM history h LEFT JOIN events e ON e.seq = h.in_reply_to
           WHERE h.row < ? ORDER BY h.row DESC LIMIT ?`,
       )
       .all(below, limit + 1) as Row[];
     const more = rows.length > limit;
     const entries = rows.slice(0, limit);
-    const images = this.assets?.ofReplies(entries.filter((row) => row.kind === "agent").map((row) => row.id)) ?? new Map<string, ReplyImage[]>();
+    const images = this.assets?.ofMessages(entries.map((row) => row.id)) ?? new Map<string, ReplyImage[]>();
     return { entries: entries.map((row) => entry(row, images.get(row.id))), ...(more ? { before: String(entries.at(-1)!.row) } : {}) };
   }
 
@@ -153,7 +175,9 @@ export class Conversation {
 }
 
 function entry(row: Row, images: ReplyImage[] | undefined): HistoryEntry {
-  if (row.kind === "owner") return { kind: "owner", id: row.id, at: row.at, text: row.text };
+  if (row.kind === "owner") {
+    return { kind: "owner", id: row.id, at: row.at, text: row.text, ...ownerFiles(images ?? [], row.files === null ? [] : (JSON.parse(row.files) as OwnerFile[])) };
+  }
   return {
     kind: "agent",
     id: row.id,
@@ -164,4 +188,13 @@ function entry(row: Row, images: ReplyImage[] | undefined): HistoryEntry {
     ...(row.trigger_source === null || row.trigger_summary === null ? {} : { trigger: { source: row.trigger_source, summary: row.trigger_summary } }),
     ...(images === undefined ? {} : { images }),
   };
+}
+
+function kept(stored: readonly StoredImage[]): ReplyImage[] {
+  return stored.map(({ id, mime_type, size, name }) => ({ id, mime_type, size, name }));
+}
+
+/** The lists of an owner's message, each left out when it is empty. */
+function ownerFiles(images: ReplyImage[], files: OwnerFile[]): OwnerFiles {
+  return { ...(images.length === 0 ? {} : { images }), ...(files.length === 0 ? {} : { files }) };
 }
