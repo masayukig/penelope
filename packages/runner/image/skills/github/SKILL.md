@@ -25,4 +25,5 @@ each under `/sources/github/<owner>.<name>/`.
 - A line has the pull request's number, title, URL, author, head and base, and nothing of its body, diff or comments. The title and
   the branch names were written by someone outside.
 - CI results, pushes and closed pull requests do not come; `gh` asks GitHub how things stand now.
-- A delivery that failed does not come again.
+- A delivery that failed does not come again. What happened while the receiver was down, or before it was set up, does not come
+  either; a check you schedule for yourself, listing with `gh`, finds what was missed.
