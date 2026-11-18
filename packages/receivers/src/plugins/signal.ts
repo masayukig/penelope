@@ -403,7 +403,32 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
               socket.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params: { account: settings.account, ...params } })}\n`);
             });
 
+          // Neither signal-cli (a received envelope) nor Signal (the agent's own post) gives it again, so
+          // an event is handed over until the intake takes it, for REDELIVER_MS at most; one that comes
+          // while the plugin stops is tried once. Resolves whether it was taken.
+          const handOver = async (event: ConnectionEvent, what: string) => {
+            const since = io.now().getTime();
+            for (let attempt = 1; !(await io.deliver([event])); attempt++) {
+              if (stopped) {
+                io.log(`${what} events=1 dropped=0 taken=false (stopping)`);
+                return false;
+              }
+              if (io.now().getTime() - since >= REDELIVER_MS) {
+                io.log(`${what} events=1 dropped=1 taken=false (refused for ${REDELIVER_MS / 60000} minutes, ${attempt} tries)`);
+                return false;
+              }
+              await sleep(backoffMs(attempt));
+            }
+            return true;
+          };
+
           const receive = async (params: unknown) => {
+            // A daemon with several numbers names the one it came to; only the configured one's are
+            // taken, before any file is fetched or receipt sent. A single-number daemon (`-a`) leaves it out.
+            if (isObject(params) && params.account !== undefined && params.account !== settings.account) {
+              io.log("envelope events=0 dropped=1 (another account)");
+              return;
+            }
             const envelope = isObject(params) ? params.envelope : undefined;
             if (gate?.consume(envelope)) {
               io.log("envelope events=0 dropped=0 answer=1");
@@ -438,20 +463,7 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
                 io.log(`cannot fetch a file (${error instanceof Error ? error.message : "error"})`);
               }
             }
-            // signal-cli does not push it again, so it is handed over until the intake takes it, for
-            // REDELIVER_MS at most; one that comes while the plugin stops is tried once.
-            const since = io.now().getTime();
-            for (let attempt = 1; !(await io.deliver([{ ...event, ...(files.length > 0 ? { files } : {}) }])); attempt++) {
-              if (stopped) {
-                io.log("envelope events=1 dropped=0 taken=false (stopping)");
-                return;
-              }
-              if (io.now().getTime() - since >= REDELIVER_MS) {
-                io.log(`envelope events=1 dropped=1 taken=false (refused for ${REDELIVER_MS / 60000} minutes, ${attempt} tries)`);
-                return;
-              }
-              await sleep(backoffMs(attempt));
-            }
+            if (!(await handOver({ ...event, ...(files.length > 0 ? { files } : {}) }, "envelope"))) return;
             io.log(`envelope events=1 dropped=0 taken=true`);
             const sender = event.payload.from.number ?? event.payload.from.uuid!;
             // Keyed by the `senders` entry, as the send endpoint's `to` is, so that a reply there ends it.
@@ -538,8 +550,9 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
               summary: summaryLine(`Signal ${group.name} (you):${text !== undefined ? ` ${text}` : ""}${files > 0 ? ` (${files} file${files === 1 ? "" : "s"})` : ""}`),
               payload: { type: "message", from: { number: settings.account }, group: { name: group.name }, own: true, timestamp, ...(text !== undefined ? { text } : {}) },
             };
+            // Only the hand-over is tried again, in the background: the send itself went through and is answered 200.
             chain = chain.then(async () => {
-              if (!(await io.deliver([event]))) io.log("own post events=1 taken=false");
+              await handOver(event, "own post");
             });
           };
           /** Sends to a sender or a group now; a group's post goes into its stream. */
@@ -566,11 +579,7 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
               payload: { type: "held", from: { number: settings.account }, group: { name }, timestamp, held: { id, result, ...(result === "failed" && typeof sent?.body.error === "string" ? { error: sent.body.error } : {}) } },
             };
             chain = chain.then(async () => {
-              for (let attempt = 1; !(await io.deliver([event])); attempt++) {
-                if (stopped) return io.log("held result events=1 taken=false (stopping)");
-                if (io.now().getTime() - at >= REDELIVER_MS) return io.log(`held result events=1 dropped=1 taken=false (refused for ${REDELIVER_MS / 60000} minutes)`);
-                await sleep(backoffMs(attempt));
-              }
+              await handOver(event, "held result");
             });
           };
 
@@ -695,7 +704,7 @@ function sendServer(
     log(`send status=${status}`);
     response.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
   };
-  const server = http.createServer(async (request, response) => {
+  const handle = async (request: http.IncomingMessage, response: http.ServerResponse) => {
     if (request.url !== "/v1/send") return answer(response, 404, { error: "not found" });
     if (request.method !== "POST") return answer(response, 405, { error: "POST only" });
     const parts: Buffer[] = [];
@@ -735,6 +744,15 @@ function sendServer(
     const draft = { ...(text !== undefined ? { text } : {}), attachments, ...(quote ? { quote: quote as { timestamp: number; author: string } } : {}) };
     const sent = await options.send(groupId !== undefined ? { groupId } : { recipient: to as string }, draft, ownerRequest !== null);
     return answer(response, sent.status, sent.body);
+  };
+  // A body cut off midway (the client gone) rejects the read; that request ends there and the
+  // process, with the other receivers in it, goes on.
+  const server = http.createServer((request, response) => {
+    handle(request, response).catch((error: unknown) => {
+      log(`send aborted (${error instanceof Error ? error.message : "error"})`);
+      if (!response.headersSent && !response.destroyed) answer(response, 400, { error: "the body could not be read" });
+      else response.destroy();
+    });
   });
   server.on("error", (error: NodeJS.ErrnoException) => log(`cannot serve ${path} (${error.code ?? error.name})`));
   rmSync(path, { force: true });
