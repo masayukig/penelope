@@ -32,7 +32,8 @@ commands:
   faces                           the faces --face takes, with the URL Slack is given
 
 The bot token is SLACK_BOT_TOKEN, or SLACK_BOT_TOKEN_<NAME> with --workspace
-(upper case, - as _). The faces are the avatar's at PENELOPE_PUBLIC_URL.
+(upper case, - as _). The faces are the avatar's at PENELOPE_PUBLIC_URL; Slack
+is given PENELOPE_SLACK_ICON_BASE_URL/FACE.png for them when that is set.
 
 options:
   --sources DIR    where /sources is (default ${DEFAULT_SOURCES})

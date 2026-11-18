@@ -131,6 +131,14 @@ describe("slackctl post", () => {
     assert.equal(seen[1]!.form.icon_url, `${PUBLIC}/api/agent/icons/happy.png`);
   });
 
+  test("puts the face under PENELOPE_SLACK_ICON_BASE_URL as the icon when it is set", async () => {
+    const { seen, fetcher } = world();
+    const env = { ...ENV, PENELOPE_SLACK_ICON_BASE_URL: "https://icons.example.com/iris" };
+    const result = await run(["post", "--channel", "C0DEV", "--face", "happy"], env, online(fetcher, "やった"));
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(seen[1]!.form.icon_url, "https://icons.example.com/iris/happy.png");
+  });
+
   test("posts nothing with a face the avatar does not have, or without the public URL", async () => {
     const { fetcher, calls } = world();
     const odd = await run(["post", "--channel", "C0DEV", "--face", "smug"], ENV, online(fetcher, "hi"));
@@ -244,6 +252,27 @@ describe("slackctl faces", () => {
     const result = await run(["faces"], ENV, online(fetcher));
     assert.equal(result.code, 0, result.stderr);
     assert.equal(result.stdout, `happy\t${PUBLIC}/api/agent/icons/happy.webp\n`);
+  });
+
+  test("gives Slack the faces under PENELOPE_SLACK_ICON_BASE_URL when it is set", async () => {
+    const { fetcher } = world();
+    const result = await run(["faces"], { ...ENV, PENELOPE_SLACK_ICON_BASE_URL: "https://icons.example.com/iris/" }, online(fetcher));
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(
+      result.stdout,
+      "happy\thttps://icons.example.com/iris/happy.png\nneutral\thttps://icons.example.com/iris/neutral.png\nsad\thttps://icons.example.com/iris/sad.png\n",
+    );
+  });
+
+  test("encodes the face as one path segment under PENELOPE_SLACK_ICON_BASE_URL", async () => {
+    const agent = { name: "Iris", icons: { "happy#wide": "/api/agent/icons/happy%23wide.png", "why?": "/api/agent/icons/why%3F.png" } };
+    const { fetcher } = world({ agent });
+    const result = await run(["faces"], { ...ENV, PENELOPE_SLACK_ICON_BASE_URL: "https://icons.example.com/iris" }, online(fetcher));
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(
+      result.stdout,
+      "happy#wide\thttps://icons.example.com/iris/happy%23wide.png\nwhy?\thttps://icons.example.com/iris/why%3F.png\n",
+    );
   });
 
   test("says when the avatar has no faces", async () => {

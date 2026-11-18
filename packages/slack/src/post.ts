@@ -48,10 +48,13 @@ function publicUrl(env: Env): string {
 /**
  * Each face of the avatar, with the URL of its image the backend gives
  * without a login: its PNG when it has one, as Slack may not take the Web
- * UI's WebP (docs/ui-api.md, "エージェント").
+ * UI's WebP (docs/ui-api.md, "エージェント"). With
+ * PENELOPE_SLACK_ICON_BASE_URL, for a backend Slack cannot reach, the URL is
+ * <base>/<face>.png there instead.
  */
 export async function facesOf(env: Env, online: Online): Promise<Map<string, string>> {
   const base = publicUrl(env);
+  const iconBase = env.PENELOPE_SLACK_ICON_BASE_URL?.replace(/\/+$/, "");
   const url = new URL("/api/agent", base).href;
   let agent: { icons?: unknown; png_icons?: unknown };
   try {
@@ -67,7 +70,7 @@ export async function facesOf(env: Env, online: Online): Promise<Map<string, str
   const faces = new Map<string, string>();
   for (const name of Object.keys(icons).sort()) {
     const way = icons[name];
-    if (typeof way === "string") faces.set(name, new URL(way, base).href);
+    if (typeof way === "string") faces.set(name, iconBase ? `${iconBase}/${encodeURIComponent(name)}.png` : new URL(way, base).href);
   }
   if (faces.size === 0) throw new Failure(`the avatar has no faces (${url})`);
   return faces;
