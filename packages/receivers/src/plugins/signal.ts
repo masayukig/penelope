@@ -612,9 +612,10 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
                 senders: settings.senders,
                 groups,
                 log: io.log,
-                send: async (to, draft) => {
+                send: async (to, draft, ownerRequest) => {
+                  if (ownerRequest && !gate) return { status: 400, body: { error: "owner_request: this deployment does not hold group posts for the owner (no approvals)" } };
                   if (!("groupId" in to) || !gate) return send(to, draft);
-                  const sent = await gate.post({ ...draft, groupId: to.groupId });
+                  const sent = await gate.post({ ...draft, groupId: to.groupId }, ownerRequest);
                   if (sent.status !== 200) endTyping(`group:${to.groupId}`, true);
                   return sent;
                 },
@@ -688,8 +689,9 @@ async function sendVia(call: (method: string, params: Raw) => Promise<unknown>, 
  * `POST /v1/send` on a Unix socket: the text and files of a form
  * (multipart/form-data or urlencoded) sent to one of the allowed senders or
  * groups. Fields: `text`, `to` (a sender) or `group` (a group's name; with
- * neither, the first sender), `file` (repeated), and `quote_timestamp` with
- * `quote_author` to send it as a quoted reply.
+ * neither, the first sender), `file` (repeated), `quote_timestamp` with
+ * `quote_author` to send it as a quoted reply, and `owner_request=1` on a
+ * group post the owner asked for in their DM (held for the owner at once).
  */
 function sendServer(
   path: string,
@@ -697,7 +699,8 @@ function sendServer(
     senders: readonly string[];
     groups: ReadonlyMap<string, string>;
     log: (line: string) => void;
-    send: (to: { recipient: string } | { groupId: string }, draft: Omit<Draft, "groupId">) => Promise<Sent>;
+    /** `ownerRequest`: a group post the agent says the owner asked for in their DM, to be held for the owner (approvals). */
+    send: (to: { recipient: string } | { groupId: string }, draft: Omit<Draft, "groupId">, ownerRequest: boolean) => Promise<Sent>;
   },
 ) {
   const { senders, groups, log } = options;
@@ -729,6 +732,9 @@ function sendServer(
     if (groupName !== null && groupId === undefined) return answer(response, 403, { error: "group: not one of the groups this agent may write to" });
     const to = form.get("to") ?? senders[0]!;
     if (groupId === undefined && (typeof to !== "string" || !senders.includes(to))) return answer(response, 403, { error: "to: not one of the senders this agent may write to" });
+    const ownerRequest = form.get("owner_request");
+    if (ownerRequest !== null && ownerRequest !== "1") return answer(response, 400, { error: "owner_request: 1, or left out" });
+    if (ownerRequest !== null && groupId === undefined) return answer(response, 400, { error: "owner_request: only on a post to a group" });
     const files = form.getAll("file").filter((file): file is File => typeof file !== "string");
     if (text === undefined && files.length === 0) return answer(response, 400, { error: "neither text nor a file" });
     const quoteTimestamp = form.get("quote_timestamp");
@@ -740,7 +746,7 @@ function sendServer(
     }
     const attachments = await Promise.all(files.map(dataUri));
     const draft = { ...(text !== undefined ? { text } : {}), attachments, ...(quote ? { quote: quote as { timestamp: number; author: string } } : {}) };
-    const sent = await options.send(groupId !== undefined ? { groupId } : { recipient: to as string }, draft);
+    const sent = await options.send(groupId !== undefined ? { groupId } : { recipient: to as string }, draft, ownerRequest !== null);
     return answer(response, sent.status, sent.body);
   };
   // A body cut off midway (the client gone) rejects the read; that request ends there and the

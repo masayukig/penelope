@@ -34,7 +34,7 @@ is its `payload.timestamp` and `quote_author` its `from.number` (or `from.uuid` 
 
 ```
 printf '%s' '<text>' | curl -sS --fail-with-body -F 'text=<-' [-F 'to=+81…' | -F 'group=<name>'] \
-  [-F 'quote_timestamp=…' -F 'quote_author=…'] [-F 'file=@picture.png'] https://signal.penelope.internal/v1/send
+  [-F 'quote_timestamp=…' -F 'quote_author=…'] [-F 'owner_request=1'] [-F 'file=@picture.png'] https://signal.penelope.internal/v1/send
 ```
 
 - Give a file its type when you can, `-F 'file=@video.webp;type=image/webp'`: curl itself knows only a few (png, jpg,
@@ -50,6 +50,11 @@ printf '%s' '<text>' | curl -sS --fail-with-body -F 'text=<-' [-F 'to=+81…' | 
     `expired` (not decided in time) or `failed`.
   - `422 {"issues": [...], "returns_left": n}`: the judge sent it back (the issues are what it flagged: promise-for-owner,
     hinting-at-secret, false-account, fabricated-consent, private-matter). Rewrite it and send again, or leave it.
+  - When your owner asked you in your direct conversation to post something to a group, add `-F 'owner_request=1'`.
+    The judge sees only the group, not your owner's request, so it would send such a post back; with the mark it goes to
+    your owner at once instead (`202`, reason "your owner asked for it"). It is still held: nothing goes to the group
+    until your owner gives 👍. Set it only when your owner asked for that post in the DM, not for posts you decided on
+    yourself. Without approvals in the deployment it is refused (`400`).
   - Your direct messages to the allowed senders are never held.
 - While you work on a direct message, or a group message that mentions you or quotes you, its conversation shows you typing,
   until you send there or a few minutes pass. Sending stops it, so a short "looking into it" message also ends it.
