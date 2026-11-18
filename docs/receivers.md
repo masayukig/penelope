@@ -646,7 +646,7 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 - 本文は末尾の空白と改行を除いて `send` の `message` に、ファイルは `data:<種類>;filename=<名前>;base64,…` の形で `attachments` に入れる。グループは `groupId`、引用は `quoteTimestamp`・`quoteAuthor` で渡す。
   - `<名前>` はパーセントエンコードする（`encodeURIComponent`）。signal-cli は data URI の引数の値を URL デコードするので、そのままだと `%` は壊れ、`+` は空白になる。
   - `<種類>` は form のファイルの `Content-Type` の `type/subtype`（`;` から後の引数は落とす）。それが無いか `application/octet-stream` なら、名前の拡張子（`png`・`jpg`・`jpeg`・`gif`・`webp`・`mp4`・`mov`・`m4a`・`ogg`・`pdf`）から決め、どれでもなければ `application/octet-stream` のまま。curl の `-F file=@x.webp` は WebP や MP4 を `application/octet-stream` で送り、そのまま渡すと Signal は画像や動画でなくファイルとして見せるためである。
-- グループに送れたら、その発言を `own: true` の出来事（`batch`）としてそのグループの `stream` に入れる。Signal は自分の送った発言を受信として返さないので、そうしないとグループの記録にエージェントの発言が残らない（Slack のエージェント自身の発言と同じ扱い）。1 対 1 の返事は入れない。
+- グループに送れたら、その発言を `own: true` の出来事（`batch`）としてそのグループの `stream` に入れる。Signal は自分の送った発言を受信として返さないので、そうしないとグループの記録にエージェントの発言が残らない（Slack のエージェント自身の発言と同じ扱い）。取り込み口が受けなければ、受けた envelope と同じ規則で渡し直す（送り直しはせず、応答は 200 のまま）。1 対 1 の返事は入れない。
 - 応答の body は `{error}` の JSON。ログは `send status=<番号>` だけで、本文と宛先は書かない。
 - 使い方は sandbox の image の skill `signal` にある。
 
@@ -658,6 +658,7 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 | --- | --- |
 | `connected`・`connection error (<code>)`・`connecting again in <秒>s` | つないだ・切れた |
 | `envelope events=<数> dropped=<数>`（受けたら `taken=true`、止めるときに送れなければ `taken=false (stopping)`、30 分受けられずに捨てたら `dropped=1 taken=false (refused for 30 minutes, <回数> tries)`） | envelope 1 つごと |
+| `own post events=1 dropped=<数> taken=false (…)`（括弧の中は envelope と同じ） | グループに送れた自分の発言を取り込み口が受けなかった |
 | `cannot fetch a file (…)`・`cannot send a read receipt (…)` | JSON-RPC が断られた |
 | `send status=<番号>` | 送り口の要求 1 つごと |
 
