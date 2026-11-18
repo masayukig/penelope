@@ -6,6 +6,7 @@ import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Lightbox } from "@astryxdesign/core/Lightbox";
 import { Markdown } from "@astryxdesign/core/Markdown";
 import { Thumbnail } from "@astryxdesign/core/Thumbnail";
+import { Link } from "@astryxdesign/core/Link";
 import { Fragment, useState } from "react";
 
 import type { Source } from "@penelope/contract";
@@ -14,6 +15,7 @@ import { assetUrl } from "../model/api.ts";
 import type { AgentItem, LocalFile, OwnerItem, TimelineItem } from "../model/store.ts";
 import { AgentAvatar, useAgent } from "./agent.tsx";
 import { Linked, markdownLinks } from "./links.tsx";
+import { hashOf } from "./route.ts";
 import { dayOf, faceWord, sourceWord, timeOf, triggerWords, words } from "./words.ts";
 
 export function Timeline({
@@ -86,7 +88,7 @@ function Reply({ item, wide, onOpen }: { item: AgentItem; wide: boolean; onOpen:
   // A reply to the owner's own message needs no word of what started it.
   const trigger = item.trigger !== undefined && item.trigger.source !== "ui" ? item.trigger : undefined;
   const name = (
-    <span className="reply-name">
+    <span className="reply-name" data-reply={item.id}>
       <span className="reply-who">
         <AgentAvatar size={24} expression={item.expression} />
         <strong>{agent.name}</strong>
@@ -95,7 +97,22 @@ function Reply({ item, wide, onOpen }: { item: AgentItem; wide: boolean; onOpen:
       {trigger ? <TriggerMark source={trigger.source} summary={trigger.summary} /> : null}
     </span>
   );
-  const metadata = <ChatMessageMetadata timestamp={timeOf(item.at)} />;
+  const metadata = (
+    <ChatMessageMetadata
+      timestamp={
+        item.turn_id === undefined ? (
+          timeOf(item.at)
+        ) : (
+          <span className="reply-time">
+            <span>{timeOf(item.at)}</span>
+            <Link href={hashOf({ place: "log", page: { kind: "turn", id: item.turn_id } })} color="secondary" hasUnderline className="reply-turn">
+              {words.record.seeTurn}
+            </Link>
+          </span>
+        )
+      }
+    />
+  );
   // Without a bubble, the reply and its name and time sit flush with the row's edge.
   if (wide) {
     return (

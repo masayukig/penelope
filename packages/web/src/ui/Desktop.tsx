@@ -15,9 +15,11 @@ import { StatusLabel } from "./Now.tsx";
 import { LogoutIcon } from "./icons.tsx";
 import { type Notices, NoticesButton } from "./Notices.tsx";
 import { AgentNow } from "./Panel.tsx";
+import { RecordPlace } from "./Record.tsx";
+import { type Route, useRoute } from "./route.ts";
 import { Schedules } from "./Schedules.tsx";
 import { SubAgentCount } from "./SubAgents.tsx";
-import { type Place, PlaceItems, Placeholder } from "./places.tsx";
+import { PlaceItems, Placeholder } from "./places.tsx";
 import { Talk, type TalkProps } from "./Talk.tsx";
 import { words } from "./words.ts";
 
@@ -31,11 +33,41 @@ export type ScreenProps = TalkProps & {
   /** For the places that read the backend themselves. */
   api: Api;
   onUnauthorized: () => void;
+  /** The failures of the activity record not seen. */
+  unseen: number;
+  /** Changes whenever the stream says something that may have changed the activity record. */
+  recordChanges: number;
+  /** The backend was told the owner looked at the activity record. */
+  onSeen: () => void;
 };
+
+/** What the middle of the screen shows for the route: the same on a PC and a phone. */
+export function PlaceBody({ route, props, topInset = false }: { route: Route; props: ScreenProps; topInset?: boolean }) {
+  switch (route.place) {
+    case "events":
+      return <Schedules api={props.api} onUnauthorized={props.onUnauthorized} topInset={topInset} />;
+    case "log":
+      return (
+        <RecordPlace
+          api={props.api}
+          onUnauthorized={props.onUnauthorized}
+          page={route.page}
+          unseen={props.unseen}
+          changes={props.recordChanges}
+          onSeen={props.onSeen}
+          topInset={topInset}
+        />
+      );
+    case "talk":
+      return null;
+    default:
+      return <Placeholder place={route.place} />;
+  }
+}
 
 export function Desktop(props: ScreenProps) {
   const agent = useAgent();
-  const [place, setPlace] = useState<Place>("talk");
+  const [route, go] = useRoute();
   const [open, setOpen] = useState(true);
   // The rail starts folded to its icons, to leave the width to the conversation.
   const [folded, setFolded] = useState(true);
@@ -52,7 +84,7 @@ export function Desktop(props: ScreenProps) {
   );
   const nav = (
     <SideNav aria-label="場所" collapsible={{ isCollapsed: folded, onCollapsedChange: setFolded }} footer={footer}>
-      <PlaceItems place={place} onChange={setPlace} />
+      <PlaceItems place={route.place} onChange={(place) => go({ place } as Route)} unseen={route.place === "log" ? 0 : props.unseen} folded={folded} />
     </SideNav>
   );
   const main = (
@@ -66,13 +98,7 @@ export function Desktop(props: ScreenProps) {
           <AgentAvatar size={36} expression={props.expression} />
         </button>
       </header>
-      {place === "talk" ? (
-        <Talk {...props} />
-      ) : place === "events" ? (
-        <Schedules api={props.api} onUnauthorized={props.onUnauthorized} />
-      ) : (
-        <Placeholder place={place} />
-      )}
+      {route.place === "talk" ? <Talk {...props} jump={route.reply} /> : <PlaceBody route={route} props={props} />}
     </div>
   );
   return (

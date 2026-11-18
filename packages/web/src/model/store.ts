@@ -49,6 +49,14 @@ export type State = {
   subAgents: SubAgentEntry[];
   /** The blocks of each sub-agent's turn under way, by its name. */
   subTurns: Record<string, Activity[]>;
+  /** The failures of the activity record the owner has not seen (ADR-0038). */
+  unseen: number;
+  /**
+   * Counts what the stream says that may have changed the activity record: a
+   * turn's start or end, a sub-agent closed, the unseen failures. The record's
+   * list reads its newest day again when it changes.
+   */
+  recordChanges: number;
 };
 
 /** A sub-agent as the screen keeps it: times are RFC 3339. */
@@ -65,6 +73,8 @@ export const initialState: State = {
   signedIn: undefined,
   subAgents: [],
   subTurns: {},
+  unseen: 0,
+  recordChanges: 0,
 };
 
 export type Action =
@@ -73,6 +83,8 @@ export type Action =
   | { type: "stream"; event: StreamEvent }
   /** GET /api/agents, read on each connection. */
   | { type: "agents"; agents: SubAgent[] }
+  /** GET /api/record/unseen, read on each connection, or POST /api/record/seen, after which none is unseen. */
+  | { type: "unseen"; unseen: number }
   | { type: "connection"; state: Connection }
   | { type: "signed-in" }
   | { type: "unauthorized" }
@@ -105,6 +117,8 @@ export function reduce(state: State, action: Action): State {
         ...state,
         subAgents: action.agents.map((a) => ({ agent: a.agent, purpose: a.purpose, state: a.state, startedAt: a.started_at, stateSince: a.state_since })),
       };
+    case "unseen":
+      return { ...state, unseen: action.unseen };
     case "connection":
       return { ...state, connection: action.state };
     case "signed-in":
@@ -141,6 +155,25 @@ export function reduce(state: State, action: Action): State {
 }
 
 function onStream(state: State, event: StreamEvent): State {
+  const next = onStreamEvent(state, event);
+  return changesRecord(event) ? { ...next, recordChanges: next.recordChanges + 1 } : next;
+}
+
+/** Whether the event may have added or changed a row of the activity record. */
+function changesRecord(event: StreamEvent): boolean {
+  switch (event.event) {
+    case "activity":
+      return event.data.activity.kind === "turn_start" || event.data.activity.kind === "turn_end";
+    case "agent":
+      return event.data.closed;
+    case "record":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function onStreamEvent(state: State, event: StreamEvent): State {
   switch (event.event) {
     case "reply":
       return { ...state, items: merge(state.items, [fromHistory(event.data)]) };
@@ -173,9 +206,8 @@ function onStream(state: State, event: StreamEvent): State {
       const now = new Date().toISOString();
       return { ...state, subAgents: [...state.subAgents, { agent, purpose, state: "waiting", startedAt: now, stateSince: now }] };
     }
-    // The activity record's unseen failures are not shown yet.
     case "record":
-      return state;
+      return { ...state, unseen: event.data.unseen };
   }
 }
 

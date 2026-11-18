@@ -7,6 +7,14 @@ import type {
   PushResponse,
   PushSubscriptionRequest,
   PushUnsubscribeRequest,
+  RecordDayResponse,
+  RecordKind,
+  RecordNightResponse,
+  RecordResultResponse,
+  RecordSeenResponse,
+  RecordSubAgentResponse,
+  RecordTurnResponse,
+  RecordUnseenResponse,
   SchedulesResponse,
   SubAgentsResponse,
 } from "@penelope/contract";
@@ -46,7 +54,21 @@ export type Api = {
   schedules(): Promise<SchedulesResponse>;
   /** Removes one of her schedules; Refused with 404 when it is already gone. */
   removeSchedule(id: string): Promise<void>;
+  /** One day of the activity record, newest first, narrowed as asked; today when no day is given. */
+  record(query: RecordQuery): Promise<RecordDayResponse>;
+  recordTurn(id: string): Promise<RecordTurnResponse>;
+  /** The whole output of one tool's result in a turn; Refused with 404 when it is gone. */
+  recordResult(turn: string, call: string): Promise<RecordResultResponse>;
+  recordNight(id: string): Promise<RecordNightResponse>;
+  recordSubAgent(name: string, before?: string): Promise<RecordSubAgentResponse>;
+  /** How many failures the owner has not seen. */
+  recordUnseen(): Promise<RecordUnseenResponse>;
+  /** The owner opened the record now: what was unseen until now, and when she opened it before. */
+  recordSeen(): Promise<RecordSeenResponse>;
 };
+
+/** The narrowing of `GET /api/record` (docs/ui-api.md, "活動の記録"). */
+export type RecordQuery = { day?: string; tz: string; failed?: boolean; agent?: string; kind?: RecordKind };
 
 export function createApi(fetch: Fetch): Api {
   const call = async (path: string, init: RequestInit = {}): Promise<Response> => {
@@ -96,5 +118,23 @@ export function createApi(fetch: Fetch): Api {
     removeSchedule: async (id) => {
       await call(`/api/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
     },
+    record: async ({ day, tz, failed, agent, kind }) => {
+      const query = new URLSearchParams({ tz });
+      if (day !== undefined) query.set("day", day);
+      if (failed) query.set("failed", "1");
+      if (agent !== undefined) query.set("agent", agent);
+      if (kind !== undefined) query.set("kind", kind);
+      return (await call(`/api/record?${query}`)).json() as Promise<RecordDayResponse>;
+    },
+    recordTurn: async (id) => (await call(`/api/record/turns/${encodeURIComponent(id)}`)).json() as Promise<RecordTurnResponse>,
+    recordResult: async (turn, callId) =>
+      (await call(`/api/record/turns/${encodeURIComponent(turn)}/results/${encodeURIComponent(callId)}`)).json() as Promise<RecordResultResponse>,
+    recordNight: async (id) => (await call(`/api/record/nights/${encodeURIComponent(id)}`)).json() as Promise<RecordNightResponse>,
+    recordSubAgent: async (name, before) =>
+      (
+        await call(`/api/record/sub-agents/${encodeURIComponent(name)}${before === undefined ? "" : `?before=${encodeURIComponent(before)}`}`)
+      ).json() as Promise<RecordSubAgentResponse>,
+    recordUnseen: async () => (await call("/api/record/unseen")).json() as Promise<RecordUnseenResponse>,
+    recordSeen: async () => (await call("/api/record/seen", { method: "POST" })).json() as Promise<RecordSeenResponse>,
   };
 }

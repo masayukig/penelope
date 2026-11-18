@@ -66,6 +66,16 @@ export function App({ fetch, sleep, push }: AppProps) {
     }
   }, [api]);
 
+  // The count of the failures not seen: read on each connection, then kept by the stream.
+  const readUnseen = useCallback(async () => {
+    try {
+      const { unseen } = await api.recordUnseen();
+      dispatch({ type: "unseen", unseen });
+    } catch (error) {
+      if (error instanceof Unauthorized) dispatch({ type: "unauthorized" });
+    }
+  }, [api]);
+
   // The history first: it also tells whether there is a session.
   useEffect(() => {
     void readHistory();
@@ -83,6 +93,7 @@ export function App({ fetch, sleep, push }: AppProps) {
         dispatch({ type: "stream-open" });
         outbox.online();
         void readAgents();
+        void readUnseen();
         // What came while the line was down and is no longer kept for the replay.
         if (opened.current++ > 0) void readHistory();
       },
@@ -94,7 +105,7 @@ export function App({ fetch, sleep, push }: AppProps) {
       onUnauthorized: () => dispatch({ type: "unauthorized" }),
     });
     return () => stream.close();
-  }, [signedIn, fetch, sleep, outbox, readHistory, readAgents]);
+  }, [signedIn, fetch, sleep, outbox, readHistory, readAgents, readUnseen]);
 
   const before = state.before;
   const onOlder = useMemo(
@@ -110,6 +121,15 @@ export function App({ fetch, sleep, push }: AppProps) {
 
   // Kept the same across renders: a place that reads the backend does not read it again for each render.
   const onUnauthorized = useCallback(() => dispatch({ type: "unauthorized" }), []);
+  const onSeen = useCallback(() => dispatch({ type: "unseen", unseen: 0 }), []);
+  // The page that starts with a reply the activity record points at; the older pages go on where they were.
+  const onJump = useCallback(
+    async (at: string) => {
+      const page = await api.history(at);
+      dispatch({ type: "history", entries: page.entries });
+    },
+    [api],
+  );
 
   // Read the clock again while the face shown would go back to neutral.
   const now = useClock(faceOf(state, Date.now()) === undefined ? undefined : FACE_RESET_MS);
@@ -131,6 +151,10 @@ export function App({ fetch, sleep, push }: AppProps) {
     },
     api,
     onUnauthorized,
+    unseen: state.unseen,
+    recordChanges: state.recordChanges,
+    onSeen,
+    onJump,
   };
 
   return (

@@ -5,9 +5,9 @@ import { Code } from "@astryxdesign/core/Code";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 
-import type { Activity } from "@penelope/contract";
+import type { Activity, RecordFlowItem } from "@penelope/contract";
 
 import { argumentsText, type FlowItem, type Status } from "../model/store.ts";
 import { useAgent } from "./agent.tsx";
@@ -56,8 +56,22 @@ export function Now({ status, flow }: { status: Status; flow: FlowItem[] }) {
   );
 }
 
-/** One block of a turn. A tool's result is shown under its call, so it takes the whole flow. */
-export function FlowLine({ item, all }: { item: FlowItem; all: readonly FlowItem[] }) {
+type ToolCall = Extract<Activity, { kind: "tool_call" }>;
+
+/**
+ * One block of a turn. A tool's result is shown under its call, so it takes
+ * the whole flow. The activity record (`result`) shows a result its own way:
+ * it has only the result's size until it is opened.
+ */
+export function FlowLine({
+  item,
+  all,
+  result: showResult = liveResult,
+}: {
+  item: FlowItem | RecordFlowItem;
+  all: readonly (FlowItem | RecordFlowItem)[];
+  result?: (call: ToolCall, all: readonly (FlowItem | RecordFlowItem)[]) => ReactNode;
+}) {
   switch (item.kind) {
     case "turn_start":
       return (
@@ -83,7 +97,6 @@ export function FlowLine({ item, all }: { item: FlowItem; all: readonly FlowItem
       );
     case "tool_call": {
       const what = argumentsText(item.arguments);
-      const result = all.find((other): other is Extract<Activity, { kind: "tool_result" }> => other.kind === "tool_result" && other.call_id === item.call_id);
       return (
         <li className="flow-block">
           <span className="flow-tool">
@@ -97,11 +110,7 @@ export function FlowLine({ item, all }: { item: FlowItem; all: readonly FlowItem
               )}
             </Code>
           </span>
-          {result ? (
-            <Collapsible defaultIsOpen={false} chevronPosition="start" trigger={<span className="flow-label">{result.is_error ? words.resultError : words.result}</span>}>
-              <CodeBlock code={result.output} maxHeight={220} width="100%" isWrapped size="sm" hasLanguageLabel={false} />
-            </Collapsible>
-          ) : null}
+          {showResult(item, all)}
         </li>
       );
     }
@@ -121,6 +130,16 @@ export function FlowLine({ item, all }: { item: FlowItem; all: readonly FlowItem
       // A result is shown under its call; the end closes the turn.
       return null;
   }
+}
+
+/** The result of a call in the turn under way: its output came with it. */
+function liveResult(call: ToolCall, all: readonly (FlowItem | RecordFlowItem)[]): ReactNode {
+  const result = all.find((other): other is Extract<Activity, { kind: "tool_result" }> => other.kind === "tool_result" && other.call_id === call.call_id && "output" in other);
+  return result ? (
+    <Collapsible defaultIsOpen={false} chevronPosition="start" trigger={<span className="flow-label">{result.is_error ? words.resultError : words.result}</span>}>
+      <CodeBlock code={result.output} maxHeight={220} width="100%" isWrapped size="sm" hasLanguageLabel={false} />
+    </Collapsible>
+  ) : null;
 }
 
 /** A long text folded to two lines until it is opened. */
