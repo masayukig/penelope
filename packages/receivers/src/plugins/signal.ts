@@ -579,11 +579,7 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
               payload: { type: "held", from: { number: settings.account }, group: { name }, timestamp, held: { id, result, ...(result === "failed" && typeof sent?.body.error === "string" ? { error: sent.body.error } : {}) } },
             };
             chain = chain.then(async () => {
-              for (let attempt = 1; !(await io.deliver([event])); attempt++) {
-                if (stopped) return io.log("held result events=1 taken=false (stopping)");
-                if (io.now().getTime() - at >= REDELIVER_MS) return io.log(`held result events=1 dropped=1 taken=false (refused for ${REDELIVER_MS / 60000} minutes)`);
-                await sleep(backoffMs(attempt));
-              }
+              await handOver(event, "held result");
             });
           };
 
