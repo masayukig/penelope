@@ -7,12 +7,14 @@ import type { ModelRouteRequest, ModelRuntime } from "@earendil-works/pi-coding-
 import { ConfigError, readConfig } from "../src/config.ts";
 import { decide, ModelRouter, type RouterConfig } from "../src/router.ts";
 import { until } from "./fake-backend.ts";
-import { BACKUP, MODEL } from "./fake-model.ts";
+import { BACKUP, MODEL, SPARE } from "./fake-model.ts";
 import { acked, ui, world } from "./world.ts";
 
 const CONFIG: RouterConfig = {
-  primary: { provider: "openai", id: "gpt" },
-  fallback: { provider: "anthropic", id: "claude" },
+  models: [
+    { provider: "openai", id: "gpt" },
+    { provider: "anthropic", id: "claude" },
+  ],
   prometheus: "http://prometheus:9090",
   query: "used",
   high: 85,
@@ -20,14 +22,24 @@ const CONFIG: RouterConfig = {
   cacheSeconds: 300,
 };
 
+/** The chain ChatGPT → Grok → Anthropic. */
+const CHAIN: RouterConfig = {
+  ...CONFIG,
+  models: [
+    { provider: "openai", id: "gpt" },
+    { provider: "xai", id: "grok" },
+    { provider: "anthropic", id: "claude" },
+  ],
+};
+
 /** A router over a catalog that has every model, reading `used` (a number, or a failure). */
-function router(used: () => number | Error | undefined) {
+function router(used: () => number | Error | undefined, config: RouterConfig = CONFIG) {
   const logs: string[] = [];
   const clock = { now: 0 };
   const runtime = { getModel: (provider: string, id: string) => ({ provider, id }) } as unknown as ModelRuntime;
   let reads = 0;
   const r = new ModelRouter(
-    CONFIG,
+    config,
     runtime,
     (line) => logs.push(line),
     async () => {
@@ -133,6 +145,10 @@ test("PENELOPE_MODEL_ROUTER is read as JSON, with defaults", () => {
   const value = JSON.stringify({ primary: "openai/gpt", fallback: "anthropic/claude", prometheus: "http://prometheus:9090", query: "used" });
   assert.deepEqual(readConfig({ ...env, PENELOPE_MODEL_ROUTER: value }).router, CONFIG);
   assert.throws(() => readConfig({ ...env, PENELOPE_MODEL_ROUTER: '{"primary":"openai/gpt"}' }), ConfigError);
+  const chain = JSON.stringify({ models: ["openai/gpt", "xai/grok", "anthropic/claude"], prometheus: "http://prometheus:9090", query: "used" });
+  assert.deepEqual(readConfig({ ...env, PENELOPE_MODEL_ROUTER: chain }).router, CHAIN);
+  const one = JSON.stringify({ models: ["openai/gpt"], prometheus: "http://prometheus:9090", query: "used" });
+  assert.throws(() => readConfig({ ...env, PENELOPE_MODEL_ROUTER: one }), ConfigError);
   assert.throws(() => readConfig({ ...env, PENELOPE_MODEL_ROUTER: "openai/gpt" }), ConfigError);
 });
 
@@ -158,4 +174,62 @@ test("without the router, a model error is logged and the turn ends as before", 
   await until(() => acked(fake).includes(1));
   assert.equal(calls.length, 1);
   assert.match(logs.join("\n"), /fake\/scripted failed: usage limit/);
+});
+
+test("in a chain, a high reading moves to the second model, and a low one back to the first", async () => {
+  let used = 90;
+  const { r, clock } = router(() => used, CHAIN);
+  assert.equal(await routed(r, request("user")), "xai/grok");
+  used = 10;
+  clock.now = 301_000;
+  assert.equal(await routed(r, request("user")), "openai/gpt");
+});
+
+test("in a chain, a later model is passed only when it fails, and the first comes back with a low reading", async () => {
+  let used = 90;
+  const { r, clock, logs } = router(() => used, CHAIN);
+  assert.equal(await routed(r, request("user")), "xai/grok");
+  // Grok has no reading; an ordinary error keeps it, a refusal of its credential passes it.
+  assert.equal(r.failedOver(failure("xai", "grok", "500 internal error")), false);
+  clock.now = 100_000;
+  const refused = failure("xai", "grok", "403 Forbidden");
+  assert.equal(await routed(r, request("retry", { failed: { model: { provider: "xai", id: "grok" } as never, message: refused } })), "anthropic/claude");
+  assert.match(logs.join("\n"), /xai\/grok cannot be used; to anthropic\/claude/);
+  // A follow-up of Grok's does not go back to it while the hold lasts.
+  const previous = { model: { provider: "xai", id: "grok" } } as ModelRouteRequest["previous"];
+  assert.equal(await routed(r, request("continuation", { previous })), "anthropic/claude");
+  // The hold is over but the first is still high: the router stays on the third, not back to Grok.
+  clock.now = 401_000;
+  assert.equal(await routed(r, request("user")), "anthropic/claude");
+  used = 60;
+  clock.now = 702_000;
+  assert.equal(await routed(r, request("user")), "openai/gpt");
+});
+
+test("in a chain, the first model's limit goes to the second, and the last model's has nowhere to go", async () => {
+  const { r } = router(() => 10, CHAIN);
+  assert.equal(await routed(r, request("user")), "openai/gpt");
+  assert.equal(r.failedOver(failure("openai", "gpt", "subscription_sharing_usage_limit_exceeded")), true);
+  assert.equal(r.tier, 1);
+  assert.equal(r.failedOver(failure("xai", "grok", "429 Too Many Requests")), true);
+  assert.equal(r.tier, 2);
+  assert.equal(r.failedOver(failure("anthropic", "claude", "429 rate limit")), false);
+  assert.equal(r.tier, 2);
+  // A late failure of the first, from a follow-up that stayed on it, does not move the router back up.
+  assert.equal(r.failedOver(failure("openai", "gpt", "usage limit")), true);
+  assert.equal(r.tier, 2);
+});
+
+test("a turn walks down the chain while each model refuses, and ends when one answers", async () => {
+  const { fake, start, calls, logs } = await world({ routerUsed: 10, routerModels: [MODEL, BACKUP, SPARE], turnFold: false });
+  await start((call) =>
+    call.model === MODEL ? { error: "usage limit" } : call.model === BACKUP ? { error: "401 Unauthorized: no access token" } : { text: "from the spare" },
+  );
+  fake.push(ui(1, "hello"));
+  await until(() => acked(fake).includes(1));
+  assert.deepEqual(
+    calls.map((c) => c.model),
+    [MODEL, BACKUP, SPARE],
+  );
+  assert.equal(logs.filter((line) => line.includes("tried once more on another model")).length, 2);
 });

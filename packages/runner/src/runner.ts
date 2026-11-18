@@ -62,6 +62,8 @@ export interface RunnerOptions {
 
 /** The note that asks the model to go on after a failed request was retried on another model. */
 export const MODEL_RETRY = "penelope.model_retry";
+/** At most this many retries on other models in one turn (one per model after the first of the router's list). */
+const MAX_MODEL_RETRIES = 4;
 
 interface Turn {
   session: AgentSession;
@@ -390,17 +392,18 @@ export class Runner {
    * goes on once more there.
    */
   private async afterError(session: AgentSession, turnId: string): Promise<void> {
-    const failed = lastAssistant(session);
-    if (failed?.stopReason !== "error") return;
-    this.log(`turn ${turnId}: ${failed.provider}/${failed.model} failed: ${failed.errorMessage ?? "no message"}`);
-    if (!this.failedOver?.(failed)) return;
-    this.log(`turn ${turnId}: tried once more on another model`);
-    await session.sendCustomMessage(
-      { customType: MODEL_RETRY, content: "(The model request failed and is being retried on another model. Go on with the turn.)", display: false },
-      { triggerTurn: true },
-    );
-    const again = lastAssistant(session);
-    if (again?.stopReason === "error") this.log(`turn ${turnId}: ${again.provider}/${again.model} failed too: ${again.errorMessage ?? "no message"}`);
+    // The router only moves down its list, so this ends when the list does; the cap is a guard.
+    for (let tries = 0; ; tries++) {
+      const failed = lastAssistant(session);
+      if (failed?.stopReason !== "error") return;
+      this.log(`turn ${turnId}: ${failed.provider}/${failed.model} failed: ${failed.errorMessage ?? "no message"}`);
+      if (tries >= MAX_MODEL_RETRIES || !this.failedOver?.(failed)) return;
+      this.log(`turn ${turnId}: tried once more on another model`);
+      await session.sendCustomMessage(
+        { customType: MODEL_RETRY, content: "(The model request failed and is being retried on another model. Go on with the turn.)", display: false },
+        { triggerTurn: true },
+      );
+    }
   }
 
   /** The request before folding. Events that come meanwhile wait for the next turn. */
