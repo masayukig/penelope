@@ -83,69 +83,6 @@ describe("the database", () => {
     db.close();
   });
 
-  describe("filling the triggers of the turns from before the record", () => {
-    // A file at version 7 whose main turns came from the activities: no result, no triggers.
-    const atVersion7 = (file: string) => {
-      const raw = new DatabaseSync(file);
-      for (const migration of MIGRATIONS.slice(0, 7)) raw.exec(migration);
-      raw.exec("PRAGMA user_version = 7");
-      const turn = raw.prepare("INSERT INTO turns (turn_id, agent, started_at, ended_at, at) VALUES (?, 'main', ?, ?, ?)");
-      turn.run("t-1", "2026-11-14T10:00:00.000Z", "2026-11-14T10:00:10.000Z", "2026-11-14T10:00:00.000Z");
-      turn.run("t-2", "2026-11-14T11:00:00.000Z", "2026-11-14T11:00:10.000Z", "2026-11-14T11:00:00.000Z");
-      return raw;
-    };
-    const event = (raw: DatabaseSync, seq: number, source: string, ackedAt: string | null) =>
-      raw
-        .prepare("INSERT INTO events (seq, source, id, occurred_at, received_ms, summary, delivery, inline, payload, path, line, acked_ms) VALUES (?, ?, ?, 't', 0, ?, 'now', 1, '{}', 'p', 1, ?)")
-        .run(seq, source, `e-${seq}`, `event ${seq}`, ackedAt === null ? null : Date.parse(ackedAt));
-    const triggers = (db: DatabaseSync, turnId: string) =>
-      ({ ...(db.prepare("SELECT triggers, trigger_count FROM turns WHERE turn_id = ?").get(turnId) as object) }) as { triggers: string; trigger_count: number };
-
-    it("gives a turn the events acked between its end and the end of the next turn", (t) => {
-      // Guards against: the turns from before the record shown with an unknown trigger when their events' acks tell it.
-      const file = path.join(tempDir(t), "a.sqlite");
-      const raw = atVersion7(file);
-      event(raw, 2, "owner", "2026-11-14T10:00:10.200Z");
-      event(raw, 1, "slack", "2026-11-14T10:00:10.200Z");
-      raw.close();
-      const db = openDatabase(file);
-      t.after(() => db.close());
-      assert.deepEqual(JSON.parse(triggers(db, "t-1").triggers), [
-        { seq: 1, source: "slack", summary: "event 1" },
-        { seq: 2, source: "owner", summary: "event 2" },
-      ]);
-      assert.equal(triggers(db, "t-1").trigger_count, 2);
-    });
-
-    it("gives a turn the event its reply answered", (t) => {
-      // Guards against: the trigger the conversation shows for a reply missing from the turn the reply was sent in.
-      const file = path.join(tempDir(t), "a.sqlite");
-      const raw = atVersion7(file);
-      event(raw, 1, "owner", null);
-      raw.exec("INSERT INTO history (id, kind, agent, at, text, in_reply_to, turn_id) VALUES ('r-1', 'agent', 'main', '2026-11-14T11:00:05.000Z', 'x', 1, 't-2')");
-      raw.close();
-      const db = openDatabase(file);
-      t.after(() => db.close());
-      assert.deepEqual(JSON.parse(triggers(db, "t-2").triggers), [{ seq: 1, source: "owner", summary: "event 1" }]);
-    });
-
-    it("gives no turn an event it is not sure of", (t) => {
-      // Guards against: a wrong trigger, worse than an unknown one: a control event (acked after the nightly
-      // switch), one acked when no turn had just ended, and one whose ack and reply name different turns.
-      const file = path.join(tempDir(t), "a.sqlite");
-      const raw = atVersion7(file);
-      event(raw, 1, "control", "2026-11-14T10:00:10.200Z");
-      event(raw, 2, "owner", "2026-11-14T09:00:00.000Z");
-      event(raw, 3, "owner", "2026-11-14T10:00:10.200Z");
-      raw.exec("INSERT INTO history (id, kind, agent, at, text, in_reply_to, turn_id) VALUES ('r-1', 'agent', 'main', '2026-11-14T11:00:05.000Z', 'x', 3, 't-2')");
-      raw.close();
-      const db = openDatabase(file);
-      t.after(() => db.close());
-      assert.deepEqual(triggers(db, "t-1"), { triggers: "[]", trigger_count: 0 });
-      assert.deepEqual(triggers(db, "t-2"), { triggers: "[]", trigger_count: 0 });
-    });
-  });
-
   it("is opened again without migrating twice", (t) => {
     const file = path.join(tempDir(t), "a.sqlite");
     openDatabase(file).close();

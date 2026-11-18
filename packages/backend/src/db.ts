@@ -281,47 +281,6 @@ export const MIGRATIONS: readonly string[] = [
     value TEXT NOT NULL
   );
   `,
-  `
-  -- The triggers of the main turns from before the record (docs/backend.md
-  -- "この版より前の記録"), from two things the backend kept. The runner acks a
-  -- turn's events after its end, before its next turn ends: so an event acked
-  -- from a turn's end to the next turn's end was given to it. And the event a
-  -- reply answered was given to the turn of the reply. A control event is acked
-  -- after the nightly switch and is left out; so is an event its two signs put
-  -- in different turns. Times compare as the activities write them.
-  CREATE TEMP TABLE main_turns AS
-    SELECT turn_id, result, night_seq, trigger_count, ended_at,
-           lead(coalesce(ended_at, at)) OVER (ORDER BY at, turn_id) AS until
-      FROM turns WHERE agent = 'main';
-  CREATE TEMP TABLE given AS
-    SELECT e.seq, m.turn_id
-      FROM events e JOIN main_turns m
-        ON strftime('%Y-%m-%dT%H:%M:%fZ', e.acked_ms / 1000.0, 'unixepoch') >= m.ended_at
-       AND (m.until IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', e.acked_ms / 1000.0, 'unixepoch') < m.until)
-     WHERE e.acked_ms IS NOT NULL AND e.source <> 'control'
-    UNION
-    SELECT e.seq, h.turn_id
-      FROM history h JOIN events e ON e.seq = h.in_reply_to JOIN main_turns m ON m.turn_id = h.turn_id
-     WHERE h.kind = 'agent' AND e.source <> 'control';
-  CREATE TEMP TABLE sure AS
-    SELECT g.seq, min(g.turn_id) AS turn_id FROM given g GROUP BY g.seq HAVING count(*) = 1;
-  -- The first 20 (RECORD_TRIGGERS_MAX) by seq, and how many in all.
-  UPDATE turns SET
-    triggers = (
-      SELECT json_group_array(json(trigger) ORDER BY seq) FROM (
-        SELECT e.seq,
-               CASE WHEN e.stream IS NULL THEN json_object('seq', e.seq, 'source', e.source, 'summary', e.summary)
-                    ELSE json_object('seq', e.seq, 'source', e.source, 'stream', e.stream, 'summary', e.summary) END AS trigger
-          FROM sure s JOIN events e ON e.seq = s.seq
-         WHERE s.turn_id = turns.turn_id ORDER BY e.seq LIMIT 20)),
-    trigger_count = (SELECT count(*) FROM sure s WHERE s.turn_id = turns.turn_id)
-   WHERE turn_id IN (
-     SELECT m.turn_id FROM main_turns m JOIN sure s ON s.turn_id = m.turn_id
-      WHERE m.result IS NULL AND m.night_seq IS NULL AND m.trigger_count = 0 AND m.ended_at IS NOT NULL);
-  DROP TABLE main_turns;
-  DROP TABLE given;
-  DROP TABLE sure;
-  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */
