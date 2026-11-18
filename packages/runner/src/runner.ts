@@ -11,7 +11,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import type { ImageContent } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { Activity, ControlPayload, DeliveredEvent } from "@penelope/contract";
 
@@ -53,7 +53,15 @@ export interface RunnerOptions {
   log?: (line: string) => void;
   /** The first wait before a sub-agent's notice or a job's end is sent again (ADR-0022, ADR-0030). */
   retryMs?: number;
+  /**
+   * Whether a turn that ended in this model error is tried once more, on
+   * another model; the model router says so after a usage limit (router.ts).
+   */
+  failedOver?: (message: AssistantMessage) => boolean;
 }
+
+/** The note that asks the model to go on after a failed request was retried on another model. */
+export const MODEL_RETRY = "penelope.model_retry";
 
 interface Turn {
   session: AgentSession;
@@ -83,6 +91,7 @@ export class Runner {
   private readonly backend: Backend;
   private readonly setup: PiSetup;
   private readonly log: (line: string) => void;
+  private readonly failedOver: ((message: AssistantMessage) => boolean) | undefined;
   private readonly places: Places;
   private readonly subAgents: SubAgents;
   private readonly jobs: Jobs;
@@ -105,6 +114,7 @@ export class Runner {
     this.config = options.config;
     this.backend = options.backend;
     this.log = options.log ?? ((line) => process.stderr.write(`${line}\n`));
+    this.failedOver = options.failedOver;
     const pi = { config: options.config, modelRuntime: options.modelRuntime, settings: options.settings };
     // A sub-agent has Pi's tools alone, and its turns are not folded.
     this.subAgents = new SubAgents({
@@ -343,6 +353,7 @@ export class Runner {
         const { steering, followUp } = session.clearQueue();
         text = [...steering, ...followUp].join("\n\n");
       }
+      await this.afterError(session, recorder.turnId);
     } catch (error) {
       failed = true;
       this.log(`turn ${recorder.turnId} failed: ${(error as Error).message}`);
@@ -371,6 +382,25 @@ export class Runner {
       return;
     }
     await this.ack(turn.seqs);
+  }
+
+  /**
+   * A model error ends Pi's run without a throw, and the turn would end with
+   * nothing said. It is logged; if the router moved to another model, the turn
+   * goes on once more there.
+   */
+  private async afterError(session: AgentSession, turnId: string): Promise<void> {
+    const failed = lastAssistant(session);
+    if (failed?.stopReason !== "error") return;
+    this.log(`turn ${turnId}: ${failed.provider}/${failed.model} failed: ${failed.errorMessage ?? "no message"}`);
+    if (!this.failedOver?.(failed)) return;
+    this.log(`turn ${turnId}: tried once more on another model`);
+    await session.sendCustomMessage(
+      { customType: MODEL_RETRY, content: "(The model request failed and is being retried on another model. Go on with the turn.)", display: false },
+      { triggerTurn: true },
+    );
+    const again = lastAssistant(session);
+    if (again?.stopReason === "error") this.log(`turn ${turnId}: ${again.provider}/${again.model} failed too: ${again.errorMessage ?? "no message"}`);
   }
 
   /** The request before folding. Events that come meanwhile wait for the next turn. */
@@ -437,4 +467,9 @@ export class Runner {
     this.session = session;
     this.state = state;
   }
+}
+
+function lastAssistant(session: AgentSession): AssistantMessage | undefined {
+  const message = session.messages.findLast((message) => message.role === "assistant");
+  return message as AssistantMessage | undefined;
 }

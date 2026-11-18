@@ -33,6 +33,8 @@ export interface Call {
   messages: Message[];
   /** The names of the tools the model was given. */
   tools: string[];
+  /** The model called: MODEL, or BACKUP. */
+  model: string;
 }
 
 /** Decides each answer from the call. Called once per model request. */
@@ -40,6 +42,8 @@ export type Script = (call: Call) => Answer | Promise<Answer>;
 
 export const PROVIDER = "fake";
 export const MODEL = "scripted";
+/** A second model of the provider, for the model router's fallback. */
+export const BACKUP = "backup";
 
 let counter = 0;
 
@@ -134,6 +138,7 @@ export async function fakeRuntime(root: string, script: Script): Promise<ModelRu
             : [],
           messages: structuredClone(rest),
           tools: toolsOf(system),
+          model: model.id,
         });
         // A request cancelled while the script is still deciding ends as Pi's own aborted ones do.
         const answer = await new Promise<Answer | undefined>((resolve, reject) => {
@@ -185,15 +190,15 @@ export async function fakeRuntime(root: string, script: Script): Promise<ModelRu
       return stream;
     },
     models: [
-      {
-        id: MODEL,
-        name: MODEL,
+      ...[MODEL, BACKUP].map((id) => ({
+        id,
+        name: id,
         reasoning: true,
-        input: ["text", "image"],
+        input: ["text" as const, "image" as const],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: 200_000,
         maxTokens: 8_192,
-      },
+      })),
     ],
   });
   await runtime.setRuntimeApiKey(PROVIDER, "unused");

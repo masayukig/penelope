@@ -9,6 +9,7 @@ import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 
 import { Backend } from "./backend.ts";
 import { ConfigError, readConfig } from "./config.ts";
+import { ModelRouter } from "./router.ts";
 import { Runner } from "./runner.ts";
 
 export interface Result {
@@ -43,11 +44,15 @@ async function serve(env: Readonly<Record<string, string | undefined>>): Promise
     authPath: `${config.agentDir}/auth.json`,
     modelsPath: `${config.agentDir}/models.json`,
   });
+  const log = (line: string) => process.stderr.write(`${line}\n`);
+  const router = config.router ? new ModelRouter(config.router, modelRuntime, log) : undefined;
+  router?.register();
   const runner = new Runner({
     config,
     backend: new Backend({ url: config.backend.url, token: config.backend.token, agent: config.agent }),
     modelRuntime,
     settings: () => SettingsManager.create(config.home, config.agentDir),
+    ...(router ? { failedOver: (message) => router.failedOver(message) } : {}),
   });
   const controller = new AbortController();
   for (const name of ["SIGTERM", "SIGINT"] as const) process.once(name, () => controller.abort());
