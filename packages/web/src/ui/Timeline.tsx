@@ -106,6 +106,7 @@ function Reply({ item, wide, onOpen }: { item: AgentItem; wide: boolean; onOpen:
           <Link
             href={hashOf({ place: "log", page: { kind: "turn", id: item.turn_id } })}
             label={words.record.seeTurn(timeOf(item.at))}
+            type="inherit"
             color="secondary"
             className="reply-turn"
           >

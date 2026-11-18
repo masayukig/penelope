@@ -1079,7 +1079,6 @@ button.record-row-body:hover {
   border-bottom: 0;
 }
 
-/* "See the turn" beside a reply's time: a faint link, as tall as a finger. */
 /* The time of a reply that opens its turn: plain until pointed at or focused. */
 .reply-turn {
   min-height: 44px;

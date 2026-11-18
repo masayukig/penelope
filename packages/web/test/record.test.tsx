@@ -343,4 +343,15 @@ describe("a reply in the conversation", () => {
     const link = await within(await screen.findByRole("log")).findByRole("link", { name: w.seeTurn(timeOf(at)) });
     assert.equal(new URL((link as HTMLAnchorElement).href).hash, "#/record/turns/t-9");
   });
+
+  // A reply whose turn is not known keeps its time as plain text.
+  it("keeps its time as text when its turn is not known", async () => {
+    const backend = new FakeBackend();
+    const at = new Date().toISOString();
+    backend.history = [{ kind: "agent", id: "r-1", at, text: "done", agent: "main" }];
+    start(backend);
+    const log = await screen.findByRole("log");
+    assert.ok(await within(log).findByText(timeOf(at)));
+    assert.equal(within(log).queryAllByRole("link").length, 0);
+  });
 });
