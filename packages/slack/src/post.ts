@@ -70,7 +70,7 @@ export async function facesOf(env: Env, online: Online): Promise<Map<string, str
   const faces = new Map<string, string>();
   for (const name of Object.keys(icons).sort()) {
     const way = icons[name];
-    if (typeof way === "string") faces.set(name, iconBase ? `${iconBase}/${name}.png` : new URL(way, base).href);
+    if (typeof way === "string") faces.set(name, iconBase ? `${iconBase}/${encodeURIComponent(name)}.png` : new URL(way, base).href);
   }
   if (faces.size === 0) throw new Failure(`the avatar has no faces (${url})`);
   return faces;

@@ -264,6 +264,17 @@ describe("slackctl faces", () => {
     );
   });
 
+  test("encodes the face as one path segment under PENELOPE_SLACK_ICON_BASE_URL", async () => {
+    const agent = { name: "Iris", icons: { "happy#wide": "/api/agent/icons/happy%23wide.png", "why?": "/api/agent/icons/why%3F.png" } };
+    const { fetcher } = world({ agent });
+    const result = await run(["faces"], { ...ENV, PENELOPE_SLACK_ICON_BASE_URL: "https://icons.example.com/iris" }, online(fetcher));
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(
+      result.stdout,
+      "happy#wide\thttps://icons.example.com/iris/happy%23wide.png\nwhy?\thttps://icons.example.com/iris/why%3F.png\n",
+    );
+  });
+
   test("says when the avatar has no faces", async () => {
     const { fetcher } = world({ agent: { name: "Iris" } });
     const result = await run(["faces"], ENV, online(fetcher));
