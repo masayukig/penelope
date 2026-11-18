@@ -11,6 +11,10 @@
 // sandbox does not mount it, ADR-0014). It sends only to the allowed senders
 // and groups.
 //
+// While the agent works on a message that came `now`, the conversation shows
+// her typing: the receivers cannot see the turn, so it lasts until she sends
+// there or `typing_seconds` pass.
+//
 // signal-cli acknowledges a message to Signal's server as soon as it has it,
 // so there is nothing to tell it back: an event the intake does not take is
 // sent again here until it is, and a read receipt goes to the sender once it
@@ -35,6 +39,8 @@ const GROUP_ID = /^[A-Za-z0-9+/]+={0,2}$/;
 const MENTION_MARK = "\uFFFC";
 /** How long after the agent's own post in a group what others say there comes `now` (natsumi's `follow-up`). */
 export const FOLLOW_UP_MS = 10 * 60_000;
+/** Signal's apps stop showing "typing" about 15 s after the last one, so it is sent again this often. */
+const TYPING_REFRESH_MS = 10_000;
 
 type Raw = Record<string, unknown>;
 
@@ -195,7 +201,7 @@ function withNames(text: string | undefined, mentions: Raw[], account: string): 
 }
 
 function settingsOf(settings: Record<string, unknown>) {
-  onlyKnown(settings, ["socket", "account", "senders", "groups", "names", "send_socket", "max_file_bytes", "rpc_timeout_seconds"]);
+  onlyKnown(settings, ["socket", "account", "senders", "groups", "names", "send_socket", "max_file_bytes", "rpc_timeout_seconds", "typing_seconds"]);
   const path = (field: string, value: unknown, required: boolean) => {
     if (value === undefined && !required) return undefined;
     if (typeof value !== "string" || !value.startsWith("/")) throw new SettingsError(field, "must be the absolute path of a Unix socket");
@@ -229,6 +235,8 @@ function settingsOf(settings: Record<string, unknown>) {
   }
   const timeout = settings.rpc_timeout_seconds ?? 30;
   if (typeof timeout !== "number" || !(timeout > 0)) throw new SettingsError("rpc_timeout_seconds", "must be a number greater than 0");
+  const typing = settings.typing_seconds ?? 300;
+  if (typeof typing !== "number" || !(typing >= 0) || typing > 3600) throw new SettingsError("typing_seconds", "must be a number from 0 to 3600");
   return {
     socket,
     sendSocket,
@@ -238,6 +246,7 @@ function settingsOf(settings: Record<string, unknown>) {
     names: (names as string[]).map((name) => fold(name).trim()),
     maxFileBytes,
     rpcTimeoutMs: timeout * 1000,
+    typingMs: typing * 1000,
   };
 }
 
@@ -257,6 +266,35 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
       const settings = settingsOf(raw);
       return {
         start(io) {
+          /** The conversations shown as typing, by `dm:<sender>` or `group:<ID>`. */
+          const typing = new Map<string, { refresh: NodeJS.Timeout; end: NodeJS.Timeout }>();
+          const typingTo = (key: string): Raw => (key.startsWith("group:") ? { groupId: [key.slice(6)] } : { recipient: [key.slice(3)] });
+          const sendTyping = (key: string, stop: boolean) =>
+            call("sendTyping", { ...typingTo(key), ...(stop ? { stop: true } : {}) }).catch((error: unknown) =>
+              io.log(`cannot send typing (${error instanceof Error ? error.message : "error"})`),
+            );
+          /** Ends the typing; `tell` sends Signal the stop, which a message sent there makes needless. */
+          const endTyping = (key: string, tell: boolean) => {
+            const shown = typing.get(key);
+            if (!shown) return;
+            clearInterval(shown.refresh);
+            clearTimeout(shown.end);
+            typing.delete(key);
+            if (tell) void sendTyping(key, true);
+          };
+          // ponytail: the receivers do not see the turn end, so a turn that sends nothing leaves "typing" up to typing_seconds;
+          // tell the plugin of turn ends (a runner hook, or the Sentinel's log of the backend's /v1/turns/end) if that matters.
+          const startTyping = (key: string) => {
+            if (settings.typingMs === 0 || stopped) return;
+            endTyping(key, false);
+            void sendTyping(key, false);
+            const refresh = setInterval(() => void sendTyping(key, false), TYPING_REFRESH_MS);
+            const end = setTimeout(() => endTyping(key, true), settings.typingMs);
+            refresh.unref();
+            end.unref();
+            typing.set(key, { refresh, end });
+          };
+
           /** Per group ID: when the agent last posted there, and whether hers is still the last message. */
           const ownPosts = new Map<string, { at: number; last: boolean }>();
           const audience: Audience = {
@@ -341,6 +379,7 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
             }
             io.log(`envelope events=1 dropped=0 taken=true`);
             const sender = event.payload.from.number ?? event.payload.from.uuid!;
+            if (event.delivery === "now") startTyping(made.groupId !== undefined ? `group:${made.groupId}` : `dm:${sender}`);
             if (event.payload.type === "message") {
               await call("sendReceipt", { recipient: sender, targetTimestamp: [event.payload.timestamp], type: "read" }).catch((error: unknown) =>
                 io.log(`cannot send a read receipt (${error instanceof Error ? error.message : "error"})`),
@@ -409,6 +448,7 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
 
           /** The agent's own post in a group: it is written into the group's stream as anyone's is, and starts the follow-up window. */
           const posted = (group: { id: string; name: string }, timestamp: number, text: string | undefined, files: number) => {
+            endTyping(`group:${group.id}`, false);
             ownPosts.set(group.id, { at: timestamp, last: true });
             const event: ConnectionEvent & { payload: SignalPayload } = {
               id: `group.${group.name}/${settings.account}/${timestamp}`,
@@ -422,12 +462,13 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
               if (!(await io.deliver([event]))) io.log("own post events=1 taken=false");
             });
           };
-          const sender = settings.sendSocket ? sendServer(settings.sendSocket, { senders: settings.senders, groups: settings.groups, call, log: io.log, posted }) : undefined;
+          const sender = settings.sendSocket ? sendServer(settings.sendSocket, { senders: settings.senders, groups: settings.groups, call, log: io.log, posted, sent: (to) => endTyping(`dm:${to}`, false) }) : undefined;
 
           return {
             async stop() {
               stopped = true;
               wake?.();
+              for (const key of [...typing.keys()]) endTyping(key, false);
               await sender?.close();
               await chain;
               current?.end();
@@ -455,6 +496,8 @@ function sendServer(
     call: (method: string, params: Raw) => Promise<unknown>;
     log: (line: string) => void;
     posted: (group: { id: string; name: string }, timestamp: number, text: string | undefined, files: number) => void;
+    /** A direct message went to this sender. */
+    sent: (to: string) => void;
   },
 ) {
   const { senders, groups, call, log } = options;
@@ -511,6 +554,7 @@ function sendServer(
       if (failed) return answer(response, 502, { error: `Signal did not take it (${String(failed.type)})` });
       const timestamp = isObject(result) ? num(result.timestamp) : undefined;
       if (groupId !== undefined && timestamp !== undefined) options.posted({ id: groupId, name: groupName as string }, timestamp, text, files.length);
+      if (groupId === undefined) options.sent(to as string);
       return answer(response, 200, { timestamp });
     } catch (error) {
       const message = error instanceof Error ? error.message : "error";

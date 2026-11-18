@@ -50,6 +50,7 @@ describe("the Signal plugin's settings", () => {
     assert.equal(refused({ ...SETTINGS, groups: { family: "not an id!" } }), "groups.family: must be a group ID as signal-cli's listGroups gives it (base64)");
     assert.equal(refused({ ...SETTINGS, groups: { family: GROUP, again: GROUP } }), "groups.again: the same group ID is named twice");
     assert.equal(refused({ ...SETTINGS, names: ["い"] }), "names[0]: must be a name of 2 characters or more");
+    assert.equal(refused({ ...SETTINGS, typing_seconds: -1 }), "typing_seconds: must be a number from 0 to 3600");
   });
 });
 
@@ -214,9 +215,10 @@ describe("the Signal plugin against signal-cli", () => {
       assert.equal((event!.payload as { files: { attached: boolean }[] }).files[0]!.attached, true);
       assert.deepEqual(
         cli.calls.map((call) => call.method),
-        ["getAttachment", "sendReceipt"],
+        ["getAttachment", "sendTyping", "sendReceipt"],
       );
-      assert.deepEqual(cli.calls[1]!.params, { account: AGENT, recipient: OWNER, targetTimestamp: [1794819600000], type: "read" });
+      assert.deepEqual(cli.calls[1]!.params, { account: AGENT, recipient: [OWNER] });
+      assert.deepEqual(cli.calls[2]!.params, { account: AGENT, recipient: OWNER, targetTimestamp: [1794819600000], type: "read" });
       assert.ok(lines.includes("envelope events=0 dropped=1"));
 
       const form = new FormData();
@@ -276,6 +278,29 @@ describe("the Signal plugin against signal-cli", () => {
       assert.equal((await post(sendSocket, refusedForm)).status, 503);
       await cli.listen();
       await until(() => cli.clients.length === 1 && lines.filter((line) => line === "connected").length === 2);
+    } finally {
+      await handle.stop();
+      await cli.close();
+    }
+  });
+
+  test("shows typing in a group while a message for the agent is worked on, and stops it after typing_seconds", async () => {
+    const cli = new FakeSignalCli(join(dir, "typing.sock"));
+    await cli.listen();
+    const lines: string[] = [];
+    const connection = signalPlugin({ backoffMs: () => 10 }).create({ ...SETTINGS, groups: { family: GROUP }, socket: cli.path, typing_seconds: 0.05 }, env);
+    const handle = connection.start({ deliver: async () => true, log: (line) => lines.push(line), now: () => new Date() });
+    try {
+      await until(() => cli.clients.length === 1 && lines.includes("connected"));
+      cli.push(inGroup({ message: "chatting" }));
+      await until(() => cli.calls.some((call) => call.method === "sendReceipt"));
+      assert.ok(!cli.calls.some((call) => call.method === "sendTyping"), "a batched message shows no typing");
+      cli.push(inGroup({ message: "\uFFFC?", mentions: [{ number: AGENT, start: 0, length: 1 }] }));
+      await until(() => cli.calls.some((call) => call.method === "sendTyping" && call.params.stop === true));
+      assert.deepEqual(
+        cli.calls.filter((call) => call.method === "sendTyping").map((call) => call.params),
+        [{ account: AGENT, groupId: [GROUP] }, { account: AGENT, groupId: [GROUP], stop: true }],
+      );
     } finally {
       await handle.stop();
       await cli.close();

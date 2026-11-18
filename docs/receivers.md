@@ -566,6 +566,7 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 | `send_socket` | なし | 送り口（下の「送り口」）を待ち受ける Unix socket。省けば送り口を持たない |
 | `max_file_bytes` | `20971520`（20 MiB） | 取ってくるファイル 1 つの大きさの上限。1〜62914560（60 MiB）の整数 |
 | `rpc_timeout_seconds` | `30` | JSON-RPC の 1 回の呼び出しを待つ秒数 |
+| `typing_seconds` | `300` | 入力中の表示（下の「入力中」）を出し続ける上限の秒数。0〜3600。`0` なら出さない |
 
 - signal-cli の daemon は `--receive-mode on-connection` で動かす。受けるのは receivers がつないでいる間だけになり、切れている間の発言は Signal のサーバーに残る。
 - signal-cli の socket は、signal-cli と receivers のコンテナだけが mount する volume に置く。sandbox は mount しない（[ADR-0014](adr/0014-sandbox-loopback-left-open-and-pod-ports-on-unix-sockets.md)）。signal-cli の JSON-RPC には確かめが無く、届けば番号の全部（受信・送信・端末の追加）を使えるためである。同じ理由で `--http`・`--tcp` では待ち受けない（loopback から sandbox が届く）。
@@ -626,6 +627,14 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 - 発言は `payload.text` を持つので、配置がこの有効化の `source` を backend の `PENELOPE_INLINE_SOURCES` に書けば、本文がそのままターンに載る（[events.md](events.md) の「`inline`」）。添付の画像も画像として載る。
 - ファイルは `getAttachment` で取り、出来事の添付として送る。上限を超えるもの、合わせて 60 MiB を超えるもの、取れなかったものは `attached` を `false` にする。種類は問わない。
 
+### 入力中
+
+- `now` の発言（1 対 1 の発言と、グループの自分宛ての発言）を取り込み口が受けたら、その会話に入力中を出す（JSON-RPC `sendTyping`、1 対 1 は `recipient: [<相手>]`、グループは `groupId: [<ID>]`）。natsumi が、本人の 1 対 1（OwnerTyping）と、グループの自分宛ての attention（fork の ADR F07）で出していたものに当たる。
+- Signal のアプリは最後の入力中から 15 秒ほどで表示を消すので、10 秒ごとに送り直す。
+- 止めるのは、送り口がその会話に送れたとき（届いた発言で表示は消えるので、止める知らせは送らない）と、`typing_seconds` が過ぎたとき（`stop: true` を送る）。receivers の止まるときは送り直しをやめるだけにする。
+- receivers にはターンが見えない。natsumi はターンが終わったら止めていたが、ここでは**返事を送らずに終わったターンでも、`typing_seconds` まで入力中が出続ける**。途中の発言（「確かめています」など）を送ると、その後も作業が続いていても表示は消える。ターンの終わりを receivers に知らせる道ができたら、そこで止める（未決）。
+- `sendTyping` が断られたら `cannot send typing (…)` をログに書くだけで、発言の扱いは変えない。
+
 ### 送り口
 
 `send_socket` があれば、そこで HTTP を待ち受ける。sandbox は mount せず、Sentinel が登録の `upstream: unix://<send_socket>` で届ける（backend の sandbox 向けの口と同じ形。[sentinel-config.md](sentinel-config.md) の「上流」）。sandbox からの要求は Sentinel を通り、記録に残る。
@@ -655,12 +664,13 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 | --- | --- |
 | `connected`・`connection error (<code>)`・`connecting again in <秒>s` | つないだ・切れた |
 | `envelope events=<数> dropped=<数>`（受けたら `taken=true`） | envelope 1 つごと |
-| `cannot fetch a file (…)`・`cannot send a read receipt (…)` | JSON-RPC が断られた |
+| `cannot fetch a file (…)`・`cannot send a read receipt (…)`・`cannot send typing (…)` | JSON-RPC が断られた |
 | `send status=<番号>` | 送り口の要求 1 つごと |
 
 ### 未決
 
-- 入力中の表示、エージェントからのリアクション、編集・削除の扱い。
+- エージェントからのリアクション、編集・削除の扱い。
+- ターンの終わりで入力中を止めること（上の「入力中」）。
 - 知らないグループに足されたときに本人に聞き、断られたら抜けてブロックすること（natsumi の fork の ADR F06）。いまは `groups` に無いグループを黙って捨てる。
 - グループへの投稿の判定と本人の承認（natsumi のポッポさんと judge）。penelope には投稿の判定が無く（ADR-0033）、Sentinel の ask（ADR-0005）もまだ無いので、グループへの送り口は判定も承認も通さずに送る。
 
