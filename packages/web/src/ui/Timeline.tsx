@@ -9,14 +9,12 @@ import { Thumbnail } from "@astryxdesign/core/Thumbnail";
 import { Link } from "@astryxdesign/core/Link";
 import { Fragment, useState } from "react";
 
-import type { Source } from "@penelope/contract";
-
 import { assetUrl } from "../model/api.ts";
 import type { AgentItem, LocalFile, OwnerItem, TimelineItem } from "../model/store.ts";
-import { AgentAvatar, useAgent } from "./agent.tsx";
+import { AgentAvatar } from "./agent.tsx";
 import { Linked, markdownLinks } from "./links.tsx";
 import { hashOf } from "./route.ts";
-import { dayOf, faceWord, sourceWord, timeOf, triggerWords, words } from "./words.ts";
+import { dayOf, sourceWord, timeOf, triggerWords, words } from "./words.ts";
 
 export function Timeline({
   items,
@@ -34,8 +32,8 @@ export function Timeline({
   // The image shown large: one the owner sent, or one of her replies'.
   const [shown, setShown] = useState<Shown | undefined>(undefined);
   const openFile = (file: LocalFile) => (file.url ? setShown({ url: file.url, name: file.name }) : undefined);
-  // On a narrow screen her replies take the whole width (docs/design/README.md, 4).
-  const wide = density === "compact";
+  // On a narrow screen her avatar is small and stands with the time under the reply, which keeps the whole width.
+  const narrow = density === "compact";
   let lastDay: string | undefined;
   return (
     <>
@@ -49,7 +47,14 @@ export function Timeline({
           return (
             <Fragment key={item.key}>
               {divider}
-              {item.kind === "agent" ? <Reply item={item} wide={wide} onOpen={setShown} /> : <OwnerMessage item={item} onOpen={openFile} />}
+              {item.kind === "agent" ? (
+                <>
+                  <EventLine item={item} />
+                  <Reply item={item} narrow={narrow} onOpen={setShown} />
+                </>
+              ) : (
+                <OwnerMessage item={item} onOpen={openFile} />
+              )}
             </Fragment>
           );
         })}
@@ -83,51 +88,50 @@ function ReplyImages({ item, onOpen }: { item: AgentItem; onOpen: (shown: Shown)
   );
 }
 
-function Reply({ item, wide, onOpen }: { item: AgentItem; wide: boolean; onOpen: (shown: Shown) => void }) {
-  const agent = useAgent();
-  // A reply to the owner's own message needs no word of what started it.
-  const trigger = item.trigger !== undefined && item.trigger.source !== "ui" ? item.trigger : undefined;
-  const name = (
-    <span className="reply-name" data-reply={item.id}>
-      <span className="reply-who">
-        <AgentAvatar size={24} expression={item.expression} />
-        <strong>{agent.name}</strong>
-        {item.expression !== undefined ? <span className="reply-expression">{faceWord(item.expression)}</span> : null}
-      </span>
-      {trigger ? <TriggerMark source={trigger.source} summary={trigger.summary} /> : null}
-    </span>
-  );
+function Reply({ item, narrow, onOpen }: { item: AgentItem; narrow: boolean; onOpen: (shown: Shown) => void }) {
+  const time =
+    item.turn_id === undefined ? (
+      timeOf(item.at)
+    ) : (
+      <Link
+        href={hashOf({ place: "log", page: { kind: "turn", id: item.turn_id } })}
+        label={words.record.seeTurn(timeOf(item.at))}
+        type="inherit"
+        color="secondary"
+        className="reply-turn"
+      >
+        {timeOf(item.at)}
+      </Link>
+    );
   const metadata = (
     <ChatMessageMetadata
       timestamp={
-        item.turn_id === undefined ? (
-          timeOf(item.at)
+        narrow ? (
+          <span className="reply-foot">
+            <AgentAvatar size={24} shape="rounded" expression={item.expression} />
+            {time}
+          </span>
         ) : (
-          <Link
-            href={hashOf({ place: "log", page: { kind: "turn", id: item.turn_id } })}
-            label={words.record.seeTurn(timeOf(item.at))}
-            type="inherit"
-            color="secondary"
-            className="reply-turn"
-          >
-            {timeOf(item.at)}
-          </Link>
+          time
         )
       }
     />
   );
-  // Without a bubble, the reply and its name and time sit flush with the row's edge.
-  if (wide) {
-    return (
-      <ChatMessage sender="assistant" name={name} metadata={metadata}>
-        <Markdown {...markdownLinks}>{item.text}</Markdown>
-        <ReplyImages item={item} onOpen={onOpen} />
-      </ChatMessage>
-    );
-  }
+  // Her replies go without a bubble, beside her avatar; the owner's messages keep theirs, on the other side.
   return (
-    <ChatMessage sender="assistant">
-      <ChatMessageBubble variant="ghost" name={name} metadata={metadata}>
+    <ChatMessage
+      sender="assistant"
+      {...(narrow
+        ? {}
+        : {
+            avatar: (
+              <span className="reply-avatar">
+                <AgentAvatar size={36} shape="rounded" expression={item.expression} />
+              </span>
+            ),
+          })}
+    >
+      <ChatMessageBubble variant="ghost" metadata={metadata} className="reply-bubble" data-reply={item.id}>
         <Markdown {...markdownLinks}>{item.text}</Markdown>
         <ReplyImages item={item} onOpen={onOpen} />
       </ChatMessageBubble>
@@ -136,20 +140,23 @@ function Reply({ item, wide, onOpen }: { item: AgentItem; wide: boolean; onOpen:
 }
 
 /**
- * What made her speak, beside her name (docs/design/README.md, 13): on one
- * line, its kind whole and its words cut at the end by CSS alone, so that the
- * whole of them is read aloud. Nothing opens it; the turn's own page shows
- * it all. Its room takes the rest of the name's line, and goes below once
- * the name takes more than half of it.
+ * What made her speak, as a line of its own in the flow before the reply
+ * (docs/design/README.md, 13): in the middle, weaker than the day between
+ * the messages, its kind whole and its words cut at the end by CSS alone, so
+ * that the whole of them is read aloud. Nothing opens it; the turn's own
+ * page shows it all. A reply to the owner's own message has none: the
+ * message is right above it.
  */
-function TriggerMark({ source, summary }: { source: Source; summary: string }) {
+function EventLine({ item }: { item: AgentItem }) {
+  const trigger = item.trigger !== undefined && item.trigger.source !== "ui" ? item.trigger : undefined;
+  if (!trigger) return null;
   return (
-    <span className="reply-trigger-room">
+    <div className="timeline-event">
       <span className="reply-trigger">
-        <span className="reply-trigger-kind">{sourceWord(source)}</span>
-        <span className="reply-trigger-words">・ {triggerWords(summary)}</span>
+        <span className="reply-trigger-kind">{sourceWord(trigger.source)}</span>
+        <span className="reply-trigger-words">・ {triggerWords(trigger.summary)}</span>
       </span>
-    </span>
+    </div>
   );
 }
 

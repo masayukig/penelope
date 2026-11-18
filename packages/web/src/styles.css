@@ -1,12 +1,15 @@
 /* Astryx's layers in their order, then what the screens add
    (docs/design/README.md). The theme is neutral; the one override is the
-   Japanese faces after its Figtree, which has no Japanese glyphs (9). */
+   Japanese faces after its Figtree, which has no Japanese glyphs (9). The
+   theme sets its faces again on the element it wraps the app in, so the
+   override is made there too: on :root alone it reached only the body. */
 @import "@astryxdesign/core/reset.css";
 @import "@astryxdesign/core/astryx.css";
 @import "@astryxdesign/theme-neutral/theme.css";
 @import "@astryxdesign/theme-neutral/fonts.css";
 
-:root {
+:root,
+[data-astryx-theme] {
   --font-family-body: Figtree, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
   --font-family-heading: Figtree, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
 }
@@ -22,6 +25,10 @@ body {
   background: var(--color-background-body);
   color: var(--color-text-primary);
   font-family: var(--font-family-body);
+  /* Astryx's reset thins the strokes (antialiased), which makes Japanese
+     text of this size hard to read on a Mac; the browser's own is kept. */
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
 }
 
 .muted {
@@ -471,61 +478,21 @@ body {
 }
 
 /* The timeline */
-/* The name's line (docs/design/README.md, 13): the avatar, the name and the
-   face, then the mark of what made her speak in the rest of the line. The
-   mark's room is at least half the line, so it goes below once the name
-   takes more; there, it has the whole width. All is cut on one line.
-   Astryx puts the name in an item of a column that aligns its items to the
-   start, so the item takes the width of what it holds; and what holds a mark
-   that is not wrapped is as wide as all its words. So the box Astryx puts the
-   name in (the bubble's [data-chat-name], or the message's name without a
-   bubble) is stretched to the width of the column instead, and the mark is cut
-   within it. Above a bubble, it goes no wider than the bubble may
-   (ChatMessageBubble's max(80%, 280px)). happy-dom measures no width; the
-   widths are measured in Chromium (packages/web/browser/, make test-browser). */
-:has(> .reply-name) {
-  align-self: stretch;
-  min-width: 0;
-}
-[data-chat-name]:has(> .reply-name) {
-  height: auto;
-  min-height: 20px;
-  max-width: max(80%, 280px);
-}
-.reply-name {
+/* What made her speak, a line of its own in the flow before the reply
+   (docs/design/README.md, 13): in the middle and weaker than the day between
+   the messages, on one line, its words cut at the end. It stands as far from
+   the reply it started as from what is before it. happy-dom measures
+   no width; the widths are measured in Chromium (packages/web/browser/,
+   make test-browser). */
+.timeline-event {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  row-gap: 4px;
-  column-gap: 8px;
-  width: 100%;
+  justify-content: center;
   min-width: 0;
-  font-size: 12px;
-  color: var(--color-text-secondary);
 }
-.reply-who {
-  flex: 0 1 auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  max-width: 100%;
-}
-.reply-who > * {
-  flex: none;
-}
-.reply-who strong {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--color-text-primary);
-}
-.reply-trigger-room {
-  flex: 1 1 0;
-  display: flex;
-  min-width: 50%;
+/* On a phone the rows are close (8px): the line takes as much again on
+   both sides, 16px in all. */
+.phone .timeline-event {
+  margin-block: 8px;
 }
 .reply-trigger {
   display: flex;
@@ -533,13 +500,10 @@ body {
   gap: 4px;
   box-sizing: border-box;
   min-width: 0;
-  max-width: 100%;
-  padding: 2px 8px;
-  border-radius: 9999px;
-  background: var(--color-neutral);
+  max-width: 78%;
   font-size: 12px;
-  line-height: 16px;
-  color: var(--color-text-primary);
+  line-height: 18px;
+  color: var(--color-text-secondary);
 }
 .reply-trigger-kind {
   flex: none;
@@ -550,6 +514,48 @@ body {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+/* The lines of the conversation are set apart as the design draws them
+   (docs/design/README.md, 5): the theme's 1.43 is close for Japanese. */
+.astryx-chat-message-bubble {
+  --text-body-leading: 1.7;
+  line-height: 1.7;
+}
+/* Her avatar beside the reply (docs/design/README.md, 15): a little nearer
+   the bubble than Astryx's rows put it. */
+.astryx-chat-message:has(.reply-avatar) {
+  gap: 8px;
+}
+.reply-avatar {
+  display: flex;
+}
+/* Her reply has no bubble, so it needs none of a bubble's room at its sides:
+   its text starts right after the avatar (at the row's edge on a phone), the
+   time under it starts where the text does, and it may run to the end of
+   the column. */
+.astryx-chat-message-bubble.reply-bubble {
+  max-width: 100%;
+  padding-inline: 0;
+}
+/* Beside the avatar it leaves as much room at the end as the avatar takes
+   at the start (36px and the 8px gap), so the text sits in the middle. */
+.astryx-chat-message:has(.reply-avatar) .astryx-chat-message-bubble.reply-bubble {
+  max-width: calc(100% - 88px);
+}
+.astryx-chat-message:has(.reply-bubble) div:has(> .astryx-chat-message-metadata) {
+  padding-inline: 0;
+}
+/* On a phone it is small and stands with the time under the reply: the
+   reply keeps the whole width, and the two close it. */
+.reply-foot {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+/* The bubbles' corners: Astryx rounds them as much as the field below
+   (28px), which is heavy around a few lines of text. */
+.astryx-chat-message-bubble[data-density="spacious"] {
+  border-radius: 16px;
 }
 .owner-text {
   white-space: pre-wrap;
@@ -641,15 +647,18 @@ body {
   font-size: 16px;
 }
 /* The timeline's sides line up with the strip and the field (16px from the
-   screen's edges): its rows take no room of their own, and her replies go
-   without a bubble (docs/design/README.md, 4). Astryx has no prop for the
-   rows' sides; its data attributes are the theming hook. */
+   screen's edges): its rows take no room of their own. Astryx has no prop
+   for the rows' sides; its data attributes are the theming hook. */
 .phone .astryx-chat-message-list[data-density="compact"] > div {
   padding-inline: 0;
 }
-/* The owner's bubble stays to the right, a little wider than Astryx's cap. */
+/* The owner's bubble stays to the right, a little wider than Astryx's cap;
+   hers, with lists and code in it, may be wider still. */
 .phone .astryx-chat-message-bubble[data-variant="filled"][data-density="compact"] {
   max-width: 85%;
+}
+.phone .astryx-chat-message-bubble.reply-bubble[data-density="compact"] {
+  max-width: 100%;
 }
 /* The height of the floating avatar and its word (docs/design/README.md, 11). */
 .timeline-inset {
