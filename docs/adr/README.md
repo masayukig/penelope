@@ -43,3 +43,6 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0037 | [main への push ごとに image を `main` の tag で出し、脆弱性対応の係の PR がマージされたらすぐにパッチ版を出す](0037-a-main-image-to-scan-and-a-vulnerability-fix-released-at-once.md) | Accepted |
 | 0038 | [活動の記録は backend が 1 行の要約として持ち、ターンの結果と夜の段の結果を runner が知らせる](0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md) | Accepted |
 | 0039 | [モデルは配置の設定で選んだまま、`router/auto` を選んだ配置では runner が要求ごとに主の枠の使用率で振り分ける](0039-router-auto-picks-the-model-per-request-by-the-primary-usage.md) | Accepted |
+| 0040 | [Signal は receivers のプラグインが signal-cli の JSON-RPC で受け、送り口は Sentinel から Unix socket で届ける](0040-signal-through-signal-cli-in-a-receivers-plugin-with-a-send-socket.md) | Accepted |
+| 0041 | [Signal のグループは、配置が許したものだけを、メンバー全員の発言ごと受ける](0041-signal-groups-the-owner-allowed-received-from-every-member.md) | Accepted |
+| 0042 | [Signal のグループへの投稿の判定と本人の承認は、配置が選んだときだけ、Signal のプラグインの中で Signal で行う](0042-signal-group-posts-judged-and-held-for-the-owner-inside-the-plugin.md) | Accepted |
