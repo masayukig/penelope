@@ -32,11 +32,11 @@ const LABELLED = 72;
  * large. It takes only the expression and the size, so that how it is drawn
  * (a 3D model, say) can change here alone.
  */
-export function AgentAvatar({ expression, size }: { expression?: string | undefined; size: AvatarSize }) {
+export function AgentAvatar({ expression, size, shape = "circle" }: { expression?: string | undefined; size: AvatarSize; shape?: "circle" | "rounded" }) {
   const agent = useAgent();
   const face = expression !== undefined && agent.icons?.[expression] !== undefined ? expression : NEUTRAL;
   const src = agent.icons?.[face] ?? BUILT_ICON;
-  const avatar = <Avatar src={src} fallbackSrc={BUILT_ICON} name={agent.name} size={size} tooltip={false} />;
+  const avatar = <Avatar src={src} fallbackSrc={BUILT_ICON} name={agent.name} size={size} shape={shape} tooltip={false} />;
   if (size < LABELLED) return avatar;
   return (
     <span className="agent-avatar">

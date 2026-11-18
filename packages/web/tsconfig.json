@@ -7,5 +7,5 @@
     "jsx": "react-jsx",
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "browser/**/*.ts", "build.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "browser/**/*.ts", "build.ts", "dev.ts", "dev/**/*.ts"]
 }

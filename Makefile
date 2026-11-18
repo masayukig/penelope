@@ -67,6 +67,12 @@ images: ## Build every image for this machine's platform, as penelope-<target>:$
 			--tag "penelope-$$target:$(VERSION)" . ; \
 	done
 
+# The Web UI over a mock of the backend, rebuilt as its files change
+# (packages/web/dev.ts). Nothing in CI calls it.
+.PHONY: web-dev
+web-dev: node_modules/.package-lock.json ## Serve the Web UI over a mock backend at 127.0.0.1:5173 (PORT=), rebuilt on change. Pick a scene with ?scene=<name>.
+	$(NPM) run dev --workspace=@penelope/web
+
 ##@ Check
 
 # gofmt is given the module's package directories rather than `.`, so that it

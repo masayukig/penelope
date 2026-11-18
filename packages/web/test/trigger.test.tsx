@@ -96,41 +96,22 @@ describe("the mark of what made her speak", () => {
     assert.equal(css(mark.querySelector(".reply-trigger-kind")!).flexShrink, "0");
     assert.equal(css(mark.querySelector(".reply-trigger-kind")!).flexGrow, "0");
     assert.equal(parseFloat(css(mark).minWidth), 0);
-    assert.equal(css(mark).maxWidth, "100%");
+    assert.equal(css(mark).maxWidth, "78%");
     assert.equal(css(mark).display, "flex");
     assert.equal(css(mark).fontSize, "12px");
   });
 
-  it("takes the rest of the name's line, and goes below once the name takes more than half", async () => {
+  it("is a line of its own in the flow, in the middle, before the reply and outside it", async () => {
     const timeline = await start([reply("r-1", "alertmanager", ALERT)]);
-    const row = timeline.querySelector(".reply-name")!;
-    assert.equal(css(row).display, "flex");
-    assert.equal(css(row).flexWrap, "wrap");
-    assert.equal(parseFloat(css(row).minWidth), 0);
-    assert.equal(css(row).rowGap, "4px");
-    assert.equal(css(row).columnGap, "8px");
-    const holder = timeline.querySelector(".reply-trigger")!.parentElement!;
-    assert.ok(holder.classList.contains("reply-trigger-room"));
-    assert.equal(css(holder).flexGrow, "1");
-    assert.equal(css(holder).flexShrink, "1");
-    assert.match(css(holder).flexBasis, /^0(px|%)?$/);
-    assert.equal(css(holder).minWidth, "50%");
-    assert.equal(css(holder).display, "flex");
-    // The row of the bubble around it grows with a mark that went below.
-    assert.equal(css(row.parentElement!).height, "auto");
-  });
-
-  it("cuts a long name on one line and keeps the avatar and the face whole", async () => {
-    const timeline = await start([reply("r-1", "alertmanager", ALERT)], "ペネロペ・クラスタ管理担当".repeat(4));
-    const who = timeline.querySelector(".reply-who")!;
-    assert.equal(css(who).flexGrow, "0");
-    assert.equal(css(who).flexShrink, "1");
-    assert.equal(parseFloat(css(who).minWidth), 0);
-    assert.equal(css(who).maxWidth, "100%");
-    cut(who.querySelector("strong")!);
-    for (const el of [...who.children].filter((el) => el.tagName !== "STRONG")) {
-      assert.equal(css(el).flexShrink, "0", el.className);
-    }
+    const line = timeline.querySelector(".timeline-event")!;
+    assert.equal(css(line).display, "flex");
+    assert.equal(css(line).justifyContent, "center");
+    assert.equal(parseFloat(css(line).minWidth), 0);
+    assert.equal(line.children.length, 1);
+    assert.equal(line.closest(".astryx-chat-message"), null);
+    const bubble = timeline.querySelector(".reply-bubble")!;
+    assert.ok(line.compareDocumentPosition(bubble) & 4, "the line comes before the reply");
+    assert.equal(timeline.querySelector(".reply-name"), null);
   });
 
   it("does not stretch a short one to the end of the line", async () => {

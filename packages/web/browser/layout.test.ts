@@ -23,7 +23,6 @@ if (!executablePath) throw new Error("set CHROMIUM to the path of a Chromium or 
 const dist = path.join(import.meta.dirname, "../dist");
 // Longer than the widest column (720px) can show.
 const LONG = "This content was flagged for possible cybersecurity risk and the turn was stopped before it could finish. ".repeat(3);
-const LONG_NAME = "ペネロペ・クラスタ管理担当".repeat(2);
 
 const reply = (id: string, text: string, trigger?: Trigger): HistoryEntry => ({
   kind: "agent",
@@ -86,28 +85,27 @@ after(async () => {
 async function open(width: number): Promise<Page> {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   await page.goto(origin);
-  await page.waitForSelector(".reply-name");
+  await page.waitForSelector(".reply-bubble");
   return page;
 }
 
 type Box = { left: number; right: number; top: number; bottom: number };
 
-/** The boxes of the name's line of the only reply: the line, the avatar and name, the mark, and the reply around them. */
+/** The boxes of the line before the only reply: the mark, and the line it is in the middle of. */
 async function boxes(page: Page) {
   return page.evaluate(() => {
     const box = (el: Element | null) => {
       const { left, right, top, bottom } = el!.getBoundingClientRect();
       return { left, right, top, bottom };
     };
-    const name = document.querySelector(".reply-name")!;
+    const name = document.querySelector(".timeline-event")!;
     const words = name.querySelector(".reply-trigger-words")!;
     return {
-      who: box(name.querySelector(".reply-who")),
       mark: box(name.querySelector(".reply-trigger")),
-      reply: box(name.closest(".astryx-chat-message")),
+      reply: box(name),
       cut: words.scrollWidth > words.clientWidth,
     };
-  }) as Promise<{ who: Box; mark: Box; reply: Box; cut: boolean }>;
+  }) as Promise<{ mark: Box; reply: Box; cut: boolean }>;
 }
 
 for (const [screen, width] of [
@@ -125,24 +123,13 @@ for (const [screen, width] of [
       assert.ok(mark.right <= column.right, `the mark ends at ${mark.right}, past the reply's ${column.right}`);
     });
 
-    it("stays beside the name when it is short", async () => {
+    it("is whole when it is short", async () => {
       agentName = "ペネロペ";
       history = [reply("r-1", "返事", { source: "cron", summary: "毎朝 9:00" })];
       const page = await open(width);
-      const { who, mark, cut } = await boxes(page);
+      const { mark, reply: column, cut } = await boxes(page);
       await page.close();
       assert.ok(!cut, "the words are whole");
-      assert.ok(mark.top < who.bottom, "the mark is on the name's line");
-    });
-
-    it("goes below a name that takes more than half the line, and is cut there", async () => {
-      agentName = LONG_NAME;
-      history = [reply("r-1", "返事", { source: "self", summary: LONG })];
-      const page = await open(width);
-      const { who, mark, reply: column, cut } = await boxes(page);
-      await page.close();
-      assert.ok(mark.top >= who.bottom, "the mark is below the name");
-      assert.ok(cut, "the words are cut");
       assert.ok(mark.right <= column.right, `the mark ends at ${mark.right}, past the reply's ${column.right}`);
     });
   });
