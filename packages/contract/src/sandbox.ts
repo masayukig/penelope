@@ -124,6 +124,8 @@ export type JobEventRequest = FromAgent & { id: string; summary: string; payload
 /** `POST /v1/replies`: a reply to the owner. */
 export type ReplyRequest = FromAgent & {
   text: string;
+  /** The turn it is sent in (ADR-0038). Without it, the backend takes the main agent's turn under way. */
+  turn_id?: string;
   /** The face to show: the Web UI puts the latest one beside the avatar (ADR-0016). */
   expression?: string;
   /** The `seq` of the event it answers. */
@@ -155,8 +157,31 @@ export type Activity =
 /** `POST /v1/activity` */
 export type ActivityRequest = FromAgent & { activities: Activity[] };
 
-/** `POST /v1/turns/end`: the turn is over; the backend commits /memory. */
-export type TurnEndRequest = FromAgent & { turn_id: string };
+/**
+ * How a turn ended (ADR-0038): it ran to its end, it failed, or the runner
+ * cut it (the runner stopping, a sub-agent closed while it ran). Only
+ * `failed` is a failure.
+ */
+export type TurnResult = "done" | "failed" | "stopped";
+
+/** The steps of the nightly switch that are turns (ADR-0007). */
+export type NightTurnStage = "reflection" | "curator";
+
+/**
+ * `POST /v1/turns/end`: the turn is over; the backend commits /memory. The
+ * rest is for the activity record (ADR-0038); a runner that leaves it out
+ * makes a turn whose result and trigger are unknown.
+ */
+export type TurnEndRequest = FromAgent & {
+  turn_id: string;
+  result?: TurnResult;
+  /** For `failed`: why, in one line. May come with `stopped`. */
+  reason?: string;
+  /** The `seq` of every event handed into the turn, steers and follow-ups too, in the order handed. */
+  seqs?: number[];
+  /** For a turn of the nightly switch: the `seq` of its control event, and which step it is. */
+  night?: { seq: number; stage: NightTurnStage };
+};
 
 /** When a schedule comes due: a cron expression, or one time (RFC 3339). */
 export type ScheduleWhen = { cron: string; at?: never } | { at: string; cron?: never };
@@ -168,8 +193,26 @@ export type ScheduleRequest = FromAgent & { reason: string } & ScheduleWhen;
 export type Schedule = { id: string; agent: AgentId; reason: string } & ScheduleWhen;
 export type ScheduleListResponse = { schedules: Schedule[] };
 
-/** `POST /v1/sessions/rotated`: the nightly switch is done and a new session runs. */
-export type SessionRotatedRequest = FromAgent;
+/** What became of one step of the nightly switch: done, failed, or not made because an earlier one stopped it. */
+export type NightStageResult = "done" | "failed" | "skipped";
+
+export type NightStage = {
+  result: NightStageResult;
+  /** For `failed`: why, in one line. */
+  reason?: string;
+};
+
+/** The three steps of a night, in order (ADR-0007). */
+export type NightStages = { reflection: NightStage; curator: NightStage; session: NightStage };
+
+/**
+ * `POST /v1/sessions/rotated`: the runner went through the nightly switch of
+ * the control event `seq`, and how each step went (ADR-0038). Sent each time
+ * the steps are run, also when one stopped them; sent with `seq` alone when
+ * the event came again after its switch was made. A runner that sends
+ * neither has switched to a new session, the steps unknown.
+ */
+export type SessionRotatedRequest = FromAgent & { seq?: number; stages?: NightStages };
 
 /** Where a task an agent sent over A2A is (docs/a2a.md). `working` and `input-required` are open. */
 export type A2ATaskState = "working" | "input-required" | "completed" | "failed" | "rejected";

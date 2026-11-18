@@ -173,6 +173,9 @@ function onStream(state: State, event: StreamEvent): State {
       const now = new Date().toISOString();
       return { ...state, subAgents: [...state.subAgents, { agent, purpose, state: "waiting", startedAt: now, stateSince: now }] };
     }
+    // The activity record's unseen failures are not shown yet.
+    case "record":
+      return state;
   }
 }
 

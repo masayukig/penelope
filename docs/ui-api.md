@@ -38,6 +38,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 | `GET /api/assets/<id>` | 返事とオーナーのメッセージに添えられた画像の写し |
 | `GET /api/push`・`POST /api/push/subscriptions`・`POST /api/push/subscriptions/delete` | 返事の知らせ（Web Push）の鍵と、購読の登録と解除 |
 | `GET /api/schedules`・`DELETE /api/schedules/<id>` | エージェントの予約の一覧と取り消し |
+| `GET /api/record`・`GET /api/record/<種類>/<id>`・`GET /api/record/unseen`・`POST /api/record/seen` | 活動の記録（「活動の記録」） |
 | `GET /api/approvals`・`POST /api/approvals/<id>` | 承認（後の波） |
 
 ## メッセージを送る
@@ -56,11 +57,12 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 - 返事とオーナーのメッセージを、新しい順に返す。応答は `{entries, before?}`。`before` は次の（より古い）ページを取るための不透明な cursor で、最後のページには無い。
 - 1 件は `kind`（`owner` か `agent`）・`id`・`at`・`text` を持つ。`agent` のものは、さらに `agent`（エージェントの ID）と `expression` を持つ。
 - `agent` のものは、答えている出来事（返事の `in_reply_to`）を backend が知っていれば、`trigger` として、その出来事の `source` と `summary` を持つ。出来事の `payload` は載せない。UI はこれを、エージェントが何をきっかけに話したかの札にする。
+- `agent` のものは、backend が返事を出したターンを知っていれば `turn_id` を持つ（[ADR-0038](adr/0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md)）。Web UI は「ターンを見る」で `GET /api/record/turns/<turn_id>` を開く（「活動の記録」）。
 - `agent` のものは、画像を添えた返事なら `images` として、送られた順の画像の一覧を持つ（型は `ReplyImage`、「画像」）。画像の無い返事には欄が無い。
 - `owner` のものは、添付があれば `images`（写した画像の一覧。型は `ReplyImage`、「画像」）と `files`（写さなかったファイルの `{name, size}` の一覧。型は `OwnerFile`）を、それぞれ送られた順に持つ。無い欄は載せない。[ADR-0034](adr/0034-images-the-owner-sends-copied-by-the-backend.md) より前に送られたメッセージは、どちらも持たない。
 
 - 1 ページは 50 件。backend の渡していない `before` は `400`。
-- 途中経過は履歴に含めない。途中経過は流れだけで送る。過去の途中経過を見る画面は後の波。
+- 途中経過は履歴に含めない。途中経過は流れで送り、過去の途中経過は活動の記録で読む（「活動の記録」）。
 
 ## 流れ（SSE）
 
@@ -72,6 +74,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 | `activity` | `{agent, activity}`。`activity` は sandbox 向けの口の途中経過の 1 件の写し（[sandbox-api.md](sandbox-api.md) の「途中経過」） |
 | `state` | `{agent, state}`。`state` は `thinking`（ターンの最中）か `waiting`（出来事を待っている） |
 | `agent` | `{agent, purpose, closed}`（型は `SubAgentStatus`）。サブエージェントを起こした・閉じた（「サブエージェント」） |
+| `record` | `{unseen}`（型は `RecordUnseenResponse`）。まだ見ていない失敗の数が変わった（「活動の記録」） |
 
 - 細かさは、sandbox 向けの口と同じくブロックが閉じるごと。トークンごとの流れが UI に要るなら、後で足す。
 
@@ -172,6 +175,76 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 - 繰り返しは、cron の式（等幅）の前に言葉で書く。言葉にするのは毎日・毎週（曜日 1 つ）・毎月（日 1 つ）・毎年（月と日 1 つずつ）で、分と時が 1 つの数のときだけ（`0 6 * * *` は「毎日 6:00」、`0 18 * * 0` は「毎週 日曜 18:00」、`0 9 1 * *` は「毎月 1日 9:00」、`0 9 5 1 *` は「毎年 1月5日 9:00」）。ほかの式は式だけを出す。式は backend の時間帯で読まれるので、言葉は式の数をそのまま書く。1 回の予約は「1 回だけ」。
 - 「取り消す」を押すと、取り消すかを確かめる（理由の見出し、繰り返しか 1 回だけか、エージェントには知らせないことを添える）。確かめてから `DELETE` を送り、その行を消す。`404` のときは（エージェントが自分で消したか、1 回の予約が来たあと）一覧を読み直す。ほかの失敗は知らせを出し、行は残す。
 - 一覧はこの場所を開くたびに読む。流れでは直さない（予約の変化は流れに載らない）。
+
+## 活動の記録
+
+オーナーが、各エージェントがいつ・何をきっかけに・何をしたか、何かが失敗していないかを後から見る場所である（[ADR-0038](adr/0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md)、画面は [docs/design](design/README.md) の 14 章）。見るだけで、操作の口は無い。型は `packages/contract` の `src/ui.ts` の `Record…`、上限と期間は `src/record.ts`。
+
+- 時刻はすべて RFC 3339 の UTC（`2026-11-14T10:00:00.000Z` の形）。
+- 1 行の要約は 1 年、ターンの中の流れは 30 日で backend が消す（[backend.md](backend.md) の「活動の記録」）。
+
+### 失敗
+
+- **失敗** は、`result` が `failed` のターン、`result` が `failed` の夜、`failed_at` を持つ裏の仕事（0 以外の exit code で終わった `exited`、`timed-out`、`signaled`）である。止められたターン（`stopped`）、エージェントが止めた裏の仕事（`stopped`）、runner の立ち上がり直しで切れた裏の仕事（`interrupted`）は失敗でない。
+- 夜の切り替えのターン（`night` を持つターン）は、その夜の行の中にあり、一覧のターンの行には出ない。失敗も夜の 1 つとして数える。夜の切り替えの知らせがまだ来ていない夜のターンは、ふつうのターンとして出る。
+- 失敗の行は `failed_at`（backend がその失敗を知った時刻）を持つ。逃した夜も持つ。失敗でない行は持たない。
+- **日ごとの数**（`turns`・`failures`）には逃した夜を数えない。**まだ見ていない失敗の数**（`unseen`）には数える。
+
+### 一覧
+
+`GET /api/record?day=&tz=&failed=&agent=&kind=` は 1 日分の行を返す（型は `RecordDayResponse`）。
+
+| 引数 | 中身 |
+| --- | --- |
+| `day` | `YYYY-MM-DD`。省くと `tz` での今日 |
+| `tz` | 日を区切る時間帯（IANA の名前、例 `Asia/Tokyo`）。省くと backend の `PENELOPE_TIME_ZONE`。Web UI はブラウザの時間帯を渡す（予約の一覧と同じく、日付はブラウザの時間帯で書くため） |
+| `failed` | `1` で失敗の行と逃した夜だけ。`0` か省くと全部 |
+| `agent` | `main` で本体の行（本体のターン・夜・逃した夜・裏の仕事）だけ。サブエージェントの名前で、その人のターンと閉じた行だけ |
+| `kind` | `turn`・`night`（逃した夜も）・`job`・`sub_agent` のどれか |
+
+- 形の違う `day`、知らない `tz`・`kind`、`0` と `1` でない `failed` は `400`。
+- 応答は `{day, rows, turns, failures, before?, agents}`。
+  - `rows` は行の並びで、`at` の新しい順。`at` は行の位置の時刻で、ターンと夜は始まり、逃した夜は予定の時刻、裏の仕事は終わり、閉じたサブエージェントは閉じた時刻である。
+  - `turns`・`failures` はその日の全部の数（絞り込みは効かない）。`turns` は夜の切り替えのターンを除いたターンの数。
+  - `before` は、同じ絞り込みで行のある、より前の日（`YYYY-MM-DD`）。行の無い日は飛ばす。無ければ欄が無い。Web UI は下までスクロールしたら `day=<before>` で次を読む。
+  - `agents` は記録の知っているサブエージェントの名前の一覧（閉じたものも）。「誰の」の絞り込みの選択肢に使う。
+- 畳み（1 時間ごと）と、きっかけの見出しの書き方（「最初の 1 件 ＋ ほか n 件」）は Web UI がする。API は行ときっかけの並びを渡すだけである。
+
+行は `kind` で 5 つに分かれる。すべて `id`・`kind`・`at` を持ち、失敗の行は `failed_at` も持つ。
+
+| `kind` | 欄 | 開く口 |
+| --- | --- | --- |
+| `turn` | `agent`、`started_at`・`ended_at`・`seconds`（分かるときだけ）、`result`、`reason`、`triggers`・`trigger_count`、`tools`、`replies`、`night`（夜の切り替えのターンだけ。夜の行の `id` と段） | `GET /api/record/turns/<id>` |
+| `night` | `scheduled_at`（夜の出来事が分かるとき）、`started_at`・`ended_at`・`seconds`、`result`、`stages` | `GET /api/record/nights/<id>` |
+| `missed_night` | `scheduled_at` | なし |
+| `job` | `command`（頭の `RECORD_COMMAND_MAX`（200）文字）、`started_at`・`ended_at`・`seconds`、`end`、`exit_code`・`signal`（あるときだけ） | なし |
+| `sub_agent` | `agent`、`purpose`、`started_at`、`closed_at`、`turns`・`failed_turns` | `GET /api/record/sub-agents/<agent>` |
+
+- ターンの `result` は `done`・`failed`・`stopped`（runner の言ったもの）、`running`（まだ終わっていない）、`unknown`（終わったが runner が結果を言わなかった。結果を送らない runner のターンと、記録より前のターン）。`reason` は runner が言ったときだけある。
+- ターンの `triggers` は、渡した出来事を渡した順に、`RECORD_TRIGGERS_MAX`（20）件まで並べたもの。1 件は `{seq, source, stream?, summary}`（型は `RecordTrigger`）。`trigger_count` は全部の数。サブエージェントのターン（頼みは本体から来る）、夜の切り替えのターン、出来事の分からないターンでは空で、`trigger_count` は 0 である。
+- 夜の `result` は、段のどれかが失敗なら `failed`、そうでなければ `done`、段の結果が知らされていなければ `unknown`。`stages` は `{reflection, curator, session}` で、1 つの段は `{result, reason?}`。`result` は `done`・`failed`・`skipped`（行われなかった）・`unknown`。段の結果が知らされていない夜は、`session` が `done` で、ほかの 2 つは `unknown` である（切り替えの知らせは新しいセッションに切り替えてから来るため）。
+- **逃した夜** は、記録が始まった後の予定の夜の時刻（backend の `PENELOPE_NIGHTLY_CRON`、今の設定で数える）のうち、次のどちらかのものである。夜の出来事が、その時刻から 1 分たっても列に無い（backend が止まっていた）。夜の出来事はあるが、次の夜の時刻までに切り替えの知らせが来なかった。`failed_at` はそれが決まった時刻（1 分後か、次の夜の時刻）。後から知らせが来れば、逃した夜ではなくなる。
+- 閉じたサブエージェントの `turns` と `failed_turns` は、記録に残っているそのサブエージェントのターンと、うち失敗の数。
+
+### 1 件
+
+- `GET /api/record/turns/<id>` は `{turn, flow, expired, replies}`（型は `RecordTurnResponse`）。
+  - `turn` は一覧の行と同じ形。
+  - `flow` は、そのターンの途中経過を順に並べたもの（`turn_start` と `turn_end` は除く）。形は sandbox 向けの口の途中経過の 1 件と同じだが、`tool_result` だけは `output` の代わりに大きさ（`lines` 行・`bytes` バイト、UTF-8）を持つ（型は `RecordFlowItem`）。結果の本文は開いたときに下の口で読む。
+  - `expired` は、30 日を過ぎて流れが消えたとき `true`（そのとき `flow` は空）。
+  - `replies` は、そのターンで出した返事の `{id, at, text, history_before}`（型は `RecordReply`）の並び。`history_before` は `GET /api/history?before=` に渡すと、その返事から始まるページが返る値である。Web UI は「会話でこの返事を見る」で、会話を開いてそのページを読み、`id` の返事の位置へ移る。
+- `GET /api/record/turns/<id>/results/<call_id>` は `{output}`（型は `RecordResultResponse`）。そのツールの結果の本文の全部（runner が切った 16,000 文字まで）。流れが消えたもの、無いものは `404`。
+- `GET /api/record/nights/<id>` は `{night, turns}`（型は `RecordNightResponse`）。`turns` は `{reflection?, curator?}` で、その段の最後のターン（一覧の `turn` の行と同じ形）。手順を回し直した夜は、最後に回したもの。
+- `GET /api/record/sub-agents/<name>?before=` は `{sub_agent, turns, before?}`（型は `RecordSubAgentResponse`）。`sub_agent` は一覧の行と同じ形（閉じていなければ `closed_at` が無い）。`turns` はそのサブエージェントのターンの新しい順で、1 ページ 20 件。`before` は次のページの不透明な cursor で、最後のページには無い。backend の渡していない `before` は `400`。
+- 無い `id`・名前は `404`。どの口も GET のほかの method は `405`。
+
+### まだ見ていない失敗と「見た」
+
+- backend は、オーナーが活動の記録の画面を開いた時刻を 1 つ覚える（配置のオーナーごと。ブラウザごとではない）。まだ一度も開いていなければ、記録が始まった時刻を使う。
+- **まだ見ていない失敗の数** は、その時刻より後の `failed_at` を持つ失敗と逃した夜の数である。
+- `GET /api/record/unseen` は `{unseen}`（型は `RecordUnseenResponse`）。Web UI は、最初につなぐときとつなぎ直すときにこれを読み、左のレールとメニューの札にする。
+- 数が変わると、流れで `record`（`{unseen}`）を送る。backend は記録が失敗を受けたとき、オーナーが開いたとき、15 秒ごと（逃した夜は時がたつだけで決まるため）に数え直し、前に送った数と違えば送る。
+- `POST /api/record/seen` は、今を開いた時刻として覚え、`{unseen, previous_seen_at}`（型は `RecordSeenResponse`）を返す。`unseen` は覚える前のまだ見ていない数、`previous_seen_at` は前に開いた時刻（初めてなら記録が始まった時刻）。Web UI は、活動の記録の画面を開いたときに 1 回送り、`unseen` が 1 以上なら「前に見たあとの失敗が n 件あります」を出し、`failed_at` が `previous_seen_at` より後の行に「新しい」の札を付ける。札は画面を離れるまで残す。
 
 ## 画像
 

@@ -41,3 +41,4 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0035 | [道具の使い方とどの配置にも同じ skill は sandbox の image に skill として入れ、オーナー・記憶の後に並べる](0035-tool-usage-and-shared-skills-as-image-skills.md) | Accepted |
 | 0036 | [アバターは記憶の中で育て、最初の 1 回だけ backend が選んだアバターを写す](0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md) | Accepted |
 | 0037 | [main への push ごとに image を `main` の tag で出し、脆弱性対応の係の PR がマージされたらすぐにパッチ版を出す](0037-a-main-image-to-scan-and-a-vulnerability-fix-released-at-once.md) | Accepted |
+| 0038 | [活動の記録は backend が 1 行の要約として持ち、ターンの結果と夜の段の結果を runner が知らせる](0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md) | Accepted |

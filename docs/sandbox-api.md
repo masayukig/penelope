@@ -1,7 +1,7 @@
 # sandbox 向けの口の仕様
 
 sandbox の中の runner と道具が backend を呼ぶ口を決める。方針は
-[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)・[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)・[ADR-0007](adr/0007-one-session-switched-nightly-with-a-one-turn-curator.md)・[ADR-0013](adr/0013-event-contents-in-sources-and-summaries-in-turns.md)・[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)・[ADR-0030](adr/0030-background-jobs-run-by-the-runner-and-their-end-as-an-event.md) にある。
+[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)・[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)・[ADR-0007](adr/0007-one-session-switched-nightly-with-a-one-turn-curator.md)・[ADR-0013](adr/0013-event-contents-in-sources-and-summaries-in-turns.md)・[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)・[ADR-0030](adr/0030-background-jobs-run-by-the-runner-and-their-end-as-an-event.md)・[ADR-0038](adr/0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md) にある。
 型は `packages/contract` の `src/sandbox.ts` が正である。サブエージェントの名前の形を確かめる関数は `src/agents.ts` にあり、runner と backend が同じものを使う。出来事の封筒と `/sources` は [events.md](events.md) にある。
 
 「未決」と書いた点は、実装の作業単位が決めて、この文書を直す。
@@ -112,6 +112,7 @@ runner は、サブエージェントごとに `<Pi のディレクトリ>/sessi
 - 受信元を `self` と分けるのは、inline を受信元ごとに選ぶためである。サブエージェントの知らせは要約と場所のまま、裏の仕事の終わりは中身ごとターンに入る。
 - `agent` は `main` だけ。ほかは `400`。`id`（空でない文字列）・`summary`（文字列）・`payload` が無ければ `400`。
 - `id` は裏の仕事の ID。1 つの仕事の終わりは 1 件なので、送り直しても同じ `id` で、重複として落ちる。応答は `202` で、body は無い。
+- backend は、出来事のほかに、活動の記録の 1 行（[ui-api.md](ui-api.md) の「活動の記録」）を残す。`payload` が下の表の形でなければ記録には残さないが、出来事としては受ける。
 - `payload` は次の欄を持つ（型は `JobEnd`）。
 
 | 欄 | 中身 |
@@ -161,7 +162,8 @@ runner は、本体のセッションにだけ、裏の仕事を扱う 3 つの�
 
 ## 返事
 
-- body は `{agent, text, expression?, in_reply_to?, images?}`。
+- body は `{agent, text, expression?, in_reply_to?, turn_id?, images?}`。
+  - `turn_id`: 返事を出したターンの ID（「途中経過」の `turn_id`）。backend は返事をそのターンに結び付け、活動の記録と会話の行き来に使う（[ADR-0038](adr/0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md)）。無ければ、backend はそのとき本体の進んでいるターン（記録に始まりがあって終わりの無いもの）に結び付け、それも無ければ結び付けない。空の文字列は `400`。
   - `expression`: 表情。Web UI はアバターをこの表情の絵で出す（[ADR-0016](adr/0016-show-the-avatar-and-expression-from-the-first-web-ui.md)）。
   - `in_reply_to`: 答えている出来事の `seq`。ターンの `<events>` の行の `seq` である（`batch` のまとめなら `seqs` の 1 つ）。
   - `images`: 返事に添える画像の並び（[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md)）。1 件は `{name, data}`（型は `ReplyImageUpload`）で、`name` はファイルの名前（ディレクトリを除く、1〜255 文字）、`data` はファイルの中身の base64（padding 付き）。
@@ -216,12 +218,29 @@ runner は、本体のセッションにだけ、裏の仕事を扱う 3 つの�
 
 ## ターンの終わり
 
-- body は `{agent, turn_id}`。backend が `/memory` の作業ツリーの変わったものをコミットする合図である（[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)）。コミットの形は [backend.md](backend.md) の「`/memory` のコミット」にある。
+- body は `{agent, turn_id, result?, reason?, seqs?, night?}`（型は `TurnEndRequest`）。`turn_id` のほかは活動の記録のための欄である（下の「ターンの結果ときっかけ」）。backend が `/memory` の作業ツリーの変わったものをコミットする合図である（[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)）。コミットの形は [backend.md](backend.md) の「`/memory` のコミット」にある。
 - backend はコミットを終えてから `204` で答える。コミットに失敗したら `500` で答える。
 - UI の流れでは、エージェントを `waiting` にする。
 - runner は、ターンの `turn_end` の途中経過を送り終えてから、この口を呼ぶ。`turn_end` を送れなかったとき（途中経過は送り直さない）は、流れでは `waiting` になるが、記録から引く `state`（`GET /api/agents`）は次のターンの `turn_start` か `turn_end` まで `thinking` のままである。
 - サブエージェントのターンの終わりにも、runner は `agent` をサブエージェントの名前にして送り、backend は同じくコミットする。サブエージェントが `/memory` に書いたものを、本体の次のターンを待たずに残すためである。本体のターンの途中の変更も一緒にコミットされる（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md) の「サブエージェントの途中経過とターンの終わり」）。
 - 途中経過の `turn_end` は UI と記録のため、この口はコミットのために、別に置く。
+
+### ターンの結果ときっかけ
+
+[ADR-0038](adr/0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md) の活動の記録のために、runner はターンの終わりに次の欄を足す。どれも省いてよく、省いた要求も今までどおり受けてコミットする。形が違えば `400` で、コミットもしない。
+
+| 欄 | 中身 |
+| --- | --- |
+| `result` | `done`（ふつうに終わった）・`failed`（失敗した）・`stopped`（runner が中断した）のどれか。省くと、記録ではそのターンの結果は「分からない」（`unknown`） |
+| `reason` | 文字列。`failed` のときの理由の 1 行。`stopped` にも付けてよい。backend は 1 行目だけを、`RECORD_REASON_MAX`（500 文字）まで残す |
+| `seqs` | 整数の並び。そのターンに渡した出来事の `seq` を、渡した順に、すべて（最初の入力も、steer と follow-up で途中に入ったものも）。backend は自分の列から `source`・`stream`・`summary` を引いて残す（先頭の `RECORD_TRIGGERS_MAX`（20）件と、全部の数）。知らない `seq` は落とす。夜の切り替えのターン、サブエージェントのターンは省く |
+| `night` | `{seq, stage}`。夜の切り替えのターンだけ。`seq` はその夜の制御の出来事の `seq`、`stage` は `reflection`（振り返り）か `curator`（整理係） |
+
+- `failed` は、ターンの実行が失敗で終わったもの（Pi の実行が例外を投げた、モデルの要求が失敗で終わったなど）である。理由の 1 行は、オーナーが記録の一覧で読む。
+- `stopped` は、runner が自分で切ったもの: runner が止まるために中断した、走っているサブエージェントを `subagent_close` で閉じた、runner が立ち上がり直して切れたターンを終わらせた（サブエージェント）。失敗には数えない。
+- どの場合を `failed` と `stopped` に分けるかの細部は runner が決める。迷うものは `failed` にする（失敗に気づけることを先にする）。
+- 本体のターンが Pod ごと落ちて終わりを送れなかったときは送り直さない。backend は、同じエージェントの次のターンの `turn_start` を受けたとき、終わりの無い前のターンを `stopped` にする。
+- 記録に残せなかったとき（backend の中の誤り）も、ターンの終わりは断らない。
 
 ## 予約
 
@@ -235,8 +254,17 @@ runner は、本体のセッションにだけ、裏の仕事を扱う 3 つの�
 
 ## セッションの切り替えの知らせ
 
-- 夜の切り替え（制御の出来事、[events.md](events.md) の「制御の出来事」）を終え、新しいセッションが動き出したら、runner が送る。body は `{agent}`。
-- そのあと runner は、制御の出来事を ack する。
+- 夜の切り替え（制御の出来事、[events.md](events.md) の「制御の出来事」）の手順を 1 回回し終えたら、runner が送る。body は `{agent, seq?, stages?}`（型は `SessionRotatedRequest`）。`agent` は `main` だけで、ほかは `400`。
+- 新しいセッションが動き出したら、そのあと runner は、制御の出来事を ack する。
+- `seq` はその夜の制御の出来事の `seq`、`stages` は段ごとの結果 `{reflection, curator, session}` で、1 つの段は `{result, reason?}`（型は `NightStage`）である（[ADR-0038](adr/0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md)）。
+  - `result` は `done`（済んだ）・`failed`（失敗した）・`skipped`（前の段で止まって行われなかった）。`reason` は `failed` のときの理由の 1 行。
+  - `reflection` と `curator` は、その段のターンのターンの終わりの `result` と同じにする。整理係のセッションを開けなかったときは、ターンが無いまま `curator` を `failed` にする。
+  - `session` は、新しいセッションを開いて動かし始めたら `done`。開けなかったら `failed`。
+  - 新しいセッションに切り替えられなかったときも、止まったところまでの `stages` を送る。そのときは ack しないので、制御の出来事がもう一度渡り、手順を振り返りから回し直して、また送る。backend は同じ `seq` の後の知らせで記録を置き換える。
+  - 同じ `seq` がもう一度渡って手順を回さずに知らせだけを送り直すときは、`stages` を省いて `{agent, seq}` を送ってよい。backend は前に受けた段の結果を残す。
+  - `stages` は `seq` と一緒にだけ送る。`seq` の無い `stages`、形の違う `stages` は `400`。
+  - どちらも無い知らせ（この欄の無い runner）は、新しいセッションに切り替えたが段の結果は分からない夜として記録される。
+- 振り返りと整理係のどちらかが `failed` なら、新しいセッションまで済んでいても、記録ではその夜を「止まった夜」として失敗に数える。
 - runner は、新しいセッションに切り替えたときに、その制御の出来事の `seq` をセッションの記録の場所に残す。同じ `seq` がもう一度渡されたら、手順は回さずに知らせと ack だけを送り直す。新しいセッションに切り替える前に止まったときは、もう一度渡された出来事で、振り返りからやり直す。
 
 - backend は切り替えの段を数えず、制御の出来事も ack が無ければもう一度渡すだけである。切り替えの途中で runner が止まったとき（制御の出来事がもう一度渡されたとき）にどこからやり直すか、整理係のターンが失敗したときにどうするかは、runner が決める（[backend.md](backend.md) の「夜の切り替え」）。
