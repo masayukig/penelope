@@ -147,6 +147,12 @@ test("PENELOPE_MODEL_ROUTER is read as JSON, with defaults", () => {
   assert.throws(() => readConfig({ ...routed, PENELOPE_MODEL_ROUTER: '{"primary":"openai/gpt"}' }), ConfigError);
   assert.throws(() => readConfig({ ...routed, PENELOPE_MODEL_ROUTER: "openai/gpt" }), ConfigError);
   for (const json of ["null", "[]", "1"]) assert.throws(() => readConfig({ ...routed, PENELOPE_MODEL_ROUTER: json }), ConfigError, json);
+  // Only finite JSON numbers and an http(s) URL with a host.
+  const base = JSON.parse(value) as Record<string, unknown>;
+  for (const bad of [{ low: null }, { high: "90" }, { cacheSeconds: "Infinity" }, { prometheus: "http://" }, { prometheus: "ftp://prometheus" }]) {
+    const json = JSON.stringify({ ...base, ...bad });
+    assert.throws(() => readConfig({ ...routed, PENELOPE_MODEL_ROUTER: json }), ConfigError, json);
+  }
   // One without the other is refused at start, not found out at the first request.
   assert.throws(() => readConfig(routed), ConfigError);
   assert.throws(() => readConfig({ ...env, PENELOPE_MODEL: "openai/gpt", PENELOPE_MODEL_ROUTER: value }), ConfigError);

@@ -95,6 +95,16 @@ function modelName(value: unknown): { provider: string; id: string } | undefined
   return { provider: value.slice(0, slash), id: value.slice(slash + 1) };
 }
 
+function httpURL(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") && url.hostname !== "";
+  } catch {
+    return false;
+  }
+}
+
 /** PENELOPE_MODEL_ROUTER: a JSON object (docs/model-router.md). */
 function readRouter(value: string, problems: string[]): RouterConfig | undefined {
   let raw: Record<string, unknown>;
@@ -110,13 +120,18 @@ function readRouter(value: string, problems: string[]): RouterConfig | undefined
   }
   const primary = modelName(raw.primary);
   const fallback = modelName(raw.fallback);
-  const number = (name: string, fallback: number) => (raw[name] === undefined ? fallback : Number(raw[name]));
+  // Not Number(): it would read null as 0 and "Infinity" as Infinity. NaN fails every check below.
+  const number = (name: string, fallback: number) => {
+    const v = raw[name];
+    if (v === undefined) return fallback;
+    return typeof v === "number" && Number.isFinite(v) ? v : NaN;
+  };
   const high = number("high", 85);
   const low = number("low", 70);
   const cacheSeconds = number("cacheSeconds", 300);
   const before = problems.length;
   if (!primary || !fallback) problems.push("PENELOPE_MODEL_ROUTER: primary and fallback must be <provider>/<model>");
-  if (typeof raw.prometheus !== "string" || !/^https?:\/\//.test(raw.prometheus)) problems.push("PENELOPE_MODEL_ROUTER: prometheus must be a URL");
+  if (!httpURL(raw.prometheus)) problems.push("PENELOPE_MODEL_ROUTER: prometheus must be an http(s) URL");
   if (typeof raw.query !== "string" || raw.query === "") problems.push("PENELOPE_MODEL_ROUTER: query is not set");
   if (!(low >= 0 && low <= high && high <= 100)) problems.push("PENELOPE_MODEL_ROUTER: 0 <= low <= high <= 100");
   if (!(cacheSeconds > 0)) problems.push("PENELOPE_MODEL_ROUTER: cacheSeconds must be positive");
