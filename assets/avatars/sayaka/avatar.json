@@ -1,0 +1,26 @@
+{
+  "id": "sayaka",
+  "name": "さやか",
+  "icons": {
+    "neutral": "icons/neutral.webp",
+    "happy": "icons/happy.webp",
+    "laughing": "icons/laughing.webp",
+    "surprised": "icons/surprised.webp",
+    "thinking": "icons/thinking.webp",
+    "worried": "icons/worried.webp",
+    "sad": "icons/sad.webp",
+    "sleepy": "icons/sleepy.webp",
+    "angry": "icons/angry.webp"
+  },
+  "pngIcons": {
+    "neutral": "slack/neutral.png",
+    "happy": "slack/happy.png",
+    "laughing": "slack/laughing.png",
+    "surprised": "slack/surprised.png",
+    "thinking": "slack/thinking.png",
+    "worried": "slack/worried.png",
+    "sad": "slack/sad.png",
+    "sleepy": "slack/sleepy.png",
+    "angry": "slack/angry.png"
+  }
+}
