@@ -3,12 +3,12 @@ import { chmod, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promis
 import { join } from "node:path";
 import { test } from "node:test";
 
-import type { DeliveredEvent, TurnLine } from "@penelope/contract";
+import type { DeliveredEvent, SessionRotatedRequest, TurnEndRequest, TurnLine } from "@penelope/contract";
 
 import type { Config } from "../src/config.ts";
 import { curatorSystemPrompt, FOLDING, foldAskInput, type Places, reflectionInput } from "../src/prompts.ts";
 import { until } from "./fake-backend.ts";
-import type { Call, Script } from "./fake-model.ts";
+import type { Answer, Call, Script } from "./fake-model.ts";
 import { acked, activities, closers, ui, world } from "./world.ts";
 
 function slack(seq: number, delivery: "now" | "batch"): DeliveredEvent {
@@ -62,16 +62,16 @@ test("an event becomes a turn; the reply, the activities, the turn's end and the
     events(calls[0]!.userTexts.at(-1)!).map((line) => [line.seq, line.source, line.text]),
     [[1, "ui", "hello"]],
   );
-  assert.deepEqual(fake.sent("POST", "/v1/replies"), [{ agent: "main", text: "hi", in_reply_to: 1 }]);
-
   const sent = activities(fake);
   const turnId = sent[0]!.turn_id;
+  assert.deepEqual(fake.sent("POST", "/v1/replies"), [{ agent: "main", text: "hi", in_reply_to: 1, turn_id: turnId }]);
+
   assert.deepEqual(
     sent.map((a) => a.kind),
     ["turn_start", "thinking", "tool_call", "tool_result", "message", "turn_end"],
   );
   assert.ok(sent.every((a) => a.turn_id === turnId));
-  assert.deepEqual(fake.sent("POST", "/v1/turns/end"), [{ agent: "main", turn_id: turnId }]);
+  assert.deepEqual(fake.sent("POST", "/v1/turns/end"), [{ agent: "main", turn_id: turnId, result: "done", seqs: [1] }]);
 
   const order = fake.order().filter((r) => r !== "POST /v1/activity" && r !== "POST /v1/replies");
   assert.deepEqual(order, ["POST /v1/turns/end", "POST /v1/events/ack"]);
@@ -232,7 +232,8 @@ test("an event that comes during a turn steers it; the turn acks both", async ()
   await until(() => acked(fake).includes(2));
 
   assert.ok(calls.some((c) => c.userTexts.length === 2 && c.userTexts[1]!.includes("and this")));
-  assert.equal(fake.sent("POST", "/v1/turns/end").length, 1);
+  // Guards against: the activity record missing what joined the turn as its trigger.
+  assert.deepEqual((fake.sent("POST", "/v1/turns/end") as TurnEndRequest[]).map((end) => end.seqs), [[1, 2]]);
   assert.deepEqual(acked(fake).sort(), [1, 2]);
 });
 
@@ -304,11 +305,20 @@ test("the nightly event runs the reflection, the curator and a new session", asy
   const curator = calls.find((c) => isCurator(config, c))!;
   assert.equal(curator.userTexts.length, 1, "the curator starts from an empty context");
 
-  // Three turns were committed: the day's, the reflection and the curator's.
-  assert.equal(fake.sent("POST", "/v1/turns/end").length, 3);
+  // Three turns were committed: the day's, the reflection and the curator's, each told as the turn it was.
+  assert.deepEqual(
+    (fake.sent("POST", "/v1/turns/end") as TurnEndRequest[]).map(({ result, seqs, night }) => ({ result, seqs, night })),
+    [
+      { result: "done", seqs: [1], night: undefined },
+      { result: "done", seqs: undefined, night: { seq: 2, stage: "reflection" } },
+      { result: "done", seqs: undefined, night: { seq: 2, stage: "curator" } },
+    ],
+  );
   const order = fake.order().filter((r) => r === "POST /v1/sessions/rotated" || r === "POST /v1/events/ack");
   assert.deepEqual(order, ["POST /v1/events/ack", "POST /v1/sessions/rotated", "POST /v1/events/ack"]);
-  assert.deepEqual(fake.sent("POST", "/v1/sessions/rotated"), [{ agent: "main" }]);
+  assert.deepEqual(fake.sent("POST", "/v1/sessions/rotated"), [
+    { agent: "main", seq: 2, stages: { reflection: { result: "done" }, curator: { result: "done" }, session: { result: "done" } } },
+  ]);
 
   // The new session starts empty, with the handoff in its system prompt.
   fake.push(ui(3, "good morning"));
@@ -336,6 +346,47 @@ test("a nightly event that comes again after the switch only tells and acks", as
   await until(() => fake.sent("POST", "/v1/sessions/rotated").length === 2);
   await until(() => acked(fake).filter((seq) => seq === 1).length === 2);
   assert.equal(calls.length, made);
+  // Guards against: the steps of the night told again as if it had been run again.
+  assert.deepEqual(fake.sent("POST", "/v1/sessions/rotated")[1], { agent: "main", seq: 1 });
+});
+
+test("a curator's turn that fails is told as its step, and the night goes on to a new session", async () => {
+  const { fake, start, config } = await world();
+  await start((call) => (call.lastRole === "user" && isCurator(config, call) ? { error: "the model is away" } : nightWrites(config)(call)));
+  fake.push(nightly(1));
+  await until(() => acked(fake).includes(1));
+  const stages = (fake.sent("POST", "/v1/sessions/rotated") as SessionRotatedRequest[])[0]?.stages;
+  assert.equal(stages?.curator.result, "failed");
+  assert.match(stages?.curator.reason ?? "", /the model is away/);
+  assert.deepEqual([stages?.reflection, stages?.session], [{ result: "done" }, { result: "done" }]);
+});
+
+test("a new session that cannot be opened is told as the night's last step, and the night is run again", async () => {
+  const { fake, start, calls, config } = await world();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await start(async (call) => {
+    if (call.lastRole === "user" && isCurator(config, call)) await held;
+    return nightWrites(config)(call);
+  });
+  fake.push(nightly(1));
+  await until(() => calls.some((c) => isCurator(config, c)));
+  // No new session file can be written: the curator's place is made first, so that only hers fails.
+  await mkdir(join(config.sessionDir, "curator"), { recursive: true });
+  await chmod(config.sessionDir, 0o555);
+  closers.push(() => chmod(config.sessionDir, 0o755));
+  release();
+  await until(() => fake.sent("POST", "/v1/sessions/rotated").length === 1);
+  const [first] = fake.sent("POST", "/v1/sessions/rotated") as SessionRotatedRequest[];
+  assert.equal(first!.stages?.session.result, "failed");
+  assert.ok(first!.stages?.session.reason);
+  assert.ok(!acked(fake).includes(1), "the nightly event is not acked");
+
+  await chmod(config.sessionDir, 0o755);
+  await until(() => acked(fake).includes(1));
+  const rotations = fake.sent("POST", "/v1/sessions/rotated") as SessionRotatedRequest[];
+  assert.equal(rotations.length, 2);
+  assert.deepEqual(rotations[1]!.stages?.session, { result: "done" });
 });
 
 test("an event that comes during the switch waits for the new session", async () => {
@@ -355,6 +406,25 @@ test("an event that comes during the switch waits for the new session", async ()
   const late = calls.find((c) => c.userTexts.at(-1)!.includes("late message"))!;
   assert.ok(!isCurator(config, late));
   assert.equal(late.userTexts.length, 1);
+});
+
+test("a turn whose model request fails ends as failed, with the reason", async () => {
+  const { fake, start } = await world();
+  await start(() => ({ error: "the model is away" }));
+  fake.push(ui(1, "hello"));
+  await until(() => fake.sent("POST", "/v1/turns/end").length === 1);
+  const [end] = fake.sent("POST", "/v1/turns/end") as TurnEndRequest[];
+  assert.equal(end!.result, "failed");
+  assert.match(end!.reason ?? "", /the model is away/);
+});
+
+test("a turn cut by the runner stopping ends as stopped", async () => {
+  const { fake, start, calls } = await world();
+  const stop = await start(() => new Promise<Answer>(() => {}));
+  fake.push(ui(1, "hello"));
+  await until(() => calls.length === 1);
+  await stop();
+  assert.deepEqual((fake.sent("POST", "/v1/turns/end") as TurnEndRequest[]).map((end) => end.result), ["stopped"]);
 });
 
 test("the images of the owner's message go into the turn as images", async () => {

@@ -16,7 +16,9 @@ import type {
   ScheduleListResponse,
   ScheduleWhen,
   SelfEventRequest,
+  SessionRotatedRequest,
   SubAgentStatus,
+  TurnEndRequest,
 } from "@penelope/contract";
 
 export class BackendError extends Error {
@@ -67,8 +69,9 @@ export class Backend {
     await this.post("/v1/activity", { activities });
   }
 
-  async turnEnd(turnId: string): Promise<void> {
-    await this.post("/v1/turns/end", { turn_id: turnId });
+  /** `POST /v1/turns/end`: the backend commits /memory, and records how the turn went (ADR-0038). */
+  async turnEnd(end: Without<TurnEndRequest>): Promise<void> {
+    await this.post("/v1/turns/end", end);
   }
 
   async reply(reply: Without<ReplyRequest>): Promise<ReplyResponse> {
@@ -107,8 +110,9 @@ export class Backend {
     await this.request("DELETE", `/v1/schedules/${encodeURIComponent(id)}?${query}`);
   }
 
-  async rotated(): Promise<void> {
-    await this.post("/v1/sessions/rotated", {});
+  /** `POST /v1/sessions/rotated`: the nightly switch of `seq` was run, its steps as `stages` (ADR-0038). */
+  async rotated(rotation: Without<SessionRotatedRequest>): Promise<void> {
+    await this.post("/v1/sessions/rotated", rotation);
   }
 
   private post(path: string, body: object): Promise<unknown> {

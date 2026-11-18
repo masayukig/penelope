@@ -7,7 +7,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import type { SelfEventRequest, SubAgentStatus } from "@penelope/contract";
+import type { SelfEventRequest, SubAgentStatus, TurnEndRequest } from "@penelope/contract";
 
 import { type FakeBackend, until } from "./fake-backend.ts";
 import type { Answer, Call, Script } from "./fake-model.ts";
@@ -57,6 +57,7 @@ async function ask(fake: FakeBackend, tool: string, args: Record<string, unknown
 /** The notices the backend took. */
 const notices = (fake: FakeBackend) => fake.selfEvents;
 const statuses = (fake: FakeBackend) => fake.sent("POST", "/v1/agents") as SubAgentStatus[];
+const turnEnds = (fake: FakeBackend, agent: string) => (fake.sent("POST", "/v1/turns/end") as TurnEndRequest[]).filter((end) => end.agent === agent);
 const subCalls = (calls: Call[], first: string) => calls.filter((call) => !isMain(call) && call.userTexts[0] === first);
 
 function gate(): { held: Promise<void>; release: () => void } {
@@ -104,7 +105,8 @@ test("a sub-agent runs in the background, and its last words reach the main agen
   const turnId = own[0]!.turn_id;
   assert.ok(own.every((a) => a.turn_id === turnId));
   const ends = fake.received.filter((r) => r.path === "/v1/turns/end" && (r.body as { agent: string }).agent === "alerts");
-  assert.deepEqual(ends.map((r) => r.body), [{ agent: "alerts", turn_id: turnId }]);
+  // A sub-agent's turn takes no events of the queue: it is told without seqs.
+  assert.deepEqual(ends.map((r) => r.body), [{ agent: "alerts", turn_id: turnId, result: "done" }]);
   const lastActivity = fake.received.findLastIndex((r) => r.path === "/v1/activity" && (r.body as { agent: string }).agent === "alerts");
   assert.ok(lastActivity < fake.received.indexOf(ends[0]!), "turn_end is sent before the turn's end");
 
@@ -267,6 +269,9 @@ test("a failed run is told to the main agent, and more words try again", async (
   assert.equal((notice.payload as { reason: string }).reason, "failed");
   assert.match((notice.payload as { text: string }).text, /the model is away/);
   assert.equal(notice.id, "flaky/1");
+  const [failed] = turnEnds(fake, "flaky");
+  assert.equal(failed!.result, "failed");
+  assert.match(failed!.reason ?? "", /the model is away/);
 
   fail = false;
   assert.equal((await ask(fake, "subagent_send", { name: "flaky", text: "try again" })).is_error, false);
@@ -284,6 +289,8 @@ test("closing a running sub-agent cancels its run, and no notice follows", async
   assert.deepEqual(statuses(fake).at(-1), { agent: "long", purpose: "p", closed: true });
   await until(() => activities(fake, "long").some((a) => a.kind === "turn_end"));
   assert.deepEqual(notices(fake), []);
+  await until(() => turnEnds(fake, "long").length === 1);
+  assert.equal(turnEnds(fake, "long")[0]!.result, "stopped");
 });
 
 test("after a restart, a sub-agent that was running is waiting, interrupted, and goes on from its record", async () => {
@@ -305,7 +312,7 @@ test("after a restart, a sub-agent that was running is waiting, interrupted, and
   ]);
   const ended = activities(fake, "cut").filter((a) => a.kind === "turn_end");
   assert.deepEqual(ended.map((a) => a.turn_id), [turnId]);
-  assert.ok(fake.sent("POST", "/v1/turns/end").some((body) => JSON.stringify(body) === JSON.stringify({ agent: "cut", turn_id: turnId })));
+  assert.deepEqual(turnEnds(fake, "cut").map((end) => [end.turn_id, end.result]), [[turnId, "stopped"]]);
   assert.equal(JSON.parse((await ask(fake, "subagent_list")).output)[0].state, "waiting");
 
   await ask(fake, "subagent_send", { name: "cut", text: "go on" });

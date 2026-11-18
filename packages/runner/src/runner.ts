@@ -13,7 +13,15 @@ import { randomUUID } from "node:crypto";
 
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
-import type { Activity, ControlPayload, DeliveredEvent } from "@penelope/contract";
+import type {
+  Activity,
+  ControlPayload,
+  DeliveredEvent,
+  NightStage,
+  NightStages,
+  NightTurnStage,
+  TurnEndRequest,
+} from "@penelope/contract";
 
 import { TurnRecorder } from "./activities.ts";
 import type { Backend } from "./backend.ts";
@@ -24,6 +32,7 @@ import { inlineImages } from "./images.ts";
 import { Jobs } from "./jobs.ts";
 import {
   curatorManager,
+  lastAssistant,
   newSessionFile,
   openFile,
   openSession,
@@ -55,6 +64,18 @@ export interface RunnerOptions {
   retryMs?: number;
 }
 
+/** How a turn went, as its end tells the backend (docs/sandbox-api.md, "ターンの結果ときっかけ"). */
+type Outcome = Required<Pick<TurnEndRequest, "result">> & Pick<TurnEndRequest, "reason">;
+
+interface TurnOptions {
+  /** The seqs of the events handed in as its input; events join an ordinary turn only. */
+  seqs?: number[];
+  /** For a turn of the nightly switch: its control event and step. The turn is not ordinary. */
+  night?: { seq: number; stage: NightTurnStage };
+  images?: ImageContent[];
+  heartbeat?: boolean;
+}
+
 interface Turn {
   session: AgentSession;
   seqs: number[];
@@ -75,6 +96,12 @@ const sleep = (ms: number, signal: AbortSignal) =>
 
 const isHeartbeat = (event: DeliveredEvent) => event.source === "heartbeat";
 
+const failure = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/** A turn of the night as its step: a turn the runner cut is a step that did not get done. */
+const stageOf = ({ result, reason }: Outcome): NightStage =>
+  result === "done" ? { result } : { result: "failed", reason: result === "stopped" ? `Stopped: ${reason}` : (reason ?? "") };
+
 /** YYYY-MM-DD in the runner's time zone. */
 const today = () => new Date().toLocaleDateString("sv-SE");
 
@@ -90,6 +117,8 @@ export class Runner {
   private session: AgentSession | undefined;
   private state: SessionState | undefined;
   private turn: Turn | undefined;
+  /** The id of the turn under way, for a reply to carry. */
+  private turnId: string | undefined;
   /** Events being handled or handled: a second delivery of one is dropped. */
   private readonly taken = new Set<number>();
   private readonly inbox: DeliveredEvent[] = [];
@@ -126,7 +155,7 @@ export class Runner {
     });
     this.setup = {
       ...pi,
-      tools: [...backendTools(options.backend, { home: options.config.home }), ...subAgentTools(this.subAgents), ...jobTools(this.jobs, options.config.jobs)],
+      tools: [...backendTools(options.backend, { home: options.config.home, turn: () => this.turnId }), ...subAgentTools(this.subAgents), ...jobTools(this.jobs, options.config.jobs)],
       extensions: [
         foldExtension({
           folding: () => options.config.turnFold,
@@ -268,14 +297,11 @@ export class Runner {
       const until = this.inbox.findIndex((event) => event.source === "control");
       const events = this.inbox.splice(0, until < 0 ? this.inbox.length : until);
       const [text, images] = await this.input(events);
-      await this.turnOf(
-        this.session!,
-        text,
-        events.map((event) => event.seq),
-        true,
-        images,
-        events.every(isHeartbeat),
-      );
+      await this.turnOf(this.session!, text, {
+        seqs: events.map((event) => event.seq),
+        ...(images ? { images } : {}),
+        heartbeat: events.every(isHeartbeat),
+      });
     }
   }
 
@@ -289,7 +315,8 @@ export class Runner {
    * One turn: Pi runs `input`, and what comes during it joins it. Then the
    * backend is told the turn ended (it commits /memory), and the events are
    * acked. A turn that fails is not acked: the backend hands its events over
-   * again.
+   * again. The end tells how the turn went and what was handed into it, for
+   * the activity record (ADR-0038); that is also what this returns.
    *
    * An ordinary turn is one of her day's session, made of events: events can
    * join it, and when it ends it is marked so that it is folded from then on
@@ -298,14 +325,9 @@ export class Runner {
    * no tool, so that nothing happened in it (ADR-0031). The nightly reflection and the curator's turn
    * are not ordinary.
    */
-  private async turnOf(
-    session: AgentSession,
-    input: string,
-    seqs: number[],
-    ordinary = true,
-    images?: ImageContent[],
-    heartbeat = false,
-  ): Promise<void> {
+  private async turnOf(session: AgentSession, input: string, options: TurnOptions = {}): Promise<Outcome> {
+    const { night, images } = options;
+    const ordinary = night === undefined;
     const recorder = new TurnRecorder(randomUUID(), () => new Date().toISOString(), (activity) => this.send(activity));
     let spoke = false;
     let called = false;
@@ -320,11 +342,13 @@ export class Runner {
         compactions++;
       }
     });
-    const turn: Turn = { session, seqs: [...seqs], heartbeat, queued: [] };
+    const turn: Turn = { session, seqs: [...(options.seqs ?? [])], heartbeat: options.heartbeat ?? false, queued: [] };
     if (ordinary) this.turn = turn;
+    this.turnId = recorder.turnId;
     this.folded = 0;
     recorder.start();
     let failed = false;
+    let thrown: string | undefined;
     let asked = false;
     try {
       let text = input;
@@ -345,15 +369,20 @@ export class Runner {
       }
     } catch (error) {
       failed = true;
-      this.log(`turn ${recorder.turnId} failed: ${(error as Error).message}`);
+      thrown = failure(error);
+      this.log(`turn ${recorder.turnId} failed: ${thrown}`);
     } finally {
       if (ordinary) this.turn = undefined;
     }
+    let outcome = this.outcome(session, thrown);
     if (ordinary && !failed) {
       const idle = turn.heartbeat && !called;
       if (this.config.turnFold && !spoke && !idle && !this.stopping) {
         asked = true;
-        await this.ask(session, recorder.turnId);
+        const asking = this.outcome(session, await this.ask(session, recorder.turnId));
+        if (outcome.result === "done" && asking.result !== "done") {
+          outcome = { ...asking, reason: `The request before folding: ${asking.reason ?? ""}` };
+        }
       }
       await session.sendCustomMessage({ customType: TURN_END, content: "", display: false });
     }
@@ -361,25 +390,49 @@ export class Runner {
     this.log(`turn ${recorder.turnId}: folded ${this.folded}, asked ${asked ? "yes" : "no"}, compactions ${compactions}`);
     recorder.end();
     await this.sending;
+    this.turnId = undefined;
     try {
-      await this.backend.turnEnd(recorder.turnId);
+      await this.backend.turnEnd({
+        turn_id: recorder.turnId,
+        ...outcome,
+        ...(ordinary ? { seqs: turn.seqs } : { night }),
+      });
     } catch (error) {
-      this.log(`turn end not sent: ${(error as Error).message}`);
+      this.log(`turn end not sent: ${failure(error)}`);
     }
     if (failed) {
       for (const seq of turn.seqs) this.taken.delete(seq);
-      return;
+      return outcome;
     }
     await this.ack(turn.seqs);
+    return outcome;
   }
 
-  /** The request before folding. Events that come meanwhile wait for the next turn. */
-  private async ask(session: AgentSession, turnId: string): Promise<void> {
+  /**
+   * How the run of a turn went, from what it threw and the model's last
+   * answer. One the runner cut as it stops is stopped; one that is unclear
+   * is failed, so that the owner sees it.
+   */
+  private outcome(session: AgentSession, thrown: string | undefined): Outcome {
+    const last = lastAssistant(session.messages);
+    if (this.stopping && (thrown !== undefined || last?.stopReason === "aborted")) {
+      return { result: "stopped", reason: "The runner was stopping." };
+    }
+    if (thrown !== undefined) return { result: "failed", reason: thrown };
+    if (last?.stopReason === "error") return { result: "failed", reason: last.errorMessage ?? "The model's request failed." };
+    if (last?.stopReason === "aborted") return { result: "failed", reason: "The run was cancelled." };
+    return { result: "done" };
+  }
+
+  /** The request before folding; what it threw, if it did. Events that come meanwhile wait for the next turn. */
+  private async ask(session: AgentSession, turnId: string): Promise<string | undefined> {
     this.asking = true;
     try {
       await session.sendCustomMessage({ customType: FOLD_ASK, content: foldAskInput(), display: false }, { triggerTurn: true });
+      return undefined;
     } catch (error) {
-      this.log(`turn ${turnId}: the request before folding failed: ${(error as Error).message}`);
+      this.log(`turn ${turnId}: the request before folding failed: ${failure(error)}`);
+      return failure(error);
     } finally {
       this.asking = false;
     }
@@ -404,37 +457,63 @@ export class Runner {
       return;
     }
     // A nightly event that comes again after its switch was made only needs telling.
-    if (this.state?.nightly !== event.seq) await this.nightly(event.seq);
-    await this.backend.rotated().catch((error: unknown) => this.log(`rotation not sent: ${(error as Error).message}`));
+    const made = this.state?.nightly === event.seq;
+    const stages = made ? undefined : await this.nightly(event.seq);
+    await this.backend
+      .rotated({ seq: event.seq, ...(stages ? { stages } : {}) })
+      .catch((error: unknown) => this.log(`rotation not sent: ${failure(error)}`));
+    // Without a new session the event is not acked: it comes again, and the night is run again.
+    if (stages && stages.session.result !== "done") {
+      this.taken.delete(event.seq);
+      return;
+    }
     await this.ack([event.seq]);
   }
 
-  /** Her reflection, the curator's turn, then a new session (ADR-0007). */
-  private async nightly(seq: number): Promise<void> {
-    await this.turnOf(this.session!, reflectionInput(this.places), [], false);
-
+  /** Her reflection, the curator's turn, then a new session (ADR-0007); how each step went. */
+  private async nightly(seq: number): Promise<NightStages> {
+    const reflection = stageOf(await this.turnOf(this.session!, reflectionInput(this.places), { night: { seq, stage: "reflection" } }));
     // A curator that fails is recorded and passed over: the next night can
     // tidy again, and the day's session does not go on (docs/sandbox-api.md).
+    const curator = await this.curator(seq);
+    let session: NightStage;
     try {
-      const curator = await openSession(
+      const state = { file: await newSessionFile(this.config), nightly: seq };
+      const next = await openSession(this.setup, await this.mainPrompt(), openFile(this.config, state.file));
+      try {
+        await writeState(this.config, state);
+      } catch (error) {
+        next.dispose();
+        throw error;
+      }
+      this.session?.dispose();
+      this.session = next;
+      this.state = state;
+      session = { result: "done" };
+    } catch (error) {
+      this.log(`the new session could not start: ${failure(error)}`);
+      session = { result: "failed", reason: `The new session could not start: ${failure(error)}` };
+    }
+    return { reflection, curator, session };
+  }
+
+  /** The curator's turn, in a session that starts empty; a failed step when the session cannot be opened. */
+  private async curator(seq: number): Promise<NightStage> {
+    let curator: AgentSession;
+    try {
+      curator = await openSession(
         { ...this.setup, tools: [], extensions: [] },
         curatorSystemPrompt(this.config.identity, this.places),
         curatorManager(this.config),
       );
-      try {
-        await this.turnOf(curator, curatorInput(this.places, today()), [], false);
-      } finally {
-        curator.dispose();
-      }
     } catch (error) {
-      this.log(`the curator could not start: ${(error as Error).message}`);
+      this.log(`the curator could not start: ${failure(error)}`);
+      return { result: "failed", reason: `The curator could not start: ${failure(error)}` };
     }
-
-    const state = { file: await newSessionFile(this.config), nightly: seq };
-    const session = await openSession(this.setup, await this.mainPrompt(), openFile(this.config, state.file));
-    await writeState(this.config, state);
-    this.session?.dispose();
-    this.session = session;
-    this.state = state;
+    try {
+      return stageOf(await this.turnOf(curator, curatorInput(this.places, today()), { night: { seq, stage: "curator" } }));
+    } finally {
+      curator.dispose();
+    }
   }
 }
