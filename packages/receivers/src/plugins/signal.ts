@@ -635,6 +635,14 @@ async function sendVia(call: (method: string, params: Raw) => Promise<unknown>, 
   }
 }
 
+/** By the name's extension, for a file sent with no type: curl's `-F file=@…` knows png, jpg and gif, and sends a WebP or an MP4 as octet-stream, which Signal shows as a file, not as media. */
+const TYPES: Record<string, string> = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+  mp4: "video/mp4", mov: "video/quicktime", m4a: "audio/mp4", ogg: "audio/ogg", pdf: "application/pdf",
+};
+const typeOf = (file: File) =>
+  file.type && file.type !== "application/octet-stream" ? file.type : TYPES[/\.([^.]+)$/.exec(file.name)?.[1]?.toLowerCase() ?? ""] ?? "application/octet-stream";
+
 /**
  * `POST /v1/send` on a Unix socket: the text and files of a form
  * (multipart/form-data or urlencoded) sent to one of the allowed senders or
@@ -690,7 +698,7 @@ function sendServer(
       return answer(response, 400, { error: "quote_timestamp must be a Signal timestamp and quote_author a number in E.164 or a UUID" });
     }
     const attachments = await Promise.all(
-      files.map(async (file) => `data:${file.type || "application/octet-stream"};filename=${file.name.replace(/[;,]/g, "_")};base64,${Buffer.from(await file.arrayBuffer()).toString("base64")}`),
+      files.map(async (file) => `data:${typeOf(file)};filename=${file.name.replace(/[;,]/g, "_")};base64,${Buffer.from(await file.arrayBuffer()).toString("base64")}`),
     );
     const draft = { ...(text !== undefined ? { text } : {}), attachments, ...(quote ? { quote: quote as { timestamp: number; author: string } } : {}) };
     const sent = await options.send(groupId !== undefined ? { groupId } : { recipient: to as string }, draft);

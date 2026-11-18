@@ -659,7 +659,7 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 | `502` | signal-cli が断った、Signal が受けなかった（1 対 1 は `results` に `SUCCESS` でないものがある、グループはメンバーの誰も `SUCCESS` でない）、本人に回すはずが本人に送れなかった |
 | `503` | signal-cli につながっていない |
 
-- 本文は末尾の空白と改行を除いて `send` の `message` に、ファイルは `data:<種類>;filename=<名前>;base64,…` の形で `attachments` に入れる。グループは `groupId`、引用は `quoteTimestamp`・`quoteAuthor` で渡す。
+- 本文は末尾の空白と改行を除いて `send` の `message` に、ファイルは `data:<種類>;filename=<名前>;base64,…` の形で `attachments` に入れる。`<種類>` は form のファイルの `Content-Type`。それが無いか `application/octet-stream` なら、名前の拡張子（`png`・`jpg`・`jpeg`・`gif`・`webp`・`mp4`・`mov`・`m4a`・`ogg`・`pdf`）から決め、どれでもなければ `application/octet-stream` のまま。curl の `-F file=@x.webp` は WebP や MP4 を `application/octet-stream` で送り、そのまま渡すと Signal は画像や動画でなくファイルとして見せるためである。グループは `groupId`、引用は `quoteTimestamp`・`quoteAuthor` で渡す。
 - グループに送れたら、その発言を `own: true` の出来事（`batch`）としてそのグループの `stream` に入れる。Signal は自分の送った発言を受信として返さないので、そうしないとグループの記録にエージェントの発言が残らない（Slack のエージェント自身の発言と同じ扱い）。1 対 1 の返事は入れない。
 - 応答の body は `{error}` の JSON。ログは `send status=<番号>` だけで、本文と宛先は書かない。
 - 使い方は sandbox の image の skill `signal` にある。

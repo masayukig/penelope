@@ -37,6 +37,9 @@ printf '%s' '<text>' | curl -sS --fail-with-body -F 'text=<-' [-F 'to=+81…' | 
   [-F 'quote_timestamp=…' -F 'quote_author=…'] [-F 'file=@picture.png'] https://signal.penelope.internal/v1/send
 ```
 
+- Give a file its type when you can, `-F 'file=@video.webp;type=image/webp'`: curl itself knows only a few (png, jpg,
+  gif) and sends the rest as `application/octet-stream`. Without one, the type is taken from the name's extension (png, jpg,
+  gif, webp, mp4, mov, m4a, ogg, pdf); anything else arrives on Signal as a plain file, not as a picture or a video.
 - It answers `{"timestamp": …}`, Signal's time of what you sent, which a reaction or a quote points back at.
 - `403`: `to` is not one of the allowed senders, or `group` not one of the groups. `400`: neither text nor a file, or both `to`
   and `group`. `502`: signal-cli or Signal refused it. `503`: signal-cli is not connected just now; try again in a while.

@@ -250,6 +250,17 @@ describe("the Signal plugin against signal-cli", () => {
         method: "send",
         params: { account: AGENT, recipient: [OWNER], message: "here it is", attachments: ["data:image/png;filename=drawn_1.png;base64,BAU="] },
       });
+      // curl sends a WebP as octet-stream; a file with no type or an unknown extension stays octet-stream.
+      const typed = new FormData();
+      typed.append("file", new Blob([new Uint8Array([4])], { type: "application/octet-stream" }), "moving.WEBP");
+      typed.append("file", new Blob([new Uint8Array([4])]), "clip.mp4");
+      typed.append("file", new Blob([new Uint8Array([4])]), "notes.bin");
+      assert.equal((await post(sendSocket, typed)).status, 200);
+      assert.deepEqual(lastCall(cli).params.attachments, [
+        "data:image/webp;filename=moving.WEBP;base64,BA==",
+        "data:video/mp4;filename=clip.mp4;base64,BA==",
+        "data:application/octet-stream;filename=notes.bin;base64,BA==",
+      ]);
 
       const stranger = new FormData();
       stranger.set("text", "hi");
