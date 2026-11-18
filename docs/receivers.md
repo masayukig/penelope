@@ -535,13 +535,14 @@ Slack の出来事をターンに描いて載せるには、配置が、この�
 - `--channel` はチャンネルの ID（`C…`・`G…`・`D…`）か名前（`#` は付けても付けなくてもよい）。名前は `users.conversations` で、bot の入っている公開・非公開のチャンネルから探す。DM は ID で書く（読み取りの見出しの `channel <ID>`）。
 - `--thread` はスレッドの親の発言の `ts`。本文も画像もそのスレッドに入る。
 - `--image` は何度でも書ける。画像は Slack の 3 段で送る: `files.getUploadURLExternal`（`filename` と `length`）→ 返った `upload_url` へ中身を POST（`application/octet-stream`、`Authorization` を付けない）→ 全部を 1 回の `files.completeUploadExternal` で、本文と同じチャンネル（とスレッド）に共有する。本文があれば、画像は本文の後の別の投稿になる。
-- `--face` を書くと、表情の画像の URL を、本文の投稿と画像の共有の `icon_url` に入れる。URL は `PENELOPE_PUBLIC_URL` の `/api/agent`（ログインなし）が返す表情の道（[ui-api.md](ui-api.md) の「エージェント」、画像の拡張子で終わる）で、Slack はそれを外から取りにくる。表情の PNG（`png_icons`）があればその道、無ければ Web UI と同じ画像の道（`icons`）を使う。投稿の名前は変えない。
+- `--face` を書くと、表情の画像の URL を、本文の投稿と画像の共有の `icon_url` に入れる。URL は `PENELOPE_PUBLIC_URL` の `/api/agent`（ログインなし）が返す表情の道（[ui-api.md](ui-api.md) の「エージェント」、画像の拡張子で終わる）で、Slack はそれを外から取りにくる。表情の PNG（`png_icons`）があればその道、無ければ Web UI と同じ画像の道（`icons`）を使う。`PENELOPE_SLACK_ICON_BASE_URL` があるときは、その下の `<表情>.png` を使う（backend に Slack が届かない配置のため。表情の名前は backend から読む）。投稿の名前は変えない。
 
 | 環境変数（sandbox） | 中身 |
 | --- | --- |
 | `SLACK_BOT_TOKEN` | `--workspace` を書かないときの bot の token のサロゲート |
 | `SLACK_BOT_TOKEN_<名前>` | `--workspace <名前>` のときのサロゲート。`<名前>` はワークスペースの名前を大文字にし、`-` を `_` にしたもの（`--workspace home-two` なら `SLACK_BOT_TOKEN_HOME_TWO`）。ワークスペースの名前は上の「設定」の `workspaces[].name` と同じ形 |
 | `PENELOPE_PUBLIC_URL` | オーナーが backend に届く公開の URL（backend の同じ名前の設定と同じ値）。`--face` と `faces` が使う |
+| `PENELOPE_SLACK_ICON_BASE_URL` | 任意。Slack に渡すアイコンの URL の頭（例: `https://icons.example.com/iris`）。あれば `--face` と `faces` の URL は `<この値>/<表情>.png` になり、無ければ上の `PENELOPE_PUBLIC_URL` の道。表情ごとの PNG をそこに置いておく |
 
 - 配置は、`slack.com` の登録に、各サロゲートを本物の bot の token に差し替える `bearer` の `credentials` を書く（[sentinel-config.md](sentinel-config.md)）。アップロード先（`files.slack.com`）にはサロゲートを送らない。
 - 出力は、投稿した順に 1 行ずつ、タブで区切る。本文は `message <チャンネルの ID> <ts> <permalink>`（permalink は `chat.getPermalink` で取り、取れなければ省く）、画像は `file <ファイルの ID> <名前>`。
