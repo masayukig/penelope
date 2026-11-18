@@ -11,6 +11,7 @@ import { after, describe, test } from "node:test";
 
 import { SettingsError, type ConnectionEvent } from "../src/plugin.ts";
 import { eventOf, fold, signal, signalPlugin, type Audience } from "../src/plugins/signal.ts";
+import { verdictOf } from "../src/plugins/signal-gate.ts";
 
 const OWNER = "+15550000001";
 const AGENT = "+15550000002";
@@ -51,6 +52,13 @@ describe("the Signal plugin's settings", () => {
     assert.equal(refused({ ...SETTINGS, groups: { family: GROUP, again: GROUP } }), "groups.again: the same group ID is named twice");
     assert.equal(refused({ ...SETTINGS, names: ["い"] }), "names[0]: must be a name of 2 characters or more");
     assert.equal(refused({ ...SETTINGS, typing_seconds: -1 }), "typing_seconds: must be a number from 0 to 3600");
+    assert.equal(refused({ ...SETTINGS, groups: { "g-0a1b2c3d": GROUP } }), "groups.g-0a1b2c3d: g- and 8 hex digits is the form of the groups the owner lets in; name it otherwise");
+    assert.equal(refused({ ...SETTINGS, judge: {} }), "judge: needs approvals: true, to ask the owner about what the judge flags");
+    assert.equal(refused({ ...SETTINGS, approvals: true, judge: { method: "jev" } }), "judge.method: not a field of the judge");
+    assert.equal(refused({ ...SETTINGS, approvals: true, judge: { ask_at: 0.9, return_at: 0.5 } }), "judge.return_at: must not be under ask_at");
+    assert.equal(refused({ ...SETTINGS, approvals: true, judge: { api_key_file: "/run/secrets/none" } }), "judge.api_key_file: /run/secrets/none is empty");
+    assert.equal(refused({ ...SETTINGS, time_zone: "Mars/Olympus" }), "time_zone: must be an IANA time zone, such as Asia/Tokyo");
+    assert.equal(refused({ ...SETTINGS, state_file: "state.json" }), "state_file: must be an absolute path");
   });
 });
 
@@ -123,10 +131,13 @@ describe("the events it makes", () => {
 
 /** signal-cli's JSON-RPC on a Unix socket, one line a message. */
 class FakeSignalCli {
-  readonly calls: { method: string; params: Record<string, unknown> }[] = [];
+  readonly calls: { method: string; params: Record<string, unknown>; result?: unknown }[] = [];
   readonly server: net.Server;
   clients: net.Socket[] = [];
   sendResult: unknown = { timestamp: 1794819700000, results: [{ type: "SUCCESS" }] };
+  /** When set, each send gets its own timestamp, so the owner's answers can point at one. */
+  stamp = false;
+  listGroups: unknown = [];
 
   readonly path: string;
 
@@ -142,8 +153,12 @@ class FakeSignalCli {
         while ((end = buffer.indexOf("\n")) >= 0) {
           const request = JSON.parse(buffer.slice(0, end)) as { id: number; method: string; params: Record<string, unknown> };
           buffer = buffer.slice(end + 1);
-          this.calls.push({ method: request.method, params: request.params });
-          const result = request.method === "getAttachment" ? { data: Buffer.from([1, 2, 3]).toString("base64") } : request.method === "send" ? this.sendResult : {};
+          const result = request.method === "getAttachment"
+            ? { data: Buffer.from([1, 2, 3]).toString("base64") }
+            : request.method === "send"
+              ? this.stamp ? { timestamp: 1794820000000 + this.calls.length, results: [{ type: "SUCCESS" }] } : this.sendResult
+              : request.method === "listGroups" ? this.listGroups : {};
+          this.calls.push({ method: request.method, params: request.params, result });
           client.write(`${JSON.stringify({ jsonrpc: "2.0", id: request.id, result })}\n`);
         }
       });
@@ -160,6 +175,11 @@ class FakeSignalCli {
     this.server.close(() => resolve());
   });
 }
+
+const lastCall = (cli: FakeSignalCli) => {
+  const { method, params } = cli.calls.at(-1)!;
+  return { method, params };
+};
 
 const until = async (check: () => boolean) => {
   for (let i = 0; i < 200 && !check(); i++) await new Promise((resolve) => setTimeout(resolve, 10));
@@ -226,7 +246,7 @@ describe("the Signal plugin against signal-cli", () => {
       form.append("file", new Blob([new Uint8Array([4, 5])], { type: "image/png" }), "drawn;1.png");
       const sent = await post(sendSocket, form);
       assert.deepEqual(sent, { status: 200, body: { timestamp: 1794819700000 } });
-      assert.deepEqual(cli.calls.at(-1), {
+      assert.deepEqual(lastCall(cli), {
         method: "send",
         params: { account: AGENT, recipient: [OWNER], message: "here it is", attachments: ["data:image/png;filename=drawn%3B1.png;base64,BAU="] },
       });
@@ -265,7 +285,7 @@ describe("the Signal plugin against signal-cli", () => {
       toGroup.set("quote_timestamp", "1794819600000");
       toGroup.set("quote_author", STRANGER);
       assert.deepEqual(await post(sendSocket, toGroup), { status: 200, body: { timestamp: 1794819700000 } });
-      assert.deepEqual(cli.calls.at(-1), {
+      assert.deepEqual(lastCall(cli), {
         method: "send",
         params: { account: AGENT, groupId: GROUP, message: "7 is fine", quoteTimestamp: 1794819600000, quoteAuthor: STRANGER },
       });
@@ -436,6 +456,222 @@ describe("the Signal plugin while the intake refuses or it stops", () => {
     } finally {
       await handle.stop();
       await cli.close();
+    }
+  });
+});
+
+describe("the judge's scores (natsumi's decideVerdict)", () => {
+  const scored = (...scores: number[]) => scores.map((score, index) => ({ name: `i${index}`, label: `l${index}`, score }));
+  test("none at ask_at sends, one at ask_at asks the owner, one at return_at sends it back", () => {
+    const at = { askAt: 0.5, returnAt: 0.9 };
+    assert.equal(verdictOf(scored(0.1, 0.49), at), "send");
+    assert.equal(verdictOf(scored(0.1, 0.5), at), "owner");
+    assert.equal(verdictOf(scored(0.6, 0.9), at), "return");
+  });
+});
+
+/** Jev's /v1/systemone: every issue scores what `scores` gives the draft, 0.1 otherwise. */
+async function fakeJudge(scores: Record<string, Record<string, number> | "down">) {
+  const asked: { authorization?: string; state: Record<string, unknown> }[] = [];
+  const server = http.createServer(async (request, response) => {
+    const parts: Buffer[] = [];
+    for await (const part of request as AsyncIterable<Buffer>) parts.push(part);
+    const body = JSON.parse(Buffer.concat(parts).toString("utf8")) as { state: Record<string, unknown>; questions: Record<string, unknown> };
+    asked.push({ ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}), state: body.state });
+    const given = scores[body.state.draft as string];
+    if (given === "down") return response.writeHead(500).end();
+    const answers = Object.fromEntries(Object.keys(body.questions).map((name) => [name, { noul: given?.[name] ?? 0.1 }]));
+    response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ answers }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as net.AddressInfo;
+  return { url: `http://127.0.0.1:${port}`, asked, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+}
+
+const form = (fields: Record<string, string>) => {
+  const made = new FormData();
+  for (const [name, value] of Object.entries(fields)) made.set(name, value);
+  return made;
+};
+
+describe("approvals: the judge and the owner between the agent and a group", () => {
+  const dir = mkdtempSync(join(tmpdir(), "receivers-signal-approvals-"));
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  async function started(name: string, settings: Record<string, unknown>, keyFile?: string, sweepMs?: number) {
+    const cli = new FakeSignalCli(join(dir, `${name}.sock`));
+    cli.stamp = true;
+    await cli.listen();
+    const delivered: ConnectionEvent[] = [];
+    const lines: string[] = [];
+    const sendSocket = join(dir, `${name}-send.sock`);
+    const connection = signalPlugin({ backoffMs: () => 10, ...(sweepMs ? { sweepMs } : {}) }).create(
+      { ...SETTINGS, groups: { family: GROUP }, socket: cli.path, send_socket: sendSocket, approvals: true, typing_seconds: 0, ...settings },
+      { readFile: (path) => (path === keyFile ? "jev-key\n" : "") },
+    );
+    const handle = connection.start({ deliver: async (events) => (delivered.push(...events), true), log: (line) => lines.push(line), now: () => new Date() });
+    await until(() => cli.clients.length === 1 && lines.includes("connected"));
+    /** The owner's direct messages from the plugin, newest last. */
+    const toOwner = () => cli.calls.filter((call) => call.method === "send" && Array.isArray(call.params.recipient) && call.params.recipient[0] === OWNER);
+    const groupSends = () => cli.calls.filter((call) => call.method === "send" && call.params.groupId === GROUP);
+    const asked = () => (toOwner().at(-1)!.result as { timestamp: number }).timestamp;
+    // The fake records a send before it answers; the owner answers only what she was shown, so give the answer time to land.
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+    const react = async (emoji: string) => (await settle(), cli.push(message({ reaction: { emoji, targetSentTimestamp: asked(), isRemove: false } })));
+    const quote = async (text: string) => (await settle(), cli.push(message({ message: text, quote: { id: asked(), text: "承認待ちの投稿" } })));
+    const stop = async () => {
+      await handle.stop();
+      await cli.close();
+    };
+    return { cli, delivered, lines, sendSocket, toOwner, groupSends, asked, react, quote, stop };
+  }
+  const held = (delivered: ConnectionEvent[]) => delivered.filter((event) => (event.payload as { type: string }).type === "held").map((event) => ({ delivery: event.delivery, stream: event.stream, held: (event.payload as { held: unknown }).held }));
+
+  test("routes by the judge's scores: sends, holds for the owner (👍 sends, 👎 declines), sends back, and leaves the owner's DMs alone", async () => {
+    const judge = await fakeJudge({
+      flagged: { "promise-for-owner": 0.6 },
+      flagged2: { "private-matter": 0.7 },
+      bad: { "private-matter": 0.95 },
+      down: "down",
+    });
+    const keyFile = "/run/secrets/penelope-receivers/jev-api-key";
+    const s = await started("routes", { judge: { url: judge.url, api_key_file: keyFile } }, keyFile);
+    try {
+      // The talk the judge is shown.
+      s.cli.push(inGroup({ message: "dinner at 7?" }));
+      await until(() => s.delivered.length === 1);
+      const fine = await post(s.sendSocket, form({ text: "7 is fine", group: "family", quote_timestamp: "1794819600000", quote_author: STRANGER }));
+      assert.equal(fine.status, 200);
+      assert.equal(s.groupSends().length, 1);
+      assert.equal(judge.asked[0]!.authorization, "Bearer jev-key");
+      assert.equal(judge.asked[0]!.state.channel, "Signal のグループ『Family』");
+      assert.deepEqual((judge.asked[0]!.state.reply_to as { text: string }).text, "dinner at 7?");
+      assert.equal(((judge.asked[0]!.state.conversation as { channel: { messages: unknown[] } }).channel.messages).length, 1);
+
+      // Flagged: held, and the owner is asked on her DM; 👍 sends it.
+      const flagged = await post(s.sendSocket, form({ text: "flagged", group: "family" }));
+      assert.equal(flagged.status, 202);
+      assert.equal(typeof flagged.body.held, "string");
+      assert.deepEqual(flagged.body.issues, [{ name: "promise-for-owner", score: 0.6 }]);
+      assert.equal(s.groupSends().length, 1, "nothing went to the group yet");
+      const question = s.toOwner().at(-1)!.params.message as string;
+      assert.match(question, /^承認待ちの投稿: Signal のグループ『Family』 への投稿\n---\nflagged\n---\n理由: 判定が本人に回した \/ 本人に代わる約束・期限 0\.60\n期限: /);
+      assert.match(question, /👍 で送る、👎 か ❌ で見送る（引用して「送る」「見送る」でも）$/);
+      const before = s.delivered.length;
+      await s.react("👍");
+      await until(() => s.groupSends().length === 2 && held(s.delivered).length === 1);
+      assert.equal(s.groupSends()[1]!.params.message, "flagged");
+      assert.deepEqual(held(s.delivered), [{ delivery: "now", stream: "group.family", held: { id: flagged.body.held, result: "sent" } }]);
+      assert.ok(!s.delivered.slice(before).some((event) => event.stream === "dm.15550000001"), "the owner's answer is not handed to the agent");
+      await until(() => s.toOwner().at(-1)!.params.message === "→ 送った: Signal のグループ『Family』 への投稿");
+
+      // 👎 declines.
+      const declined = await post(s.sendSocket, form({ text: "flagged2", group: "family" }));
+      assert.equal(declined.status, 202);
+      await s.react("👎");
+      await until(() => held(s.delivered).length === 2);
+      assert.equal((held(s.delivered)[1]!.held as { result: string }).result, "declined");
+      assert.equal(s.groupSends().length, 2);
+      await until(() => s.toOwner().at(-1)!.params.message === "→ 見送った: Signal のグループ『Family』 への投稿");
+
+      // Sent back twice with what was flagged, then the third goes to the owner.
+      const back = await post(s.sendSocket, form({ text: "bad", group: "family" }));
+      assert.deepEqual(back, { status: 422, body: { error: "sent back by the judge: rewrite it and send again, or leave it", issues: [{ name: "private-matter", score: 0.95 }], returns_left: 1 } });
+      assert.equal((await post(s.sendSocket, form({ text: "bad", group: "family" }))).body.returns_left, 0);
+      const third = await post(s.sendSocket, form({ text: "bad", group: "family" }));
+      assert.equal(third.status, 202);
+      assert.match(s.toOwner().at(-1)!.params.message as string, /理由: 同じ返信先で 3 回突き返された \/ 私的な事情 0\.95/);
+
+      // No verdict: the owner decides.
+      const down = await post(s.sendSocket, form({ text: "down", group: "family" }));
+      assert.equal(down.status, 202);
+      assert.equal(down.body.reason, "no judge's verdict");
+      assert.ok(s.lines.includes("judge: no verdict (http-500)"));
+
+      // The owner's DM: never judged, never held.
+      const asked = judge.asked.length;
+      assert.equal((await post(s.sendSocket, form({ text: "a private note" }))).status, 200);
+      assert.equal(judge.asked.length, asked);
+      // A reaction of the owner on anything else is hers to tell the agent.
+      s.cli.push(message({ reaction: { emoji: "👍", targetSentTimestamp: 42, isRemove: false } }));
+      await until(() => s.delivered.some((event) => event.stream === "dm.15550000001"));
+    } finally {
+      await s.stop();
+      await judge.close();
+    }
+  });
+
+  test("a quoted 送る sends and 見送る declines; without a judge every group post is held", async () => {
+    const s = await started("quotes", { state_file: join(dir, "quotes.json") });
+    try {
+      const first = await post(s.sendSocket, form({ text: "see you", group: "family" }));
+      assert.equal(first.status, 202);
+      assert.equal(first.body.reason, "no judge's verdict");
+      assert.match(s.toOwner().at(-1)!.params.message as string, /理由: 判定できなかった\n/);
+      await s.quote("送る");
+      await until(() => s.groupSends().length === 1 && held(s.delivered).length === 1);
+      assert.equal((held(s.delivered)[0]!.held as { result: string }).result, "sent");
+      assert.equal((await post(s.sendSocket, form({ text: "maybe not", group: "family" }))).status, 202);
+      await s.quote("見送る");
+      await until(() => held(s.delivered).length === 2);
+      assert.equal((held(s.delivered)[1]!.held as { result: string }).result, "declined");
+      assert.equal(s.groupSends().length, 1);
+      // Any other quoted reply is the owner talking to the agent.
+      await s.quote("why?");
+      await until(() => s.delivered.some((event) => event.stream === "dm.15550000001"));
+    } finally {
+      await s.stop();
+    }
+  });
+
+  test("a held post outlives a restart through state_file", async () => {
+    const stateFile = join(dir, "restart.json");
+    const first = await started("restart1", { state_file: stateFile });
+    assert.equal((await post(first.sendSocket, form({ text: "later", group: "family" }))).status, 202);
+    const asked = first.asked();
+    await first.stop();
+    const again = await started("restart2", { state_file: stateFile });
+    try {
+      again.cli.push(message({ reaction: { emoji: "👍", targetSentTimestamp: asked, isRemove: false } }));
+      await until(() => again.groupSends().length === 1);
+      assert.equal(again.groupSends()[0]!.params.message, "later");
+    } finally {
+      await again.stop();
+    }
+  });
+
+  test("a group no one named is asked about: 👍 joins it, 👎 leaves and blocks it", async () => {
+    const OTHER = "b3RoZXItZ3JvdXAtaWQ=";
+    const THIRD = "dGhpcmQtZ3JvdXAtaWQ=";
+    const s = await started("unknown", {});
+    try {
+      s.cli.listGroups = [{ id: OTHER, name: "Drinks", isMember: true, isBlocked: false, members: [{}, {}, {}], pendingMembers: [] }];
+      s.cli.push({ ...inGroup({ message: "welcome!" }), dataMessage: { ...inGroup({}).dataMessage, message: "welcome!", groupInfo: { groupId: OTHER, type: "DELIVER" } } });
+      await until(() => s.toOwner().length === 1);
+      assert.equal(s.toOwner()[0]!.params.message, "Ownerさんが Signal のグループ『Drinks』（メンバー 3 人）にあなたのエージェントを追加しました。参加しますか？\n👍 で参加、👎 で退出してブロック（引用して「参加」「見送る」でも）。24 時間答えがなければ退出してブロックします。");
+      assert.ok(!s.delivered.some((event) => event.stream?.startsWith("group.g-")), "nothing of it is read before the owner says so");
+      await s.react("👍");
+      await until(() => s.toOwner().length === 2);
+      const name = /group\.(g-[0-9a-f]{8})/.exec(s.toOwner()[1]!.params.message as string)![1]!;
+      s.cli.push({ ...inGroup({ message: "hi all" }), dataMessage: { ...inGroup({}).dataMessage, message: "hi all", groupInfo: { groupId: OTHER, type: "DELIVER" } } });
+      await until(() => s.delivered.some((event) => event.stream === `group.${name}`));
+
+    } finally {
+      await s.stop();
+    }
+    // An invitation found by the minutely listing, refused.
+    const t = await started("invited", {}, undefined, 20);
+    try {
+      t.cli.listGroups = [{ id: THIRD, name: "Spam", isMember: false, isBlocked: false, members: [], pendingMembers: [{ number: AGENT }] }];
+      await until(() => t.toOwner().length === 1);
+      assert.match(t.toOwner()[0]!.params.message as string, /^誰かが Signal のグループ『Spam』（メンバー 0 人）にあなたのエージェントを招待しました。/);
+      await t.react("❌");
+      await until(() => t.cli.calls.some((call) => call.method === "block"));
+      assert.ok(t.cli.calls.some((call) => call.method === "quitGroup" && call.params.groupId === THIRD));
+      assert.deepEqual(t.cli.calls.find((call) => call.method === "block")!.params, { account: AGENT, groupId: [THIRD] });
+      await until(() => t.toOwner().at(-1)!.params.message === "→ 『Spam』から退出してブロックしました");
+    } finally {
+      await t.stop();
     }
   });
 });

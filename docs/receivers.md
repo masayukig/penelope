@@ -552,7 +552,7 @@ Slack の出来事をターンに描いて載せるには、配置が、この�
 
 ## Signal のプラグイン
 
-Signal の 1 対 1 の会話で許した相手の、また許したグループで誰もの、発言・ファイル・リアクションを受け、エージェントが返す道を持つ（[ADR-0040](adr/0040-signal-through-signal-cli-in-a-receivers-plugin-with-a-send-socket.md)）。`plugin` は `signal`、種類は接続。Signal には bot の API が無いので、配置がエージェントの番号で登録した [signal-cli](https://github.com/AsamK/signal-cli) を daemon として同じ Pod に置き、その JSON-RPC を Unix socket で使う。実装は `packages/receivers/src/plugins/signal.ts` にある。
+Signal の 1 対 1 の会話で許した相手の、また許したグループで誰もの、発言・ファイル・リアクションを受け、エージェントが返す道を持つ（[ADR-0040](adr/0040-signal-through-signal-cli-in-a-receivers-plugin-with-a-send-socket.md)）。`plugin` は `signal`、種類は接続。Signal には bot の API が無いので、配置がエージェントの番号で登録した [signal-cli](https://github.com/AsamK/signal-cli) を daemon として同じ Pod に置き、その JSON-RPC を Unix socket で使う。実装は `packages/receivers/src/plugins/signal.ts`（承認は `signal-gate.ts`）にある。
 
 ### 設定
 
@@ -567,6 +567,11 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 | `max_file_bytes` | `20971520`（20 MiB） | 取ってくるファイル 1 つの大きさの上限。1〜62914560（60 MiB）の整数 |
 | `rpc_timeout_seconds` | `30` | JSON-RPC の 1 回の呼び出しを待つ秒数 |
 | `typing_seconds` | `300` | 入力中の表示（下の「入力中」）を出し続ける上限の秒数。0〜3600。`0` なら出さない |
+| `approvals` | `false` | `true` なら、グループへの投稿を判定と本人の承認に通し、知らないグループを本人に聞く（下の「グループへの投稿の判定と本人の承認」）。本人は `senders` の最初 |
+| `judge` | なし | 判定（Jev の API）。`url`（既定 `https://api.typesafe.ai`、`/v1/systemone` の前まで）・`api_key_file`（鍵のファイル。省けば鍵を送らない）・`model`（既定 `jev-latest`）・`ask_at`（既定 `0.5`）・`return_at`（既定 `0.9`）・`timeout_seconds`（既定 `30`）。`approvals: true` が要る。省けばグループへの投稿は全部本人に回る |
+| `approval_hours` | `168` | 本人に回した投稿の期限（時間）。過ぎたら送らない |
+| `state_file` | なし | 回した投稿と、聞いたグループの答えを持つ JSON のファイル（絶対パス）。省けばメモリだけで、立ち上がり直すと消える |
+| `time_zone` | `UTC` | 本人と判定に見せる時刻のタイムゾーン（IANA） |
 
 - signal-cli の daemon は `--receive-mode on-connection` で動かす。receivers がつないでいる間だけ受け、最後の接続が閉じると受けるのをやめる。receivers との間が切れている間の発言は Signal のサーバーに残り、つなぎ直したときに受ける。取りこぼしうるのは、signal-cli が受けて `receive` の知らせを押し出した後に、取り込み口が受けなかった出来事である（下の「接続」）。
 - signal-cli の socket は、signal-cli と receivers のコンテナだけが mount する volume に置く。sandbox は mount しない（[ADR-0014](adr/0014-sandbox-loopback-left-open-and-pod-ports-on-unix-sockets.md)）。signal-cli の文書は JSON-RPC の口に認証を書いておらず、届けば番号の操作（送信・グループの操作・端末の追加など）を呼べるためである。同じ理由で `--http`・`--tcp` では待ち受けない（loopback から sandbox が届く）。
@@ -589,7 +594,7 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 
 - 1 対 1 は、相手の `sourceNumber` か `sourceUuid` が `senders` にあるかで見る（`sourceUuid` が `null` で届くことがあるため両方を見る）。
 - `dataMessage.groupInfo.groupId` が `groups` にあるグループの発言は、**送り主を問わず**受ける（[ADR-0041](adr/0041-signal-groups-the-owner-allowed-received-from-every-member.md)）。グループの中の会話の流れを読めないと、加わるかどうかを決められないためである。
-- Signal では、連絡先の誰かがエージェントを承認なしにグループへ足せる（受け側では防げない）。`groups` に無いグループの発言は捨てるだけで、足されたことは知らせない。「知らないグループを本人に聞き、断られたら抜けてブロックする」仕組みはまだ無い（下の「未決」）。
+- Signal では、連絡先の誰かがエージェントを承認なしにグループへ足せる（受け側では防げない）。`groups` に無いグループの発言は捨てる。`approvals: true` なら、足されたことを本人に聞く（下の「グループへの投稿の判定と本人の承認」）。
 
 | 欄 | 作り方 |
 | --- | --- |
@@ -612,7 +617,7 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 
 | 欄 | 中身 |
 | --- | --- |
-| `type` | `message` か `reaction` |
+| `type` | `message`・`reaction`、本人に回した投稿の結果なら `held` |
 | `from` | `number`・`uuid`・`name`（あるものだけ） |
 | `group` | グループのときだけ。`name`（設定の名前）と `title`（Signal のグループ名。signal-cli が渡したときだけ） |
 | `mentions_me` | グループでエージェントへのメンションがあれば `true` |
@@ -622,6 +627,7 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 | `quote` | 引用した返事のとき、引用元の `timestamp` と `text`。グループでは引用元の送り主 `author`（番号か UUID）と、エージェントの発言なら `mine: true` |
 | `files` | 付いたファイル。1 件は `name`・`mimetype`・`size`・`attached` |
 | `reaction` | `emoji`・`target_timestamp`・`removed` |
+| `held` | `type: held` のとき。`id`（送り口の `202` の `held`）・`result`（`sent`・`declined`・`expired`・`failed`）・`failed` なら `error` |
 
 - 本文のメンションの印（U+FFFC）は `@<名前>` にする。エージェントへのものは `@you`、名前の分からない相手は `@someone`。
 
@@ -649,9 +655,11 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 | 応答 | 意味 |
 | --- | --- |
 | `200` | `{"timestamp": <送った発言の Signal の時刻>}` |
+| `202` | グループへの投稿を本人に回した（`approvals`）。`{"held": <id>, "reason", "issues"?, "note"}`。何も送っていない。本人が決めたら `type: held` の出来事が来る |
+| `422` | グループへの投稿を判定が突き返した（`approvals`）。`{"error", "issues": [{name, score}], "returns_left"}`。何も送っていない |
 | `400` | form でない、本文もファイルも無い、`to` と `group` の両方がある、`quote_` の 2 つの片方だけか形が違う |
 | `403` | `to` が `senders` に無い、`group` が `groups` に無い |
-| `502` | signal-cli が断った、Signal が受けなかった（1 対 1 は `results` に `SUCCESS` でないものがある、グループはメンバーの誰も `SUCCESS` でない） |
+| `502` | signal-cli が断った、Signal が受けなかった（1 対 1 は `results` に `SUCCESS` でないものがある、グループはメンバーの誰も `SUCCESS` でない）、本人に回すはずが本人に送れなかった |
 | `503` | signal-cli につながっていない |
 
 - 本文は末尾の空白と改行を除いて `send` の `message` に、ファイルは `data:<種類>;filename=<名前>;base64,…` の形で `attachments` に入れる。グループは `groupId`、引用は `quoteTimestamp`・`quoteAuthor` で渡す。
@@ -660,6 +668,30 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 - グループに送れたら、その発言を `own: true` の出来事（`batch`）としてそのグループの `stream` に入れる。Signal は自分の送った発言を受信として返さないので、そうしないとグループの記録にエージェントの発言が残らない（Slack のエージェント自身の発言と同じ扱い）。1 対 1 の返事は入れない。
 - 応答の body は `{error}` の JSON。ログは `send status=<番号>` だけで、本文と宛先は書かない。
 - 使い方は sandbox の image の skill `signal` にある。
+
+### グループへの投稿の判定と本人の承認
+
+`approvals: true` のときだけ（[ADR-0042](adr/0042-signal-group-posts-judged-and-held-for-the-owner-inside-the-plugin.md)）。natsumi が Slack への投稿に使っていた判定（ポッポさん。natsumi ADR 0039・0040）を、本人への問い合わせ、知らないグループの問い合わせと合わせて、このプラグインの中でする。penelope の core には投稿の判定を置かない（ADR-0033）ので、接続のプラグインに閉じた。1 対 1 の送り先（`senders`）への送信は、判定も承認も通らない。
+
+- グループへの本文のある投稿は、`judge` があれば Jev の `POST <url>/v1/systemone` に、natsumi と同じ 5 つの問い（本人に代わる約束・期限、隠しごとの匂わせ、事実と違う説明、同意の捏造、私的な事情。英語の文で、前置きは Signal のグループ向け）を noul で聞く。見せるのは、グループ名・今の時刻・引用する発言・グループの直近 5 行（1 行 500 字まで）・下書き。
+- どれかが `return_at` 以上なら突き返す（`422`）。どれかが `ask_at` 以上なら本人に回す（`202`）。どれも下なら送る（`200`）。判定が答えなかった（時間切れ・`http-…`・形が違う）ら本人に回す。同じ宛先（グループと引用する発言）で続けて 2 回突き返したら、3 回目は本人に回す。`judge` が無ければ全部本人に回す。本文の無い、ファイルだけの投稿は判定も承認も通さずに送る（natsumi の ADR 0044）。
+- 本人に回すときは、本人の 1 対 1 に次を送る。
+
+  ```
+  承認待ちの投稿: Signal のグループ『<名前>』 への投稿
+  返信先: <名前>（<時刻>）「<本文の先頭>」
+  ---
+  <下書き>
+  ---
+  理由: 判定が本人に回した / 本人に代わる約束・期限 0.62
+  期限: 2026-11-25 09:00
+  👍 で送る、👎 か ❌ で見送る（引用して「送る」「見送る」でも）
+  ```
+
+- 本人の答えは、その発言への 👍（送る）・👎 か ❌（見送る）のリアクションか、引用した返事の「送る」「ok」・「見送る」「no」。その発言の Signal の時刻で照合する。答えはエージェントに渡さない（ほかの絵文字とリアクションの取り消しも、その発言へのものは渡さない）。決まったら送るか捨て、エージェントにはグループの `stream` に `type: held` の出来事（`now`）を入れ、本人に「→ 送った: … への投稿」のように 1 行送る。期限（`approval_hours`）が過ぎたら `expired` にする。
+- 知らないグループ（`groups` に無く、本人が答えていないもの）を、そのグループの発言と、つないだときと 1 分ごとの `listGroups`（`isMember` か、`pendingMembers` に `account` があるもの。`isBlocked` は除く）で見つけたら、本人に 1 度だけ聞く: 「<足した人>さんが Signal のグループ『<名前>』（メンバー <数> 人）にあなたのエージェントを追加しました。参加しますか？ 👍 で参加、👎 で退出してブロック（引用して「参加」「見送る」でも）。24 時間答えがなければ退出してブロックします。」。送れなければ次の見回りで試し直す（3 回まで）。
+  - 参加なら `g-<グループ ID の SHA-256 の先頭 8 桁>` の名前で `groups` に足し（`stream` は `group.g-…`、送り口の `group` もその名前）、招待のままなら `updateGroup` で受ける。断るか 24 時間答えが無ければ `quitGroup` と `block` をする。どちらも本人に 1 行送る。答えを待つ間と断った後は、そのグループの発言を捨てる。`groups` に書いたグループは聞かず、抜けもしない。`groups` の名前に `g-` と 16 進 8 桁の形は使えない。
+- 回した投稿（ファイルを含む）と、聞いたグループの答えは `state_file` に持つ。突き返した回数とグループの直近の発言はメモリだけで、立ち上がり直すと消える（立ち上がる前の発言を引用する投稿は、引用先なしで判定する）。
 
 ### ログ
 
@@ -671,13 +703,15 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 | `envelope events=<数> dropped=<数>`（受けたら `taken=true`、止めるときに送れなければ `taken=false (stopping)`、30 分受けられずに捨てたら `dropped=1 taken=false (refused for 30 minutes, <回数> tries)`） | envelope 1 つごと |
 | `cannot fetch a file (…)`・`cannot send a read receipt (…)`・`cannot send typing (…)` | JSON-RPC が断られた |
 | `send status=<番号>` | 送り口の要求 1 つごと |
+| `envelope events=0 dropped=0 answer=1` | 本人の承認・問い合わせへの答え |
+| `judge: no verdict (<一語>)`・`cannot ask the owner (…)`・`cannot list the groups (…)`・`cannot write the state file (…)` | 判定・承認がうまくいかなかった |
 
 ### 未決
 
 - エージェントからのリアクション、編集・削除の扱い。
 - ターンの終わりで入力中を止めること（上の「入力中」）。
-- 知らないグループに足されたときに本人に聞き、断られたら抜けてブロックすること。いまは `groups` に無いグループを黙って捨てる。
-- グループへの投稿の判定と本人の承認。penelope には投稿の判定が無く（ADR-0033）、Sentinel の ask（ADR-0005）もまだ無いので、グループへの送り口は判定も承認も通さずに送る。
+- `approvals` が無い配置では、グループへの送り口は判定も承認も通さずに送り、知らないグループは黙って捨てる。
+- 本人が承認のときに下書きを直して送ること。Signal の答えは送る・見送るだけ。
 
 ## 後に足すプラグイン
 
