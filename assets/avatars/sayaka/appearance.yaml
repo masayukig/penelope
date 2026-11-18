@@ -1,0 +1,18 @@
+lora: kutara_anima.v12
+body: |
+  <lora:kutara_anima.v12:1>,
+  masterpiece, best quality, score_7, highres, newest, year 2025, safe,
+  kutara sayaka, blonde long hair, fore head, 1girl, blonde hair, long hair, forehead, center part, gray eyes,
+outfit: "white collared shirt, red ribbon bowtie, plaid pattern skirt,"
+outfitName: 白いシャツと赤いリボン、チェックのスカート
+keep:
+  - blonde hair
+  - long hair
+  - forehead
+  - gray eyes
+examples:
+  - title: 放課後の自撮り
+    outfit: "white collared shirt, red ribbon bowtie, plaid pattern skirt,"
+    scene: |
+      solo, selfie, upper body, slight pout, looking to the side,
+      outdoors, school courtyard, afternoon sunlight

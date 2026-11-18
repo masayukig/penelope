@@ -15,8 +15,8 @@ const FACES = ["angry", "happy", "laughing", "neutral", "sad", "sleepy", "surpri
 const avatars = readdirSync(DIR, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
 
 describe("the avatars in the image", () => {
-  it("are the ones moved from natsumi", () => {
-    assert.deepEqual(avatars, ["aki", "myao", "natsumi", "penelope"]);
+  it("include the migrated avatars and Sayaka", () => {
+    assert.deepEqual(avatars, ["aki", "myao", "natsumi", "penelope", "sayaka"]);
   });
 
   for (const id of avatars) {
