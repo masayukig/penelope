@@ -40,16 +40,16 @@ test("poll names the agent, the cursor and the wait", async () => {
 test("every body names the agent", async () => {
   await backend.ack([1]);
   await backend.activity([{ kind: "turn_start", at: "t", turn_id: "x" }]);
-  await backend.turnEnd("x");
+  await backend.turnEnd({ turn_id: "x" });
   await backend.selfEvent({ id: "e-1", summary: "s", payload: { a: 1 } });
-  await backend.rotated();
+  await backend.rotated({ seq: 7 });
   assert.deepEqual(fake.sent("POST", "/v1/events/ack"), [{ agent: "main", seqs: [1] }]);
   assert.deepEqual(fake.sent("POST", "/v1/activity"), [
     { agent: "main", activities: [{ kind: "turn_start", at: "t", turn_id: "x" }] },
   ]);
   assert.deepEqual(fake.sent("POST", "/v1/turns/end"), [{ agent: "main", turn_id: "x" }]);
   assert.deepEqual(fake.sent("POST", "/v1/self-events"), [{ agent: "main", id: "e-1", summary: "s", payload: { a: 1 } }]);
-  assert.deepEqual(fake.sent("POST", "/v1/sessions/rotated"), [{ agent: "main" }]);
+  assert.deepEqual(fake.sent("POST", "/v1/sessions/rotated"), [{ agent: "main", seq: 7 }]);
 });
 
 test("a reply answers with its id", async () => {

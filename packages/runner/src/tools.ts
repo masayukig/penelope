@@ -43,7 +43,8 @@ async function readImages(paths: readonly string[], home: string): Promise<Reply
   return images;
 }
 
-export function backendTools(backend: Backend, { home }: { home: string }): ToolDefinition[] {
+/** `turn` names the turn under way, for a reply to carry (ADR-0038). */
+export function backendTools(backend: Backend, { home, turn }: { home: string; turn?: () => string | undefined }): ToolDefinition[] {
   const reply = defineTool({
     name: "reply",
     label: "Reply",
@@ -67,7 +68,12 @@ export function backendTools(backend: Backend, { home }: { home: string }): Tool
     async execute(_id, params) {
       const { images: paths, ...rest } = params;
       const images = paths === undefined || paths.length === 0 ? undefined : await readImages(paths, home);
-      const { id } = await backend.reply({ ...rest, ...(images === undefined ? {} : { images }) });
+      const turnId = turn?.();
+      const { id } = await backend.reply({
+        ...rest,
+        ...(turnId === undefined ? {} : { turn_id: turnId }),
+        ...(images === undefined ? {} : { images }),
+      });
       return text(`Sent (id ${id}).`);
     },
   });

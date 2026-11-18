@@ -12,7 +12,7 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
-import type { TurnBatch, TurnEvent, TurnLine } from "@penelope/contract";
+import type { RecordDayResponse, RecordNight, RecordTurn, TurnBatch, TurnEvent, TurnLine } from "@penelope/contract";
 
 import { E2E_PNG } from "../outside/model.ts";
 import {
@@ -204,6 +204,14 @@ describe("the Pod end to end", () => {
         ["owner", "E2E-TURN-1 こんにちは"],
       ],
     );
+
+    // The activity record has the turn as the runner told it: done, from the owner's message, with its reply (ADR-0038).
+    const record = browser.json<RecordDayResponse>("/api/record?kind=turn&agent=main");
+    const turn = record.body.rows.find(
+      (row): row is RecordTurn => row.kind === "turn" && row.triggers.some((trigger) => trigger.summary.includes("E2E-TURN-1")),
+    );
+    assert.ok(turn, `the turn in the record: ${JSON.stringify(record.body)}`);
+    assert.deepEqual([turn.result, turn.triggers.map((trigger) => trigger.source), turn.replies], ["done", ["ui"], 1]);
 
     // The model's key: the sandbox sent its surrogate, the model got the real one.
     const calls = await outside.modelCalls();
@@ -943,6 +951,11 @@ describe("the Pod end to end", () => {
       return text.includes('"nightly"') ? (JSON.parse(text) as { file: string; nightly: number }) : undefined;
     });
     assert.equal(typeof state.nightly, "number");
+    // The activity record has the night with each of its steps as the runner told them (ADR-0038).
+    const night = await eventually("the night in the activity record", () =>
+      browser.json<RecordDayResponse>("/api/record?kind=night").body.rows.find((row): row is RecordNight => row.kind === "night"),
+    );
+    assert.deepEqual(night.stages, { reflection: { result: "done" }, curator: { result: "done" }, session: { result: "done" } });
 
     stream = new Stream();
     await stream.open(browser.cookie!);

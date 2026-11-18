@@ -16,13 +16,13 @@ import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promi
 import { join, resolve } from "node:path";
 
 import { type AgentSession, parseFrontmatter, SessionManager } from "@earendil-works/pi-coding-agent";
-import { type Activity, isSubAgentName, type SubAgentNotice, type SubAgentStopReason } from "@penelope/contract";
+import { type Activity, isSubAgentName, type SubAgentNotice, type SubAgentStopReason, type TurnEndRequest } from "@penelope/contract";
 
 import { TurnRecorder } from "./activities.ts";
 import type { Backend } from "./backend.ts";
 import type { Config } from "./config.ts";
 import type { Connector } from "./connectors.ts";
-import { newSessionFileIn, openSession, type PiSetup } from "./pi.ts";
+import { type Assistant, lastAssistant, newSessionFileIn, openSession, type PiSetup } from "./pi.ts";
 import { type Places, subAgentSystemPrompt } from "./prompts.ts";
 
 export type SubAgentState = "running" | "waiting" | "closed";
@@ -97,13 +97,8 @@ const SUMMARY_MAX = 200;
 const RETRY_MAX_MS = 30_000;
 const RECORD = "agent.json";
 
-type Message = AgentSession["messages"][number];
-type Assistant = Extract<Message, { role: "assistant" }>;
-
-function lastAssistant(messages: readonly Message[]): Assistant | undefined {
-  for (let i = messages.length - 1; i >= 0; i--) if (messages[i]!.role === "assistant") return messages[i] as Assistant;
-  return undefined;
-}
+/** How a turn went, as the turn's end tells it (docs/sandbox-api.md). */
+type Outcome = Pick<TurnEndRequest, "result" | "reason">;
 
 const textOf = (message: Assistant | undefined) =>
   (message?.content ?? [])
@@ -185,7 +180,7 @@ export class SubAgents {
           await this.save(live);
         }
         await this.status(live, false);
-        if (cut) await this.endTurn(live.backend, cut);
+        if (cut) await this.endTurn(live.backend, cut, { result: "stopped", reason: "The runner stopped during the run." });
       }
       this.deliver(live);
     }
@@ -397,8 +392,14 @@ export class SubAgents {
     }
     // Cut by the runner stopping: the next runner ends the turn and tells the main agent.
     if (this.stopped.signal.aborted && (cancelled || reason === "failed")) return;
-    if (!live.closing) {
+    let outcome: Outcome = { result: "done" };
+    if (live.closing && cancelled) {
+      outcome = { result: "stopped", reason: "Closed by subagent_close." };
+    } else {
       if (cancelled) [reason, text] = ["failed", "The run was cancelled."];
+      if (reason === "failed") outcome = { result: "failed", reason: text };
+    }
+    if (!live.closing) {
       this.notice(record, reason, text);
       record.state = "waiting";
       delete record.turn;
@@ -406,7 +407,7 @@ export class SubAgents {
     }
     recorder.end();
     await sending;
-    await this.endTurn(live.backend, turnId, false);
+    await this.endTurn(live.backend, turnId, outcome, false);
     if (!live.closing) this.deliver(live);
   }
 
@@ -449,13 +450,13 @@ export class SubAgents {
   }
 
   /** The end of a turn: the activity for the UI, then the call that commits /memory. */
-  private async endTurn(backend: Backend, turnId: string, activity = true): Promise<void> {
+  private async endTurn(backend: Backend, turnId: string, outcome: Outcome, activity = true): Promise<void> {
     if (activity) {
       await backend
         .activity([{ kind: "turn_end", at: new Date().toISOString(), turn_id: turnId }])
         .catch((error: unknown) => this.log(`activity of ${backend.agent} not sent: ${failure(error)}`));
     }
-    await backend.turnEnd(turnId).catch((error: unknown) => this.log(`turn end of ${backend.agent} not sent: ${failure(error)}`));
+    await backend.turnEnd({ turn_id: turnId, ...outcome }).catch((error: unknown) => this.log(`turn end of ${backend.agent} not sent: ${failure(error)}`));
   }
 
   private async status(live: Live, closed: boolean): Promise<void> {

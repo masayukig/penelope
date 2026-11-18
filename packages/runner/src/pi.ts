@@ -129,6 +129,15 @@ export async function openSession(
   return session;
 }
 
+type Message = AgentSession["messages"][number];
+export type Assistant = Extract<Message, { role: "assistant" }>;
+
+/** The last answer of the model in the session. */
+export function lastAssistant(messages: readonly Message[]): Assistant | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) if (messages[i]!.role === "assistant") return messages[i] as Assistant;
+  return undefined;
+}
+
 export function openFile(config: Config, file: string): SessionManager {
   return SessionManager.open(file, config.sessionDir, config.home);
 }
