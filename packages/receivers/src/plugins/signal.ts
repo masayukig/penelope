@@ -9,7 +9,8 @@
 // The agent answers through a second Unix socket the plugin serves, `POST
 // /v1/send`, which the Sentinel reaches as a registered host's upstream (the
 // sandbox does not mount it, ADR-0014). It sends only to the allowed senders
-// and groups.
+// and groups. With `approvals`, a post to a group is judged and may be held for
+// the owner, and a group no one named is asked about (signal-gate.ts).
 //
 // While the agent works on a message that came `now`, the conversation shows
 // her typing: the receivers cannot see the turn, so it lasts until she sends
@@ -23,8 +24,9 @@ import { chmodSync, rmSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
 
-import { isObject, onlyKnown, SettingsError, type ConnectionEvent, type ConnectionPlugin } from "../plugin.ts";
+import { isObject, onlyKnown, readKey, SettingsError, type ConnectionEvent, type ConnectionPlugin, type PluginEnv } from "../plugin.ts";
 import type { IntakeFile } from "../intake.ts";
+import { Gate, type Draft, type HeldResult, type JudgeSettings, type Sent } from "./signal-gate.ts";
 import { backoff } from "./slack/socket.ts";
 import { streamOf, summaryLine } from "./text.ts";
 
@@ -34,6 +36,8 @@ const MAX_SEND_BYTES = 64 * MIB;
 const NUMBER = /^\+[1-9][0-9]{6,14}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const GROUP_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
+/** The names the approvals give the groups the owner let in (`g-` and 8 hex digits). */
+const ASKED_NAME = /^g-[0-9a-f]{8}$/;
 const GROUP_ID = /^[A-Za-z0-9+/]+={0,2}$/;
 /** What signal-cli leaves in the text where a mention is. */
 const MENTION_MARK = "\uFFFC";
@@ -41,6 +45,8 @@ const MENTION_MARK = "\uFFFC";
 export const FOLLOW_UP_MS = 10 * 60_000;
 /** Signal's apps stop showing "typing" about 15 s after the last one, so it is sent again this often. */
 const TYPING_REFRESH_MS = 10_000;
+/** How often held posts and questions are looked over, and the groups listed (natsumi's sweep). */
+const SWEEP_MS = 60_000;
 
 type Raw = Record<string, unknown>;
 
@@ -49,7 +55,7 @@ type Attachment = { id: string; name: string; type: string; size?: number };
 
 /** The payload of a Signal event. */
 export type SignalPayload = {
-  type: "message" | "reaction";
+  type: "message" | "reaction" | "held";
   from: { number?: string; uuid?: string; name?: string };
   /** In a group: its name in the settings, and its title on Signal when signal-cli gives it. */
   group?: { name: string; title?: string };
@@ -64,6 +70,8 @@ export type SignalPayload = {
   quote?: { timestamp: number; text?: string; author?: string; mine?: boolean };
   files?: { name: string; mimetype: string; size?: number; attached: boolean }[];
   reaction?: { emoji: string; target_timestamp: number; removed: boolean };
+  /** A post held for the owner (the `held` the send answered with 202), and what came of it. */
+  held?: { id: string; result: HeldResult; error?: string };
 };
 
 const str = (value: unknown) => (typeof value === "string" && value !== "" ? value : undefined);
@@ -200,8 +208,8 @@ function withNames(text: string | undefined, mentions: Raw[], account: string): 
   return out;
 }
 
-function settingsOf(settings: Record<string, unknown>) {
-  onlyKnown(settings, ["socket", "account", "senders", "groups", "names", "send_socket", "max_file_bytes", "rpc_timeout_seconds", "typing_seconds"]);
+function settingsOf(settings: Record<string, unknown>, env: PluginEnv) {
+  onlyKnown(settings, ["socket", "account", "senders", "groups", "names", "send_socket", "max_file_bytes", "rpc_timeout_seconds", "typing_seconds", "approvals", "judge", "approval_hours", "state_file", "time_zone"]);
   const path = (field: string, value: unknown, required: boolean) => {
     if (value === undefined && !required) return undefined;
     if (typeof value !== "string" || !value.startsWith("/")) throw new SettingsError(field, "must be the absolute path of a Unix socket");
@@ -220,6 +228,7 @@ function settingsOf(settings: Record<string, unknown>) {
   if (!isObject(rawGroups)) throw new SettingsError("groups", "must map a name to a group ID");
   for (const [name, id] of Object.entries(rawGroups)) {
     if (!GROUP_NAME.test(name)) throw new SettingsError(`groups.${name}`, "the name must be 1-32 of a-z, 0-9 and -, not starting with -");
+    if (ASKED_NAME.test(name)) throw new SettingsError(`groups.${name}`, "g- and 8 hex digits is the form of the groups the owner lets in; name it otherwise");
     if (typeof id !== "string" || !GROUP_ID.test(id)) throw new SettingsError(`groups.${name}`, "must be a group ID as signal-cli's listGroups gives it (base64)");
     if (groups.has(id)) throw new SettingsError(`groups.${name}`, "the same group ID is named twice");
     groups.set(id, name);
@@ -237,9 +246,51 @@ function settingsOf(settings: Record<string, unknown>) {
   if (typeof timeout !== "number" || !(timeout > 0)) throw new SettingsError("rpc_timeout_seconds", "must be a number greater than 0");
   const typing = settings.typing_seconds ?? 300;
   if (typeof typing !== "number" || !(typing >= 0) || typing > 3600) throw new SettingsError("typing_seconds", "must be a number from 0 to 3600");
+  const approvals = settings.approvals ?? false;
+  if (typeof approvals !== "boolean") throw new SettingsError("approvals", "must be true or false");
+  let judge: JudgeSettings | undefined;
+  if (settings.judge !== undefined) {
+    const raw = settings.judge;
+    if (!isObject(raw)) throw new SettingsError("judge", "must be an object (url, api_key_file, model, ask_at, return_at, timeout_seconds)");
+    if (!approvals) throw new SettingsError("judge", "needs approvals: true, to ask the owner about what the judge flags");
+    const known = ["url", "api_key_file", "model", "ask_at", "return_at", "timeout_seconds"];
+    for (const key of Object.keys(raw)) if (!known.includes(key)) throw new SettingsError(`judge.${key}`, "not a field of the judge");
+    const url = raw.url ?? "https://api.typesafe.ai";
+    if (typeof url !== "string" || !/^https?:\/\//.test(url)) throw new SettingsError("judge.url", "must be an http(s) URL, the base of /v1/systemone");
+    const model = raw.model ?? "jev-latest";
+    if (typeof model !== "string" || model === "") throw new SettingsError("judge.model", "must be a model's name");
+    const share = (field: string, value: unknown) => {
+      if (typeof value !== "number" || !(value > 0 && value <= 1)) throw new SettingsError(`judge.${field}`, "must be a number over 0, up to 1");
+      return value;
+    };
+    const askAt = share("ask_at", raw.ask_at ?? 0.5);
+    const returnAt = share("return_at", raw.return_at ?? 0.9);
+    if (returnAt < askAt) throw new SettingsError("judge.return_at", "must not be under ask_at");
+    const timeout = raw.timeout_seconds ?? 30;
+    if (typeof timeout !== "number" || !(timeout > 0)) throw new SettingsError("judge.timeout_seconds", "must be a number greater than 0");
+    const apiKey = raw.api_key_file === undefined ? undefined : readKey("judge.api_key_file", raw.api_key_file, env);
+    judge = { url, model, askAt, returnAt, timeoutMs: timeout * 1000, ...(apiKey ? { apiKey } : {}) };
+  }
+  const hours = settings.approval_hours ?? 168;
+  if (typeof hours !== "number" || !(hours > 0)) throw new SettingsError("approval_hours", "must be a number greater than 0");
+  if (settings.state_file !== undefined && (typeof settings.state_file !== "string" || !settings.state_file.startsWith("/"))) {
+    throw new SettingsError("state_file", "must be an absolute path");
+  }
+  const timeZone = settings.time_zone ?? "UTC";
+  try {
+    if (typeof timeZone !== "string") throw new RangeError();
+    new Intl.DateTimeFormat("en", { timeZone });
+  } catch {
+    throw new SettingsError("time_zone", "must be an IANA time zone, such as Asia/Tokyo");
+  }
   return {
     socket,
     sendSocket,
+    approvals,
+    judge,
+    approvalMs: hours * 3600_000,
+    stateFile: settings.state_file as string | undefined,
+    timeZone,
     account: settings.account,
     senders: senders as string[],
     groups,
@@ -255,6 +306,8 @@ class RpcError extends Error {}
 export type SignalPluginOptions = {
   /** The wait before the `attempt`-th try in a row that failed: to connect, or to hand an event over. */
   backoffMs?: (attempt: number) => number;
+  /** How often the approvals look over what is held and list the groups. */
+  sweepMs?: number;
 };
 
 export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugin {
@@ -262,8 +315,8 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
   return {
     name: "signal",
     kind: "connection",
-    create(raw) {
-      const settings = settingsOf(raw);
+    create(raw, env) {
+      const settings = settingsOf(raw, env);
       return {
         start(io) {
           /** The conversations shown as typing, by `dm:<sender>` or `group:<ID>`. */
@@ -297,10 +350,12 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
 
           /** Per group ID: when the agent last posted there, and whether hers is still the last message. */
           const ownPosts = new Map<string, { at: number; last: boolean }>();
+          /** The groups read and written to: the settings', and with approvals those the owner let in. */
+          const groups = new Map(settings.groups);
           const audience: Audience = {
             account: settings.account,
             senders: new Set(settings.senders),
-            groups: settings.groups,
+            groups,
             names: settings.names,
             followsOwn: (groupId, timestamp) => {
               const own = ownPosts.get(groupId);
@@ -344,7 +399,16 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
             });
 
           const receive = async (params: unknown) => {
-            const made = isObject(params) ? eventOf(params.envelope, audience) : undefined;
+            const envelope = isObject(params) ? params.envelope : undefined;
+            if (gate?.consume(envelope)) {
+              io.log("envelope events=0 dropped=0 answer=1");
+              return;
+            }
+            const made = eventOf(envelope, audience);
+            if (made?.groupId !== undefined) {
+              const { payload } = made.event;
+              gate?.record(made.groupId, { timestamp: payload.timestamp, from: payload.from.name ?? "someone", ...(payload.type === "message" && payload.text !== undefined ? { text: payload.text } : {}), ...(payload.group?.title ? { title: payload.group.title } : {}) });
+            }
             if (made?.groupId !== undefined && made.event.payload.type === "message") {
               const own = ownPosts.get(made.groupId);
               if (own) own.last = false;
@@ -398,6 +462,7 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
                 opened = true;
                 current = socket;
                 io.log("connected");
+                void gate?.sweep();
               });
               socket.on("error", (error: NodeJS.ErrnoException) => io.log(`connection error (${error.code ?? error.name})`));
               socket.on("close", () => {
@@ -450,6 +515,7 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
           const posted = (group: { id: string; name: string }, timestamp: number, text: string | undefined, files: number) => {
             endTyping(`group:${group.id}`, false);
             ownPosts.set(group.id, { at: timestamp, last: true });
+            gate?.record(group.id, { timestamp, from: "the secretary", ...(text !== undefined ? { text } : {}) });
             const event: ConnectionEvent & { payload: SignalPayload } = {
               id: `group.${group.name}/${settings.account}/${timestamp}`,
               occurred_at: new Date(timestamp).toISOString(),
@@ -462,12 +528,77 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
               if (!(await io.deliver([event]))) io.log("own post events=1 taken=false");
             });
           };
-          const sender = settings.sendSocket ? sendServer(settings.sendSocket, { senders: settings.senders, groups: settings.groups, call, log: io.log, posted, sent: (to) => endTyping(`dm:${to}`, false) }) : undefined;
+          /** Sends to a sender or a group now; a group's post goes into its stream. */
+          const send = async (to: { recipient: string } | { groupId: string }, draft: Omit<Draft, "groupId">): Promise<Sent> => {
+            const result = await sendVia(call, to, draft);
+            if ("groupId" in to && result.timestamp !== undefined) posted({ id: to.groupId, name: groups.get(to.groupId)! }, result.timestamp, draft.text, draft.attachments.length);
+            if ("recipient" in to && result.status === 200) endTyping(`dm:${to.recipient}`, false);
+            return result;
+          };
+
+          /** What came of a held post, as an event in the group's stream that comes now. */
+          const told = (groupId: string, id: string, result: HeldResult, sent: Sent | undefined) => {
+            const name = groups.get(groupId);
+            if (name === undefined) return;
+            const at = io.now().getTime();
+            const timestamp = typeof sent?.body.timestamp === "number" ? sent.body.timestamp : at;
+            const words = { sent: "sent, your owner approved it", declined: "declined by your owner, not sent", expired: "your owner did not decide in time, not sent", failed: "approved by your owner but not sent" }[result];
+            const event: ConnectionEvent & { payload: SignalPayload } = {
+              id: `group.${name}/held/${id}/${result}`,
+              occurred_at: new Date(at).toISOString(),
+              stream: streamOf(`group.${name}`),
+              delivery: "now",
+              summary: summaryLine(`Signal ${name} your held post ${id}: ${words}`),
+              payload: { type: "held", from: { number: settings.account }, group: { name }, timestamp, held: { id, result, ...(result === "failed" && typeof sent?.body.error === "string" ? { error: sent.body.error } : {}) } },
+            };
+            chain = chain.then(async () => {
+              for (let attempt = 1; !(await io.deliver([event])); attempt++) {
+                if (stopped) return io.log("held result events=1 taken=false (stopping)");
+                await sleep(backoffMs(attempt));
+              }
+            });
+          };
+
+          const gate = settings.approvals
+            ? new Gate({
+                account: settings.account,
+                owner: settings.senders[0]!,
+                ...(settings.judge ? { judge: settings.judge } : {}),
+                approvalMs: settings.approvalMs,
+                timeZone: settings.timeZone,
+                ...(settings.stateFile ? { stateFile: settings.stateFile } : {}),
+                groups,
+                configured: new Set(settings.groups.keys()),
+                call,
+                send: (draft) => send({ groupId: draft.groupId }, draft),
+                told,
+                log: io.log,
+                now: () => io.now().getTime(),
+              })
+            : undefined;
+          const sweeping = gate ? setInterval(() => void gate.sweep(), options.sweepMs ?? SWEEP_MS) : undefined;
+          sweeping?.unref();
+
+          const sender = settings.sendSocket
+            ? sendServer(settings.sendSocket, {
+                senders: settings.senders,
+                groups,
+                log: io.log,
+                send: async (to, draft) => {
+                  if (!("groupId" in to) || !gate) return send(to, draft);
+                  const sent = await gate.post({ ...draft, groupId: to.groupId });
+                  if (sent.status !== 200) endTyping(`group:${to.groupId}`, true);
+                  return sent;
+                },
+              })
+            : undefined;
 
           return {
             async stop() {
               stopped = true;
               wake?.();
+              clearInterval(sweeping);
+              await gate?.idle();
               for (const key of [...typing.keys()]) endTyping(key, false);
               await sender?.close();
               await chain;
@@ -482,6 +613,29 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
 }
 
 /**
+ * One `send` to signal-cli. A group's send has a result per member; it failed
+ * only when no one took it (natsumi ADR F07).
+ */
+async function sendVia(call: (method: string, params: Raw) => Promise<unknown>, to: { recipient: string } | { groupId: string }, draft: Omit<Draft, "groupId">): Promise<Sent & { timestamp?: number }> {
+  try {
+    const result = await call("send", {
+      ...("groupId" in to ? { groupId: to.groupId } : { recipient: [to.recipient] }),
+      ...(draft.text !== undefined ? { message: draft.text } : {}),
+      ...(draft.attachments.length > 0 ? { attachments: draft.attachments } : {}),
+      ...(draft.quote ? { quoteTimestamp: draft.quote.timestamp, quoteAuthor: draft.quote.author } : {}),
+    });
+    const results = isObject(result) && Array.isArray(result.results) ? (result.results as Raw[]) : [];
+    const failed = "recipient" in to ? results.find((item) => item.type !== "SUCCESS") : results.length > 0 && results.every((item) => item.type !== "SUCCESS") ? results[0] : undefined;
+    if (failed) return { status: 502, body: { error: `Signal did not take it (${String(failed.type)})` } };
+    const timestamp = isObject(result) ? num(result.timestamp) : undefined;
+    return { status: 200, body: { timestamp }, ...(timestamp !== undefined ? { timestamp } : {}) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "error";
+    return { status: error instanceof RpcError && message.includes("not connected") ? 503 : 502, body: { error: message } };
+  }
+}
+
+/**
  * `POST /v1/send` on a Unix socket: the text and files of a form
  * (multipart/form-data or urlencoded) sent to one of the allowed senders or
  * groups. Fields: `text`, `to` (a sender) or `group` (a group's name; with
@@ -493,14 +647,11 @@ function sendServer(
   options: {
     senders: readonly string[];
     groups: ReadonlyMap<string, string>;
-    call: (method: string, params: Raw) => Promise<unknown>;
     log: (line: string) => void;
-    posted: (group: { id: string; name: string }, timestamp: number, text: string | undefined, files: number) => void;
-    /** A direct message went to this sender. */
-    sent: (to: string) => void;
+    send: (to: { recipient: string } | { groupId: string }, draft: Omit<Draft, "groupId">) => Promise<Sent>;
   },
 ) {
-  const { senders, groups, call, log } = options;
+  const { senders, groups, log } = options;
   const answer = (response: http.ServerResponse, status: number, body: Raw) => {
     log(`send status=${status}`);
     response.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
@@ -541,25 +692,9 @@ function sendServer(
     const attachments = await Promise.all(
       files.map(async (file) => `data:${file.type || "application/octet-stream"};filename=${file.name.replace(/[;,]/g, "_")};base64,${Buffer.from(await file.arrayBuffer()).toString("base64")}`),
     );
-    try {
-      const result = await call("send", {
-        ...(groupId !== undefined ? { groupId } : { recipient: [to] }),
-        ...(text !== undefined ? { message: text } : {}),
-        ...(attachments.length > 0 ? { attachments } : {}),
-        ...(quote ? { quoteTimestamp: quote.timestamp, quoteAuthor: quote.author } : {}),
-      });
-      const results = isObject(result) && Array.isArray(result.results) ? (result.results as Raw[]) : [];
-      // A group's send has a result per member; it failed only when no one took it (natsumi ADR F07).
-      const failed = groupId === undefined ? results.find((item) => item.type !== "SUCCESS") : results.length > 0 && results.every((item) => item.type !== "SUCCESS") ? results[0] : undefined;
-      if (failed) return answer(response, 502, { error: `Signal did not take it (${String(failed.type)})` });
-      const timestamp = isObject(result) ? num(result.timestamp) : undefined;
-      if (groupId !== undefined && timestamp !== undefined) options.posted({ id: groupId, name: groupName as string }, timestamp, text, files.length);
-      if (groupId === undefined) options.sent(to as string);
-      return answer(response, 200, { timestamp });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "error";
-      return answer(response, error instanceof RpcError && message.includes("not connected") ? 503 : 502, { error: message });
-    }
+    const draft = { ...(text !== undefined ? { text } : {}), attachments, ...(quote ? { quote: quote as { timestamp: number; author: string } } : {}) };
+    const sent = await options.send(groupId !== undefined ? { groupId } : { recipient: to as string }, draft);
+    return answer(response, sent.status, sent.body);
   });
   server.on("error", (error: NodeJS.ErrnoException) => log(`cannot serve ${path} (${error.code ?? error.name})`));
   rmSync(path, { force: true });

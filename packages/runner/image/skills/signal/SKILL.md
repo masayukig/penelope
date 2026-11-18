@@ -40,8 +40,14 @@ printf '%s' '<text>' | curl -sS --fail-with-body -F 'text=<-' [-F 'to=+81…' | 
 - It answers `{"timestamp": …}`, Signal's time of what you sent, which a reaction or a quote points back at.
 - `403`: `to` is not one of the allowed senders, or `group` not one of the groups. `400`: neither text nor a file, or both `to`
   and `group`. `502`: signal-cli or Signal refused it. `503`: signal-cli is not connected just now; try again in a while.
-- What you send to a group is read by everyone in it at once, and nothing checks it before it goes. Keep your owner's private
-  matters out of it.
+- What you send to a group is read by everyone in it at once. Keep your owner's private matters out of it. Where the
+  deployment checks group posts (its connector says so), a post may not go at once:
+  - `202 {"held": "<id>", "reason": …}`: held for your owner to approve on Signal. Nothing went yet; do not send it again.
+    When they decide, an event of `type: held` comes in the group's stream: `held.result` is `sent`, `declined`,
+    `expired` (not decided in time) or `failed`.
+  - `422 {"issues": [...], "returns_left": n}`: the judge sent it back (the issues are what it flagged: promise-for-owner,
+    hinting-at-secret, false-account, fabricated-consent, private-matter). Rewrite it and send again, or leave it.
+  - Your direct messages to the allowed senders are never held.
 - While you work on a message that came at once, its conversation shows you typing, until you send there or a few minutes
   pass. Sending stops it, so a short "looking into it" message also ends it.
 - Signal's text has no markup. Write plain text.
