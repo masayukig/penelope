@@ -16,10 +16,10 @@
 // her typing: the receivers cannot see the turn, so it lasts until she sends
 // there or `typing_seconds` pass.
 //
-// signal-cli acknowledges a message to Signal's server as soon as it has it,
-// so there is nothing to tell it back: an event the intake does not take is
-// sent again here until it is, and a read receipt goes to the sender once it
-// is.
+// signal-cli takes no answer back for a `receive` notification, and its
+// documentation gives no way to have one pushed again: an event the intake
+// does not take is sent again here until it is (for 30 minutes at most), and a
+// read receipt goes to the sender once it is.
 import { chmodSync, rmSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -35,6 +35,8 @@ const MAX_FILE_BYTES = 60 * MIB;
 const MAX_SEND_BYTES = 64 * MIB;
 const NUMBER = /^\+[1-9][0-9]{6,14}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** How long an event the intake keeps refusing is handed over again before it is dropped. */
+const REDELIVER_MS = 30 * 60 * 1000;
 const GROUP_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 /** The names the approvals give the groups the owner let in (`g-` and 8 hex digits). */
 const ASKED_NAME = /^g-[0-9a-f]{8}$/;
@@ -103,7 +105,7 @@ export function fold(text: string): string {
 export function eventOf(
   envelope: unknown,
   audience: Audience,
-): { event: ConnectionEvent & { payload: SignalPayload }; attachments: Attachment[]; groupId?: string } | undefined {
+): { event: ConnectionEvent & { payload: SignalPayload }; attachments: Attachment[]; groupId?: string; sender?: string } | undefined {
   if (!isObject(envelope) || !isObject(envelope.dataMessage)) return undefined;
   const message = envelope.dataMessage;
   const number = str(envelope.sourceNumber);
@@ -119,6 +121,8 @@ export function eventOf(
     return undefined;
   }
   if (!number && !uuid) return undefined;
+  /** In a direct conversation, the `senders` entry that let it in: the address to answer and to show typing to. */
+  const sender = group ? undefined : number && audience.senders.has(number) ? number : uuid!;
   const timestamp = num(message.timestamp) ?? num(envelope.timestamp);
   if (timestamp === undefined) return undefined;
 
@@ -144,7 +148,7 @@ export function eventOf(
         payload: { type: "reaction", from, ...inGroup, timestamp, reaction: { emoji, target_timestamp: target, removed } },
       },
       attachments: [],
-      ...(group ? { groupId: group.id } : {}),
+      ...(group ? { groupId: group.id } : { sender }),
     };
   }
 
@@ -189,7 +193,7 @@ export function eventOf(
       },
     },
     attachments,
-    ...(group ? { groupId: group.id } : {}),
+    ...(group ? { groupId: group.id } : { sender }),
   };
 }
 
@@ -364,7 +368,8 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
           };
           let stopped = false;
           let current: net.Socket | undefined;
-          let wake: (() => void) | undefined;
+          /** The sleeps in progress (a redelivery's and a reconnection's can overlap); stop() wakes them all. */
+          const wakers = new Set<() => void>();
           let nextId = 0;
           const pending = new Map<number, { method: string; resolve: (result: unknown) => void; reject: (error: Error) => void }>();
           /** The notifications in hand, one after another. */
@@ -375,10 +380,10 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
               const timer = setTimeout(done, ms);
               function done() {
                 clearTimeout(timer);
-                wake = undefined;
+                wakers.delete(done);
                 resolve();
               }
-              wake = done;
+              wakers.add(done);
             });
 
           const call = (method: string, params: Raw) =>
@@ -433,17 +438,26 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
                 io.log(`cannot fetch a file (${error instanceof Error ? error.message : "error"})`);
               }
             }
-            // signal-cli has already told Signal it has the message, so it is handed over until the intake takes it.
+            // signal-cli does not push it again, so it is handed over until the intake takes it, for
+            // REDELIVER_MS at most; one that comes while the plugin stops is tried once.
+            const since = io.now().getTime();
             for (let attempt = 1; !(await io.deliver([{ ...event, ...(files.length > 0 ? { files } : {}) }])); attempt++) {
               if (stopped) {
                 io.log("envelope events=1 dropped=0 taken=false (stopping)");
+                return;
+              }
+              if (io.now().getTime() - since >= REDELIVER_MS) {
+                io.log(`envelope events=1 dropped=1 taken=false (refused for ${REDELIVER_MS / 60000} minutes, ${attempt} tries)`);
                 return;
               }
               await sleep(backoffMs(attempt));
             }
             io.log(`envelope events=1 dropped=0 taken=true`);
             const sender = event.payload.from.number ?? event.payload.from.uuid!;
-            if (event.delivery === "now") startTyping(made.groupId !== undefined ? `group:${made.groupId}` : `dm:${sender}`);
+            // Keyed by the `senders` entry, as the send endpoint's `to` is, so that a reply there ends it.
+            // In a group, only a mention of the agent or a quote of hers shows typing, not every message that comes now.
+            const forHer = event.payload.mentions_me === true || event.payload.quote?.mine === true;
+            if (event.delivery === "now" && (made.groupId === undefined || forHer)) startTyping(made.groupId !== undefined ? `group:${made.groupId}` : `dm:${made.sender}`);
             if (event.payload.type === "message") {
               await call("sendReceipt", { recipient: sender, targetTimestamp: [event.payload.timestamp], type: "read" }).catch((error: unknown) =>
                 io.log(`cannot send a read receipt (${error instanceof Error ? error.message : "error"})`),
@@ -492,7 +506,7 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
                     pending.delete(message.id);
                     if (isObject(message.error)) call.reject(new RpcError(`${call.method}: signal-cli error ${String(message.error.code)}`));
                     else call.resolve(message.result);
-                  } else if (message.method === "receive" && !stopped) {
+                  } else if (message.method === "receive") {
                     chain = chain.then(() => receive(message.params)).catch((error: unknown) => io.log(`an envelope could not be handled (${error instanceof Error ? error.message : "error"})`));
                   }
                 }
@@ -554,6 +568,7 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
             chain = chain.then(async () => {
               for (let attempt = 1; !(await io.deliver([event])); attempt++) {
                 if (stopped) return io.log("held result events=1 taken=false (stopping)");
+                if (io.now().getTime() - at >= REDELIVER_MS) return io.log(`held result events=1 dropped=1 taken=false (refused for ${REDELIVER_MS / 60000} minutes)`);
                 await sleep(backoffMs(attempt));
               }
             });
@@ -597,7 +612,7 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
           return {
             async stop() {
               stopped = true;
-              wake?.();
+              for (const wake of wakers) wake();
               clearInterval(sweeping);
               await gate?.idle();
               for (const key of [...typing.keys()]) endTyping(key, false);
@@ -605,6 +620,8 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
               await chain;
               current?.end();
               await running;
+              // What came while the connection was closing.
+              await chain;
             },
           };
         },
@@ -612,6 +629,25 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
     },
   };
 }
+
+/** By the name's extension, for a file sent with no type: curl's `-F file=@…` knows png, jpg and gif, and sends a WebP or an MP4 as octet-stream, which Signal shows as a file, not as media. */
+const TYPES: Record<string, string> = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+  mp4: "video/mp4", mov: "video/quicktime", m4a: "audio/mp4", ogg: "audio/ogg", pdf: "application/pdf",
+};
+/** The form's type as `type/subtype` (its parameters dropped), or by the extension, or octet-stream. */
+const typeOf = (file: File) => {
+  const given = file.type.split(";")[0]!.trim().toLowerCase();
+  if (/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/.test(given) && given !== "application/octet-stream") return given;
+  return TYPES[/\.([^.]+)$/.exec(file.name)?.[1]?.toLowerCase() ?? ""] ?? "application/octet-stream";
+};
+/**
+ * A file as signal-cli's data URI. signal-cli URL-decodes the parameter values
+ * (DataURI.java), so the name is percent-encoded: a `%` or a `+` in it would
+ * otherwise be read as an escape or a space.
+ */
+const dataUri = async (file: File) =>
+  `data:${typeOf(file)};filename=${encodeURIComponent(file.name)};base64,${Buffer.from(await file.arrayBuffer()).toString("base64")}`;
 
 /**
  * One `send` to signal-cli. A group's send has a result per member; it failed
@@ -635,14 +671,6 @@ async function sendVia(call: (method: string, params: Raw) => Promise<unknown>, 
     return { status: error instanceof RpcError && message.includes("not connected") ? 503 : 502, body: { error: message } };
   }
 }
-
-/** By the name's extension, for a file sent with no type: curl's `-F file=@…` knows png, jpg and gif, and sends a WebP or an MP4 as octet-stream, which Signal shows as a file, not as media. */
-const TYPES: Record<string, string> = {
-  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
-  mp4: "video/mp4", mov: "video/quicktime", m4a: "audio/mp4", ogg: "audio/ogg", pdf: "application/pdf",
-};
-const typeOf = (file: File) =>
-  file.type && file.type !== "application/octet-stream" ? file.type : TYPES[/\.([^.]+)$/.exec(file.name)?.[1]?.toLowerCase() ?? ""] ?? "application/octet-stream";
 
 /**
  * `POST /v1/send` on a Unix socket: the text and files of a form
@@ -703,9 +731,7 @@ function sendServer(
     if (quote && (!Number.isSafeInteger(quote.timestamp) || quote.timestamp <= 0 || typeof quote.author !== "string" || !(NUMBER.test(quote.author) || UUID.test(quote.author)))) {
       return answer(response, 400, { error: "quote_timestamp must be a Signal timestamp and quote_author a number in E.164 or a UUID" });
     }
-    const attachments = await Promise.all(
-      files.map(async (file) => `data:${typeOf(file)};filename=${file.name.replace(/[;,]/g, "_")};base64,${Buffer.from(await file.arrayBuffer()).toString("base64")}`),
-    );
+    const attachments = await Promise.all(files.map(dataUri));
     const draft = { ...(text !== undefined ? { text } : {}), attachments, ...(quote ? { quote: quote as { timestamp: number; author: string } } : {}) };
     const sent = await options.send(groupId !== undefined ? { groupId } : { recipient: to as string }, draft, ownerRequest !== null);
     return answer(response, sent.status, sent.body);

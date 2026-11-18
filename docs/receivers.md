@@ -573,15 +573,16 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 | `state_file` | なし | 回した投稿と、聞いたグループの答えを持つ JSON のファイル（絶対パス）。省けばメモリだけで、立ち上がり直すと消える |
 | `time_zone` | `UTC` | 本人と判定に見せる時刻のタイムゾーン（IANA） |
 
-- signal-cli の daemon は `--receive-mode on-connection` で動かす。受けるのは receivers がつないでいる間だけになり、切れている間の発言は Signal のサーバーに残る。
-- signal-cli の socket は、signal-cli と receivers のコンテナだけが mount する volume に置く。sandbox は mount しない（[ADR-0014](adr/0014-sandbox-loopback-left-open-and-pod-ports-on-unix-sockets.md)）。signal-cli の JSON-RPC には確かめが無く、届けば番号の全部（受信・送信・端末の追加）を使えるためである。同じ理由で `--http`・`--tcp` では待ち受けない（loopback から sandbox が届く）。
+- signal-cli の daemon は `--receive-mode on-connection` で動かす。receivers がつないでいる間だけ受け、最後の接続が閉じると受けるのをやめる。receivers との間が切れている間の発言は Signal のサーバーに残り、つなぎ直したときに受ける。取りこぼしうるのは、signal-cli が受けて `receive` の知らせを押し出した後に、取り込み口が受けなかった出来事である（下の「接続」）。
+- signal-cli の socket は、signal-cli と receivers のコンテナだけが mount する volume に置く。sandbox は mount しない（[ADR-0014](adr/0014-sandbox-loopback-left-open-and-pod-ports-on-unix-sockets.md)）。signal-cli の文書は JSON-RPC の口に認証を書いておらず、届けば番号の操作（送信・グループの操作・端末の追加など）を呼べるためである。同じ理由で `--http`・`--tcp` では待ち受けない（loopback から sandbox が届く）。
 
 ### 接続
 
 - `socket` へつなぎ、1 行 1 つの JSON-RPC を話す。daemon が受けた発言は `receive` の知らせ（`params.envelope`）で届く。
 - 切れた・つなげないときは、待ってからつなぎ直す。待ちは Slack の接続と同じく 1 秒から倍にし、5 分を上限にする。つながったら 1 秒に戻す。
-- signal-cli は、受けたものを自分で Signal のサーバーへ受けたと伝える。送り直しは来ないので、取り込み口が受けなかった出来事は、受けるまで同じ待ちで送り直す。止めるときに送れていなければ、ログに書いて捨てる。
-- 取り込み口が発言を受けたら、相手に既読（`sendReceipt`、`type: read`）を送る。signal-cli は配達の確認しか自分で返さないためである。
+- signal-cli の `receive` の知らせには、受けたと返す手順が無く、文書は送り直す仕組みを書いていない。取り込み口が受けなかった出来事は、受けるまで同じ待ちで送り直す。30 分送り直しても受けなければ、ログに書いて捨てる（既読も返さない）。
+- 止めている間に届いた知らせも、1 回は取り込み口へ送る。止めるときに送れていなければ、ログに書いて捨てる。
+- 取り込み口が発言を受けたら、相手に既読（`sendReceipt`、`type: read`）を送る。signal-cli は既定では配達の確認しか返さないためである。
 
 ### 出来事にするもの
 
@@ -635,11 +636,13 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 
 ### 入力中
 
-- `now` の発言（1 対 1 の発言と、グループの自分宛ての発言）を取り込み口が受けたら、その会話に入力中を出す（JSON-RPC `sendTyping`、1 対 1 は `recipient: [<相手>]`、グループは `groupId: [<ID>]`）。natsumi が、本人の 1 対 1（OwnerTyping）と、グループの自分宛ての attention（fork の ADR F07）で出していたものに当たる。
+- 取り込み口が受けた `now` の発言のうち、1 対 1 の発言と、グループでエージェントへのメンションかエージェントの発言の引用を含むものに、その会話の入力中を出す（JSON-RPC `sendTyping`、1 対 1 は `recipient: [<相手>]`、グループは `groupId: [<ID>]`）。グループで名前（`names`）を含むだけの発言や、自分の投稿に続く発言は `now` で届くが、入力中は出さない（返事をするとは限らないため）。natsumi が、本人の 1 対 1（OwnerTyping）と、グループの自分宛ての attention（fork の ADR F07）で出していたものに当たる。
+- 1 対 1 の `<相手>` は、その発言を通した `senders` の書き方（番号か UUID）にする。送り口の `to` も `senders` の書き方なので、`senders` を UUID で書いても、返事で入力中が止まる。
 - Signal のアプリは最後の入力中から 15 秒ほどで表示を消すので、10 秒ごとに送り直す。
 - 止めるのは、送り口がその会話に送れたとき（届いた発言で表示は消えるので、止める知らせは送らない）と、`typing_seconds` が過ぎたとき（`stop: true` を送る）。receivers の止まるときは送り直しをやめるだけにする。
 - receivers にはターンが見えない。natsumi はターンが終わったら止めていたが、ここでは**返事を送らずに終わったターンでも、`typing_seconds` まで入力中が出続ける**。途中の発言（「確かめています」など）を送ると、その後も作業が続いていても表示は消える。ターンの終わりを receivers に知らせる道ができたら、そこで止める（未決）。
 - `sendTyping` が断られたら `cannot send typing (…)` をログに書くだけで、発言の扱いは変えない。
+- signal-cli の設定で入力中の表示を切っている番号では、`sendTyping` は何も送らずに成功を返す（signal-cli の master、AsamK/signal-cli#2173）。
 
 ### 送り口
 
@@ -659,7 +662,9 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 | `502` | signal-cli が断った、Signal が受けなかった（1 対 1 は `results` に `SUCCESS` でないものがある、グループはメンバーの誰も `SUCCESS` でない）、本人に回すはずが本人に送れなかった |
 | `503` | signal-cli につながっていない |
 
-- 本文は末尾の空白と改行を除いて `send` の `message` に、ファイルは `data:<種類>;filename=<名前>;base64,…` の形で `attachments` に入れる。`<種類>` は form のファイルの `Content-Type`。それが無いか `application/octet-stream` なら、名前の拡張子（`png`・`jpg`・`jpeg`・`gif`・`webp`・`mp4`・`mov`・`m4a`・`ogg`・`pdf`）から決め、どれでもなければ `application/octet-stream` のまま。curl の `-F file=@x.webp` は WebP や MP4 を `application/octet-stream` で送り、そのまま渡すと Signal は画像や動画でなくファイルとして見せるためである。グループは `groupId`、引用は `quoteTimestamp`・`quoteAuthor` で渡す。
+- 本文は末尾の空白と改行を除いて `send` の `message` に、ファイルは `data:<種類>;filename=<名前>;base64,…` の形で `attachments` に入れる。グループは `groupId`、引用は `quoteTimestamp`・`quoteAuthor` で渡す。
+  - `<名前>` はパーセントエンコードする（`encodeURIComponent`）。signal-cli は data URI の引数の値を URL デコードするので、そのままだと `%` は壊れ、`+` は空白になる。
+  - `<種類>` は form のファイルの `Content-Type` の `type/subtype`（`;` から後の引数は落とす）。それが無いか `application/octet-stream` なら、名前の拡張子（`png`・`jpg`・`jpeg`・`gif`・`webp`・`mp4`・`mov`・`m4a`・`ogg`・`pdf`）から決め、どれでもなければ `application/octet-stream` のまま。curl の `-F file=@x.webp` は WebP や MP4 を `application/octet-stream` で送り、そのまま渡すと Signal は画像や動画でなくファイルとして見せるためである。
 - グループに送れたら、その発言を `own: true` の出来事（`batch`）としてそのグループの `stream` に入れる。Signal は自分の送った発言を受信として返さないので、そうしないとグループの記録にエージェントの発言が残らない（Slack のエージェント自身の発言と同じ扱い）。1 対 1 の返事は入れない。
 - 応答の body は `{error}` の JSON。ログは `send status=<番号>` だけで、本文と宛先は書かない。
 - 使い方は sandbox の image の skill `signal` にある。
@@ -696,7 +701,7 @@ Signal の 1 対 1 の会話で許した相手の、また許したグループ�
 | 行 | いつ |
 | --- | --- |
 | `connected`・`connection error (<code>)`・`connecting again in <秒>s` | つないだ・切れた |
-| `envelope events=<数> dropped=<数>`（受けたら `taken=true`） | envelope 1 つごと |
+| `envelope events=<数> dropped=<数>`（受けたら `taken=true`、止めるときに送れなければ `taken=false (stopping)`、30 分受けられずに捨てたら `dropped=1 taken=false (refused for 30 minutes, <回数> tries)`） | envelope 1 つごと |
 | `cannot fetch a file (…)`・`cannot send a read receipt (…)`・`cannot send typing (…)` | JSON-RPC が断られた |
 | `send status=<番号>` | 送り口の要求 1 つごと |
 | `envelope events=0 dropped=0 answer=1` | 本人の承認・問い合わせへの答え |
