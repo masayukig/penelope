@@ -10,9 +10,15 @@
 import type { Api, AssistantMessage, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ModelRouteRequest, ModelRuntime } from "@earendil-works/pi-coding-agent";
 
-
 export const ROUTER_PROVIDER = "router";
 export const ROUTER_MODEL = "auto";
+
+/** The note that asks the model to go on after a failed request was retried on another model. */
+export const MODEL_RETRY = {
+  customType: "penelope.model_retry",
+  content: "(The model request failed and is being retried on another model. Go on with the turn.)",
+  display: false,
+};
 
 export interface RouterConfig {
   /** In order of preference; the first is the one whose usage is read. At least two. */
@@ -30,12 +36,32 @@ export interface RouterConfig {
 const THINKING_LEVELS: ModelThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
 /**
- * Errors that say a model cannot be used now: its subscription has no room, or
- * its credential is refused or missing (a relay without a login answers "no
- * access token"). A retry on the same model would fail again.
+ * Errors that say a model cannot be used now: its subscription or quota is used
+ * up (the provider limits pi-ai does not retry, NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN
+ * in its utils/retry.js), or its credential is refused or missing (a relay without
+ * a login answers "no access token"; the Grok sidecar hands a fake token to force
+ * a 401 here). A retry on the same model would fail again. A 429, "too many
+ * requests" or "rate limit" alone is a throttle that Pi retries on the same
+ * model, and does not move the router.
  */
-const UNUSABLE =
-  /usage.?limit|(?<![a-z0-9])(?:429|403|401)(?![a-z0-9])|rate.?limit|too many requests|forbidden|unauthori[sz]ed|authentication|no access token|access token has expired/i;
+const UNUSABLE = new RegExp(
+  [
+    "usage.?limit",
+    "available balance",
+    "insufficient_quota",
+    "out of budget",
+    "quota exceeded",
+    "billing",
+    '"code"\\s*:\\s*"?1308(?![0-9])',
+    "(?<![a-z0-9])(?:403|401)(?![a-z0-9])",
+    "forbidden",
+    "unauthori[sz]ed",
+    "authentication",
+    "no access token",
+    "access token has expired",
+  ].join("|"),
+  "i",
+);
 
 /** Whether to be off the first model after a reading; an unknown reading keeps where it is. */
 export function decide(onFallback: boolean, used: number | undefined, high: number, low: number): boolean {

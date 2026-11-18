@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { AgentId } from "@penelope/contract";
 import { DEFAULT_MAX_CHARS, SEGMENT } from "@penelope/slack";
 
-import type { RouterConfig } from "./router.ts";
+import { ROUTER_MODEL, ROUTER_PROVIDER, type RouterConfig } from "./router.ts";
 
 /** Where the sandbox's image carries the skills of the repository (Dockerfile, docs/pod.md). */
 export const IMAGE_SKILLS_DIR = "/opt/penelope/skills";
@@ -104,6 +104,10 @@ function readRouter(value: string, problems: string[]): RouterConfig | undefined
     problems.push("PENELOPE_MODEL_ROUTER must be JSON");
     return undefined;
   }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    problems.push("PENELOPE_MODEL_ROUTER must be a JSON object");
+    return undefined;
+  }
   // `models` in order, or the older `primary` and `fallback` as a list of two.
   const names = raw.models === undefined ? [raw.primary, raw.fallback] : Array.isArray(raw.models) ? raw.models : [];
   const models = names.map(modelName);
@@ -160,6 +164,9 @@ export function readConfig(env: Env): Config {
     }
   }
   const router = env.PENELOPE_MODEL_ROUTER ? readRouter(env.PENELOPE_MODEL_ROUTER, problems) : undefined;
+  const routed = model?.provider === ROUTER_PROVIDER && model.id === ROUTER_MODEL;
+  if (routed && !env.PENELOPE_MODEL_ROUTER) problems.push("PENELOPE_MODEL=router/auto needs PENELOPE_MODEL_ROUTER");
+  if (!routed && env.PENELOPE_MODEL_ROUTER) problems.push("PENELOPE_MODEL_ROUTER needs PENELOPE_MODEL=router/auto");
   const promptFileMaxBytes = positiveInteger(env, "PENELOPE_PROMPT_FILE_MAX_BYTES", 65536, problems);
   const imageMaxBytes = positiveInteger(env, "PENELOPE_IMAGE_MAX_BYTES", 5 * 1024 * 1024, problems);
   const pollWaitSeconds = positiveInteger(env, "PENELOPE_POLL_WAIT_SECONDS", 30, problems);

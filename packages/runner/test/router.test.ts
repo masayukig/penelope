@@ -130,6 +130,19 @@ test("only the primary's limit errors fail over", () => {
   assert.equal(r.failedOver(failure("anthropic", "claude", "429 too many requests")), false);
   assert.equal(r.failedOver(failure("openai", "gpt", "invalid request")), false);
   assert.equal(r.failedOver(failure("openai", "gpt", "subscription_sharing_usage_limit_exceeded")), true);
+  assert.equal(r.failedOver(failure("openai", "gpt", "insufficient_quota")), true);
+});
+
+test("a throttle is left to Pi's own retry; a refused credential moves on", () => {
+  const { r } = router(() => 10, CHAIN);
+  // pi-ai's utils/retry.js retries these on the same model.
+  for (const message of ["429 Too Many Requests", "rate limit reached, try again in 2s", "too many requests"]) {
+    assert.equal(r.failedOver(failure("openai", "gpt", message)), false, message);
+  }
+  assert.equal(r.tier, 1); // untouched: still the first decision
+  // The Grok sidecar hands a fake token so that Grok answers 401 and the router moves past it.
+  assert.equal(r.failedOver(failure("xai", "grok", "401 Unauthorized: no access token")), true);
+  assert.equal(r.tier, 2);
 });
 
 test("PENELOPE_MODEL_ROUTER is read as JSON, with defaults", () => {
@@ -143,13 +156,18 @@ test("PENELOPE_MODEL_ROUTER is read as JSON, with defaults", () => {
   };
   assert.equal(readConfig(env).router, undefined);
   const value = JSON.stringify({ primary: "openai/gpt", fallback: "anthropic/claude", prometheus: "http://prometheus:9090", query: "used" });
-  assert.deepEqual(readConfig({ ...env, PENELOPE_MODEL_ROUTER: value }).router, CONFIG);
-  assert.throws(() => readConfig({ ...env, PENELOPE_MODEL_ROUTER: '{"primary":"openai/gpt"}' }), ConfigError);
+  const routed = { ...env, PENELOPE_MODEL: "router/auto" };
+  assert.deepEqual(readConfig({ ...routed, PENELOPE_MODEL_ROUTER: value }).router, CONFIG);
+  assert.throws(() => readConfig({ ...routed, PENELOPE_MODEL_ROUTER: '{"primary":"openai/gpt"}' }), ConfigError);
   const chain = JSON.stringify({ models: ["openai/gpt", "xai/grok", "anthropic/claude"], prometheus: "http://prometheus:9090", query: "used" });
-  assert.deepEqual(readConfig({ ...env, PENELOPE_MODEL_ROUTER: chain }).router, CHAIN);
+  assert.deepEqual(readConfig({ ...routed, PENELOPE_MODEL_ROUTER: chain }).router, CHAIN);
   const one = JSON.stringify({ models: ["openai/gpt"], prometheus: "http://prometheus:9090", query: "used" });
-  assert.throws(() => readConfig({ ...env, PENELOPE_MODEL_ROUTER: one }), ConfigError);
-  assert.throws(() => readConfig({ ...env, PENELOPE_MODEL_ROUTER: "openai/gpt" }), ConfigError);
+  assert.throws(() => readConfig({ ...routed, PENELOPE_MODEL_ROUTER: one }), ConfigError);
+  assert.throws(() => readConfig({ ...routed, PENELOPE_MODEL_ROUTER: "openai/gpt" }), ConfigError);
+  for (const json of ["null", "[]", "1"]) assert.throws(() => readConfig({ ...routed, PENELOPE_MODEL_ROUTER: json }), ConfigError, json);
+  // One without the other is refused at start, not found out at the first request.
+  assert.throws(() => readConfig(routed), ConfigError);
+  assert.throws(() => readConfig({ ...env, PENELOPE_MODEL: "openai/gpt", PENELOPE_MODEL_ROUTER: value }), ConfigError);
 });
 
 test("a turn that hits the primary's limit is logged and goes on once on the fallback", async () => {
@@ -211,7 +229,7 @@ test("in a chain, the first model's limit goes to the second, and the last model
   assert.equal(await routed(r, request("user")), "openai/gpt");
   assert.equal(r.failedOver(failure("openai", "gpt", "subscription_sharing_usage_limit_exceeded")), true);
   assert.equal(r.tier, 1);
-  assert.equal(r.failedOver(failure("xai", "grok", "429 Too Many Requests")), true);
+  assert.equal(r.failedOver(failure("xai", "grok", "403 Forbidden")), true);
   assert.equal(r.tier, 2);
   assert.equal(r.failedOver(failure("anthropic", "claude", "429 rate limit")), false);
   assert.equal(r.tier, 2);
@@ -232,4 +250,25 @@ test("a turn walks down the chain while each model refuses, and ends when one an
     [MODEL, BACKUP, SPARE],
   );
   assert.equal(logs.filter((line) => line.includes("tried once more on another model")).length, 2);
+});
+
+test("an event that comes while the turn goes on on the next model is run in the same turn, not on the failing one", async () => {
+  const { fake, start, calls } = await world({ routerUsed: 10, turnFold: false });
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await start(async (call) => {
+    if (call.model === MODEL) return { error: "subscription_sharing_usage_limit_exceeded" };
+    if (!call.userTexts.some((text) => text.includes("and this"))) await held;
+    return { text: "from the fallback" };
+  });
+  fake.push(ui(1, "hello"));
+  await until(() => calls.some((c) => c.model === BACKUP));
+  fake.push(ui(2, "and this"));
+  await until(() => fake.polledAfter(2));
+  release();
+  await until(() => acked(fake).includes(2));
+  // Guards against: the event acked but never shown to a model, or sent to the failing primary.
+  const after = calls.filter((c) => c.userTexts.some((text) => text.includes("and this")));
+  assert.ok(after.length > 0);
+  assert.ok(after.every((c) => c.model === BACKUP));
 });

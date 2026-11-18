@@ -35,5 +35,11 @@ PENELOPE_MODEL_ROUTER={"models":["openai/gpt-6.1-sol","xai/grok-4.7","anthropic/
 
 並べたモデルのどれかが usage limit で答えると、Pi はそれを再試行しない（`subscription_sharing_usage_limit_exceeded` などは再試行しない誤りに入っている）。`prompt()` は throw せずに終わるので、runner は:
 
-- モデルが誤りで終わったターンを、必ず stderr に記録する（router の有無によらない）。
-- router が「そのモデルは今使えない」と判断したら（誤りの文に `usage limit`・`429`・`rate limit`・`too many requests`、または `401`・`403`・`unauthorized`・`forbidden`・`authentication`・中継の `no access token`）、次のモデルへ移って同じターンを続けさせる（`penelope.model_retry` の custom message）。続けた先も「使えない」なら、さらに次へ。最後のモデルが誤りなら、記録して終える。
+- モデルが誤りで終わった要求を、必ず stderr に記録する（router の有無によらない）。
+- router が「そのモデルは今使えない」と判断したら、次のモデルへ移って同じターンを続けさせる（`penelope.model_retry` の custom message）。続けた先も「使えない」なら、さらに次へ。最後のモデルが誤りなら、記録して終える。これはターンの途中で、Pi の待ち行列に残っている steer・follow-up より先に行う。続けている間に来た event も、同じターンで（移った先のモデルへ）送る。runner が止まるところなら続けない。サブエージェントのターンも同じに続ける。
+- 「使えない」と判断する誤りの文は、pi-ai が再試行しない枠・残高の誤り（`utils/retry.js` の `NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN`: `usage limit`・`available balance`・`insufficient_quota`・`out of budget`・`quota exceeded`・`billing`・Z.ai の `"code": 1308`）と、鍵を断られた・無い誤り（`401`・`403`・`unauthorized`・`forbidden`・`authentication`・中継の `no access token`・`access token has expired`）。Grok の sidecar は、ログインが無いときにわざと偽の token を渡して 401 を返させ、ここで次へ移らせる。
+- `429`・`too many requests`・`rate limit` だけの誤りは一時的な絞りで、Pi が同じモデルで再試行する（`retry` の要求は答えたモデルに留まる）ので、移らない。
+
+## 設定の誤り
+
+次のときは runner が起動しない: `PENELOPE_MODEL_ROUTER` が JSON のオブジェクトでない・欄が足りない・形が違う、`PENELOPE_MODEL=router/auto` なのに `PENELOPE_MODEL_ROUTER` が無い、`PENELOPE_MODEL_ROUTER` があるのに `PENELOPE_MODEL` が `router/auto` でない。

@@ -56,6 +56,6 @@ printf '%s' '<text>' | curl -sS --fail-with-body -F 'text=<-' [-F 'to=+81…' | 
     until your owner gives 👍. Set it only when your owner asked for that post in the DM, not for posts you decided on
     yourself. Without approvals in the deployment it is refused (`400`).
   - Your direct messages to the allowed senders are never held.
-- While you work on a message that came at once, its conversation shows you typing, until you send there or a few minutes
-  pass. Sending stops it, so a short "looking into it" message also ends it.
+- While you work on a direct message, or a group message that mentions you or quotes you, its conversation shows you typing,
+  until you send there or a few minutes pass. Sending stops it, so a short "looking into it" message also ends it.
 - Signal's text has no markup. Write plain text.

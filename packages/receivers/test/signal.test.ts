@@ -248,7 +248,7 @@ describe("the Signal plugin against signal-cli", () => {
       assert.deepEqual(sent, { status: 200, body: { timestamp: 1794819700000 } });
       assert.deepEqual(lastCall(cli), {
         method: "send",
-        params: { account: AGENT, recipient: [OWNER], message: "here it is", attachments: ["data:image/png;filename=drawn_1.png;base64,BAU="] },
+        params: { account: AGENT, recipient: [OWNER], message: "here it is", attachments: ["data:image/png;filename=drawn%3B1.png;base64,BAU="] },
       });
       // curl sends a WebP as octet-stream; a file with no type or an unknown extension stays octet-stream.
       const typed = new FormData();
@@ -261,6 +261,16 @@ describe("the Signal plugin against signal-cli", () => {
         "data:video/mp4;filename=clip.mp4;base64,BA==",
         "data:application/octet-stream;filename=notes.bin;base64,BA==",
       ]);
+      // signal-cli URL-decodes the name: a % or a + must come through as itself. A type's parameters are dropped.
+      const named = new FormData();
+      named.append("file", new Blob([new Uint8Array([4])], { type: "application/pdf" }), "100%.pdf");
+      named.append("file", new Blob([new Uint8Array([4])], { type: "image/png; x=1" }), "a+b.png");
+      assert.equal((await post(sendSocket, named)).status, 200);
+      assert.deepEqual(cli.calls.at(-1)!.params.attachments, ["data:application/pdf;filename=100%25.pdf;base64,BA==", "data:image/png;filename=a%2Bb.png;base64,BA=="]);
+      assert.deepEqual(
+        (cli.calls.at(-1)!.params.attachments as string[]).map((uri) => decodeURIComponent(/filename=([^;]*)/.exec(uri)![1]!)),
+        ["100%.pdf", "a+b.png"],
+      );
 
       const stranger = new FormData();
       stranger.set("text", "hi");
@@ -327,19 +337,130 @@ describe("the Signal plugin against signal-cli", () => {
     const cli = new FakeSignalCli(join(dir, "typing.sock"));
     await cli.listen();
     const lines: string[] = [];
-    const connection = signalPlugin({ backoffMs: () => 10 }).create({ ...SETTINGS, groups: { family: GROUP }, socket: cli.path, typing_seconds: 0.05 }, env);
+    const connection = signalPlugin({ backoffMs: () => 10 }).create({ ...SETTINGS, groups: { family: GROUP }, names: ["iori"], socket: cli.path, typing_seconds: 0.05 }, env);
     const handle = connection.start({ deliver: async () => true, log: (line) => lines.push(line), now: () => new Date() });
     try {
       await until(() => cli.clients.length === 1 && lines.includes("connected"));
       cli.push(inGroup({ message: "chatting" }));
       await until(() => cli.calls.some((call) => call.method === "sendReceipt"));
       assert.ok(!cli.calls.some((call) => call.method === "sendTyping"), "a batched message shows no typing");
+      // Her name comes now, but only a mention or a quote of hers shows typing in a group.
+      cli.push(inGroup({ message: "Iori said so" }));
+      await until(() => cli.calls.filter((call) => call.method === "sendReceipt").length === 2);
+      assert.ok(!cli.calls.some((call) => call.method === "sendTyping"), "a name alone shows no typing");
       cli.push(inGroup({ message: "\uFFFC?", mentions: [{ number: AGENT, start: 0, length: 1 }] }));
       await until(() => cli.calls.some((call) => call.method === "sendTyping" && call.params.stop === true));
       assert.deepEqual(
         cli.calls.filter((call) => call.method === "sendTyping").map((call) => call.params),
         [{ account: AGENT, groupId: [GROUP] }, { account: AGENT, groupId: [GROUP], stop: true }],
       );
+    } finally {
+      await handle.stop();
+      await cli.close();
+    }
+  });
+
+  test("a direct message sent ends the typing, also to a sender written as a UUID", async () => {
+    const cli = new FakeSignalCli(join(dir, "typing-dm.sock"));
+    await cli.listen();
+    const lines: string[] = [];
+    const sendSocket = join(dir, "typing-send.sock");
+    const OWNER_UUID = "0b0e5b1c-1111-4222-8333-444455556666";
+    const connection = signalPlugin({ backoffMs: () => 10 }).create({ ...SETTINGS, senders: [OWNER_UUID], socket: cli.path, send_socket: sendSocket, typing_seconds: 0.2 }, env);
+    const handle = connection.start({ deliver: async () => true, log: (line) => lines.push(line), now: () => new Date() });
+    try {
+      await until(() => lines.includes("connected"));
+      cli.push({ ...message({ message: "hi" }), sourceUuid: OWNER_UUID });
+      await until(() => cli.calls.some((call) => call.method === "sendTyping"));
+      assert.deepEqual(cli.calls.find((call) => call.method === "sendTyping")!.params, { account: AGENT, recipient: [OWNER_UUID] });
+      const form = new FormData();
+      form.set("text", "here");
+      assert.equal((await post(sendSocket, form)).status, 200);
+      await new Promise((resolve) => setTimeout(resolve, 400)); // past typing_seconds
+      // Guards against: typing started under the number and the send's `to` (the UUID) not finding it, so it ran to the limit.
+      assert.deepEqual(
+        cli.calls.filter((call) => call.method === "sendTyping").map((call) => call.params),
+        [{ account: AGENT, recipient: [OWNER_UUID] }],
+      );
+    } finally {
+      await handle.stop();
+      await cli.close();
+    }
+  });
+});
+
+
+describe("the Signal plugin while the intake refuses or it stops", () => {
+  const dir = mkdtempSync(join(tmpdir(), "receivers-signal-"));
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  test("stop() wakes every wait in progress: a redelivery's and a reconnection's", async () => {
+    const cli = new FakeSignalCli(join(dir, "wake.sock"));
+    await cli.listen();
+    const lines: string[] = [];
+    const connection = signalPlugin({ backoffMs: () => 60_000 }).create({ ...SETTINGS, socket: cli.path }, env);
+    const handle = connection.start({ deliver: async () => false, log: (line) => lines.push(line), now: () => new Date() });
+    await until(() => lines.includes("connected"));
+    cli.push(message({ message: "hi" }));
+    await new Promise((resolve) => setTimeout(resolve, 50)); // refused once, waiting to try again
+    await cli.close();
+    await until(() => lines.some((line) => line.startsWith("connecting again")));
+    const started = Date.now();
+    await handle.stop();
+    // Guards against: one slot for the wake, the second wait overwriting the first so stop() waits it out.
+    assert.ok(Date.now() - started < 5_000, `stop() took ${Date.now() - started} ms`);
+    assert.ok(lines.includes("envelope events=1 dropped=0 taken=false (stopping)"));
+  });
+
+  test("a message that comes while it stops is still handed over once", async () => {
+    const cli = new FakeSignalCli(join(dir, "stopping.sock"));
+    await cli.listen();
+    const lines: string[] = [];
+    const delivered: ConnectionEvent[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const connection = signalPlugin({ backoffMs: () => 10 }).create({ ...SETTINGS, socket: cli.path }, env);
+    const handle = connection.start({
+      deliver: async (events) => {
+        await held;
+        delivered.push(...events);
+        return true;
+      },
+      log: (line) => lines.push(line),
+      now: () => new Date(),
+    });
+    try {
+      await until(() => lines.includes("connected"));
+      cli.push(message({ message: "first" }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const stopping = handle.stop();
+      cli.push({ ...message({ message: "second" }), dataMessage: { timestamp: 1794819600001, message: "second" } });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      release();
+      await stopping;
+      // Guards against: a receive dropped without a word because stop() had begun.
+      assert.deepEqual(delivered.map((event) => (event.payload as { text: string }).text), ["first", "second"]);
+    } finally {
+      await cli.close();
+    }
+  });
+
+  test("an event the intake keeps refusing is dropped after 30 minutes, without a receipt", async () => {
+    const cli = new FakeSignalCli(join(dir, "refused.sock"));
+    await cli.listen();
+    const lines: string[] = [];
+    let clock = 0;
+    const connection = signalPlugin({ backoffMs: () => 1 }).create({ ...SETTINGS, socket: cli.path }, env);
+    const handle = connection.start({
+      deliver: async () => false,
+      log: (line) => lines.push(line),
+      now: () => new Date((clock += 10 * 60 * 1000)), // ten minutes a look
+    });
+    try {
+      await until(() => lines.includes("connected"));
+      cli.push(message({ message: "hi" }));
+      await until(() => lines.some((line) => line.startsWith("envelope events=1 dropped=1 taken=false (refused for 30 minutes")));
+      assert.ok(!cli.calls.some((call) => call.method === "sendReceipt"));
     } finally {
       await handle.stop();
       await cli.close();

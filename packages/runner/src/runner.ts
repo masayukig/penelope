@@ -41,6 +41,7 @@ import {
   reflectionInput,
   systemPrompt,
 } from "./prompts.ts";
+import { MODEL_RETRY } from "./router.ts";
 import { SubAgents } from "./subagents.ts";
 import { backendTools, jobTools, subAgentTools } from "./tools.ts";
 import { formatEvents } from "./turn-input.ts";
@@ -61,7 +62,6 @@ export interface RunnerOptions {
 }
 
 /** The note that asks the model to go on after a failed request was retried on another model. */
-export const MODEL_RETRY = "penelope.model_retry";
 /** At most this many retries on other models in one turn (one per model after the first of the router's list). */
 const MAX_MODEL_RETRIES = 4;
 
@@ -126,6 +126,7 @@ export class Runner {
       connectors: () => this.connectors(),
       log: this.log,
       retryMs: options.retryMs ?? 1000,
+      ...(options.failedOver ? { failedOver: options.failedOver } : {}),
     });
     // Only the main agent has jobs: their ends reach only it (ADR-0030).
     this.jobs = new Jobs({
@@ -341,21 +342,33 @@ export class Runner {
     try {
       let text = input;
       let withImages = images;
-      for (;;) {
-        await session.prompt(text, withImages ? { images: withImages } : undefined);
-        withImages = undefined;
-        // Pi may have finished before a steer or follow-up reached it; what is
-        // left in its queue is run as a prompt of the same turn.
+      let retries = 0;
+      const settle = async () => {
         let count = 0;
         while (count !== turn.queued.length) {
           count = turn.queued.length;
           await Promise.allSettled(turn.queued);
         }
+      };
+      for (;;) {
+        await session.prompt(text, withImages ? { images: withImages } : undefined);
+        withImages = undefined;
+        // Pi may have finished before a steer or follow-up reached it; what is
+        // left in its queue is run as a prompt of the same turn.
+        await settle();
+        // Before that queue, a failed request goes on on the router's next model, so the
+        // queue is not sent to the failing one, and what comes during the retry is drained too.
+        // The router only moves down its list, so this ends when the list does; the cap is a guard.
+        while (this.afterError(session, recorder.turnId, retries < MAX_MODEL_RETRIES)) {
+          retries++;
+          this.log(`turn ${recorder.turnId}: tried once more on another model`);
+          await session.sendCustomMessage(MODEL_RETRY, { triggerTurn: true });
+          await settle();
+        }
         if (session.pendingMessageCount === 0) break;
         const { steering, followUp } = session.clearQueue();
         text = [...steering, ...followUp].join("\n\n");
       }
-      await this.afterError(session, recorder.turnId);
     } catch (error) {
       failed = true;
       this.log(`turn ${recorder.turnId} failed: ${(error as Error).message}`);
@@ -388,22 +401,14 @@ export class Runner {
 
   /**
    * A model error ends Pi's run without a throw, and the turn would end with
-   * nothing said. It is logged; if the router moved to another model, the turn
-   * goes on once more there.
+   * nothing said. It is logged; whether the turn goes on, because the router
+   * moved to another model, is returned. Not while the runner stops.
    */
-  private async afterError(session: AgentSession, turnId: string): Promise<void> {
-    // The router only moves down its list, so this ends when the list does; the cap is a guard.
-    for (let tries = 0; ; tries++) {
-      const failed = lastAssistant(session);
-      if (failed?.stopReason !== "error") return;
-      this.log(`turn ${turnId}: ${failed.provider}/${failed.model} failed: ${failed.errorMessage ?? "no message"}`);
-      if (tries >= MAX_MODEL_RETRIES || !this.failedOver?.(failed)) return;
-      this.log(`turn ${turnId}: tried once more on another model`);
-      await session.sendCustomMessage(
-        { customType: MODEL_RETRY, content: "(The model request failed and is being retried on another model. Go on with the turn.)", display: false },
-        { triggerTurn: true },
-      );
-    }
+  private afterError(session: AgentSession, turnId: string, mayRetry: boolean): boolean {
+    const failed = lastAssistant(session);
+    if (failed?.stopReason !== "error") return false;
+    this.log(`turn ${turnId}: ${failed.provider}/${failed.model} failed: ${failed.errorMessage ?? "no message"}`);
+    return mayRetry && !this.stopping && (this.failedOver?.(failed) ?? false);
   }
 
   /** The request before folding. Events that come meanwhile wait for the next turn. */

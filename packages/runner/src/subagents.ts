@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { type AgentSession, parseFrontmatter, SessionManager } from "@earendil-works/pi-coding-agent";
 import { type Activity, isSubAgentName, type SubAgentNotice, type SubAgentStopReason } from "@penelope/contract";
 
@@ -24,6 +25,7 @@ import type { Config } from "./config.ts";
 import type { Connector } from "./connectors.ts";
 import { newSessionFileIn, openSession, type PiSetup } from "./pi.ts";
 import { type Places, subAgentSystemPrompt } from "./prompts.ts";
+import { MODEL_RETRY } from "./router.ts";
 
 export type SubAgentState = "running" | "waiting" | "closed";
 
@@ -77,6 +79,8 @@ export interface SubAgentsOptions {
   log: (line: string) => void;
   /** The first wait before a notice is sent again; it doubles up to 30 seconds. */
   retryMs: number;
+  /** Whether a turn that ended in this model error goes on once more, on another model (RunnerOptions.failedOver). */
+  failedOver?: (message: AssistantMessage) => boolean;
 }
 
 interface Live {
@@ -126,6 +130,7 @@ export class SubAgents {
   private readonly connectors: SubAgentsOptions["connectors"];
   private readonly log: (line: string) => void;
   private readonly retryMs: number;
+  private readonly failedOver: SubAgentsOptions["failedOver"];
   private readonly places: Places;
   /** Every sub-agent there has been, closed ones too. */
   private readonly agents = new Map<string, Live>();
@@ -143,6 +148,7 @@ export class SubAgents {
     this.connectors = options.connectors;
     this.log = options.log;
     this.retryMs = options.retryMs;
+    this.failedOver = options.failedOver;
     this.places = {
       memory: options.config.memoryDir,
       sources: options.config.sourcesDir,
@@ -386,7 +392,13 @@ export class SubAgents {
     let cancelled = false;
     try {
       await session.prompt(input);
-      const last = lastAssistant(session.messages);
+      let last = lastAssistant(session.messages);
+      // The router only moves down its list, so this ends when the list does; the cap is a guard.
+      for (let tries = 0; tries < 4 && last?.stopReason === "error" && !this.stopped.signal.aborted && this.failedOver?.(last); tries++) {
+        this.log(`sub-agent ${record.name}: ${last.provider}/${last.model} failed; tried once more on another model`);
+        await session.sendCustomMessage(MODEL_RETRY, { triggerTurn: true });
+        last = lastAssistant(session.messages);
+      }
       if (last?.stopReason === "aborted") cancelled = true;
       else if (last?.stopReason === "error") [reason, text] = ["failed", last.errorMessage ?? "The model's request failed."];
       else text = textOf(last);
