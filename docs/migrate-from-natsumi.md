@@ -63,6 +63,7 @@ natsumi の config（JSON）の項目と、それを書く penelope の配置の
 | `loop` のほか・`curator` | 無い |
 | `pi.routes`・`defaultRoute` | `sandbox/env` の `PENELOPE_MODEL`（`<provider>/<model>`）、`sandbox/models.json`、`sentinel/sentinel.yaml` のモデルの API のホストと Secret `penelope-sentinel` の鍵（下の「モデル」） |
 | `avatar` | `backend.env` の `PENELOPE_AVATAR` と、自分のアバターなら `PENELOPE_AVATARS_DIR`（下の「アバター」） |
+| `avatarBaseUrl` | `sandbox/env` の `PENELOPE_SLACK_ICON_BASE_URL`（Slack が backend に届かないときだけ。[receivers.md](receivers.md) の「投稿の CLI」） |
 | `inbox.card.name` | `backend.env` の `PENELOPE_AGENT_NAME` と `sandbox/env` の `PENELOPE_NAME`（同じ名前にする） |
 | `inbox`（受け口） | `backend.env` の `PENELOPE_A2A_*`（下の「A2A」） |
 | `a2a.agents`・`a2a.tokenFile` | `connectors/agents.md`、`sentinel/sentinel.yaml`、`sandbox/surrogates.env`、`patches/statefulset.yaml` の projected token（下の「A2A」） |
