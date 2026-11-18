@@ -4,7 +4,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type http from "node:http";
 
-import { type Activity, type AgentId, type DeliveredEvent, isSubAgentName, type ScheduleWhen } from "@penelope/contract";
+import { type Activity, type AgentId, type DeliveredEvent, isSubAgentName, type NightStage, type NightStages, type ScheduleWhen } from "@penelope/contract";
 
 import { type Inbox, InboxRefusal } from "./a2a/inbox.ts";
 import type { SubAgents } from "./agents.ts";
@@ -14,6 +14,7 @@ import { isTime } from "./envelope.ts";
 import { type Handler, HttpError, readJson, sendEmpty, sendJson } from "./http.ts";
 import type { Memory } from "./memory.ts";
 import type { Queue } from "./queue.ts";
+import type { ActivityRecord, TurnEnd } from "./record.ts";
 import { ScheduleError, type Schedules } from "./schedules.ts";
 import { iso } from "./time.ts";
 
@@ -35,6 +36,8 @@ export type SandboxOptions = {
   memory: Memory;
   /** The tasks other agents sent over A2A, which her replies close or ask in. */
   inbox: Inbox;
+  /** The activity record (ADR-0038). */
+  record: ActivityRecord;
   now: () => number;
   maxBytes?: number;
   /** The limit of a reply's body, which carries its images. */
@@ -43,11 +46,20 @@ export type SandboxOptions = {
 };
 
 export function sandboxHandler(options: SandboxOptions): Handler {
-  const { queue, conversation, agents, schedules, memory, inbox, now } = options;
+  const { queue, conversation, agents, schedules, memory, inbox, record, now } = options;
   const log = options.log ?? console.error;
   const maxBytes = options.maxBytes ?? DEFAULT_SANDBOX_BYTES;
   const maxReplyBytes = options.maxReplyBytes ?? DEFAULT_REPLY_BYTES;
   const expected = options.token === undefined || options.token === "" ? undefined : digest(options.token);
+
+  // What is kept for the record never refuses what it is kept from (ADR-0038).
+  const keep = (work: () => void) => {
+    try {
+      work();
+    } catch (error) {
+      log(`record: not kept: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
 
   return async (request, response) => {
     const url = new URL(request.url ?? "/", "http://sandbox");
@@ -96,12 +108,14 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         if (typeof summary !== "string") throw new HttpError(400, "summary must be a string");
         if (!("payload" in request)) throw new HttpError(400, "payload is required");
         queue.accept({ source: "job", id, occurred_at: iso(now()), summary, payload }, { builtin: true });
+        keep(() => record.jobEnded(id, payload));
         sendEmpty(response, 202);
         return;
       }
       case "POST /v1/replies": {
-        const { agent, text, expression, in_reply_to, images } = withAgent(object(await readJson(request, maxReplyBytes)));
+        const { agent, text, expression, in_reply_to, images, turn_id } = withAgent(object(await readJson(request, maxReplyBytes)));
         mainOnly(agent, "replies to the owner");
+        if (turn_id !== undefined && (typeof turn_id !== "string" || turn_id === "")) throw new HttpError(400, "turn_id must be a non-empty string");
         if (typeof text !== "string") throw new HttpError(400, "text must be a string");
         if (expression !== undefined && typeof expression !== "string") throw new HttpError(400, "expression must be a string");
         if (in_reply_to !== undefined && !Number.isSafeInteger(in_reply_to)) throw new HttpError(400, "in_reply_to must be a seq");
@@ -113,6 +127,8 @@ export function sandboxHandler(options: SandboxOptions): Handler {
           if (error instanceof ImageRefusal) throw new HttpError(400, `not sent: ${error.message}`);
           throw error;
         }
+        let turn: string | undefined;
+        keep(() => (turn = record.replyTurn(turn_id as string | undefined)));
         let reply;
         try {
           reply = conversation.reply(
@@ -121,6 +137,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
               text,
               ...(expression === undefined ? {} : { expression: expression as string }),
               ...(in_reply_to === undefined ? {} : { in_reply_to: in_reply_to as number }),
+              ...(turn === undefined ? {} : { turn_id: turn }),
             },
             checked,
           );
@@ -149,13 +166,18 @@ export function sandboxHandler(options: SandboxOptions): Handler {
       case "POST /v1/activity": {
         const { agent, activities } = withAgent(await body());
         if (!Array.isArray(activities)) throw new HttpError(400, "activities must be a list");
-        conversation.activities(agent, activities.map(activity));
+        const blocks = activities.map(activity);
+        conversation.activities(agent, blocks);
+        keep(() => record.activities(agent, blocks));
         sendEmpty(response, 204);
         return;
       }
       case "POST /v1/turns/end": {
-        const { agent, turn_id } = withAgent(await body());
-        if (typeof turn_id !== "string" || turn_id === "") throw new HttpError(400, "turn_id must be a non-empty string");
+        const request = withAgent(await body());
+        const end = turnEnd(request);
+        const { agent } = request;
+        const turn_id = end.turn_id;
+        keep(() => record.turnEnded(agent, end));
         conversation.turnEnded(agent);
         try {
           await memory.commit({ agent, turnId: turn_id });
@@ -197,9 +219,13 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         return;
       }
       case "POST /v1/sessions/rotated": {
-        const { agent } = withAgent(await body());
-        conversation.sessionRotated(agent);
-        log(`session: ${agent} switched to a new session`);
+        const { agent, seq, stages } = withAgent(await body());
+        mainOnly(agent, "has a nightly switch");
+        if (seq !== undefined && !Number.isSafeInteger(seq)) throw new HttpError(400, "seq must be the seq of the night's control event");
+        if (stages !== undefined && seq === undefined) throw new HttpError(400, "stages come with the seq of their night");
+        const steps = stages === undefined ? undefined : nightStages(stages);
+        keep(() => record.nightReported({ ...(seq === undefined ? {} : { seq: seq as number }), ...(steps === undefined ? {} : { stages: steps }) }));
+        log(`session: the nightly switch${seq === undefined ? "" : ` of ${String(seq)}`} was reported${steps === undefined ? "" : ` (${steps.reflection.result}, ${steps.curator.result}, ${steps.session.result})`}`);
         sendEmpty(response, 204);
         return;
       }
@@ -320,4 +346,39 @@ function activity(value: unknown): Activity {
     default:
       throw bad("kind must be turn_start, thinking, tool_call, tool_result, message or turn_end");
   }
+}
+
+/** The end of a turn: its id, and what the runner said of it for the record (ADR-0038). */
+function turnEnd(body: Record<string, unknown>): TurnEnd {
+  const { turn_id, result, reason, seqs, night } = body;
+  if (typeof turn_id !== "string" || turn_id === "") throw new HttpError(400, "turn_id must be a non-empty string");
+  if (result !== undefined && result !== "done" && result !== "failed" && result !== "stopped") throw new HttpError(400, "result must be done, failed or stopped");
+  if (reason !== undefined && typeof reason !== "string") throw new HttpError(400, "reason must be a string");
+  if (seqs !== undefined && (!Array.isArray(seqs) || !seqs.every((seq) => Number.isSafeInteger(seq)))) throw new HttpError(400, "seqs must be a list of integers");
+  let step: TurnEnd["night"];
+  if (night !== undefined) {
+    const { seq, stage } = object(night);
+    if (!Number.isSafeInteger(seq)) throw new HttpError(400, "night needs the seq of its control event");
+    if (stage !== "reflection" && stage !== "curator") throw new HttpError(400, "night's stage must be reflection or curator");
+    step = { seq: seq as number, stage };
+  }
+  return {
+    turn_id,
+    ...(result === undefined ? {} : { result }),
+    ...(reason === undefined ? {} : { reason }),
+    ...(seqs === undefined ? {} : { seqs: seqs as number[] }),
+    ...(step === undefined ? {} : { night: step }),
+  };
+}
+
+/** The three steps of a night, each done, failed or skipped, with an optional reason. */
+function nightStages(value: unknown): NightStages {
+  const stages = object(value);
+  const stage = (name: keyof NightStages): NightStage => {
+    const { result, reason } = object(stages[name] ?? null);
+    if (result !== "done" && result !== "failed" && result !== "skipped") throw new HttpError(400, `stages.${name}.result must be done, failed or skipped`);
+    if (reason !== undefined && typeof reason !== "string") throw new HttpError(400, `stages.${name}.reason must be a string`);
+    return { result, ...(reason === undefined ? {} : { reason }) };
+  };
+  return { reflection: stage("reflection"), curator: stage("curator"), session: stage("session") };
 }

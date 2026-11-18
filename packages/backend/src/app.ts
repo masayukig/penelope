@@ -27,8 +27,9 @@ import { Memory } from "./memory.ts";
 import { Notifier, PushSubscriptions } from "./push/notifier.ts";
 import { vapidKeyOf, type WebPushRequest, WebPushChannel } from "./push/web-push.ts";
 import { Queue } from "./queue.ts";
+import { ActivityRecord } from "./record.ts";
 import { sandboxHandler } from "./sandbox-api.ts";
-import { Scheduler, Schedules } from "./schedules.ts";
+import { cronOf, Scheduler, Schedules } from "./schedules.ts";
 import { Sources } from "./sources.ts";
 import { AwakeHours } from "./time.ts";
 import { uiHandler } from "./ui-api.ts";
@@ -69,6 +70,13 @@ export async function startBackend(
   const agents = new SubAgents(db, feed, conversation, { now });
   const schedules = new Schedules(db, { now, timeZone: config.timeZone });
   const scheduler = new Scheduler(schedules, queue, { now, timeZone: config.timeZone, nightly: config.nightly, log });
+  const record = new ActivityRecord(db, feed, {
+    now,
+    timeZone: config.timeZone,
+    nightly: cronOf(config.nightly, config.timeZone, { seconds: true }),
+    ...(config.github === undefined ? {} : { owner: config.github.ownerId }),
+    log,
+  });
   const sessions = new LoginSessions(db, { now });
   const inbox = new Inbox(db, queue, { now, limits: config.a2a?.limits ?? { deadlineMs: 24 * 3_600_000, maxOpenTasks: 3 } });
   const login = new GitHubLogin({ settings: config.github, ...(githubEndpoints ? { endpoints: githubEndpoints } : {}), sessions, now, log });
@@ -99,7 +107,7 @@ export async function startBackend(
     intake = await opening(listenUnix(intakeHandler(queue, { log }), config.intakeSocket, log));
     sandbox = await opening(
       listenUnix(
-        sandboxHandler({ token: config.sandboxToken, queue, conversation, agents, schedules, memory, inbox, now, log }),
+        sandboxHandler({ token: config.sandboxToken, queue, conversation, agents, schedules, memory, inbox, record, now, log }),
         config.sandboxSocket,
         log,
       ),
@@ -112,6 +120,7 @@ export async function startBackend(
           assets,
           agents,
           schedules,
+          record,
           feed,
           login,
           sessions,
@@ -134,6 +143,7 @@ export async function startBackend(
     throw error;
   }
   const stopScheduler = scheduler.start();
+  const stopRecord = record.start();
   const stopHeartbeat =
     config.heartbeatMs === undefined ? () => {} : new Heartbeat(queue, conversation, { now, quietMs: config.heartbeatMs, awake, log }).start();
   const stopNotifier = notifier?.start() ?? (() => {});
@@ -149,6 +159,7 @@ export async function startBackend(
     port,
     close: async () => {
       stopScheduler();
+      stopRecord();
       stopHeartbeat();
       stopNotifier();
       await Promise.all([close(intake), close(sandbox), close(ui)]);

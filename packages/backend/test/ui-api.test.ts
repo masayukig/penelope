@@ -17,7 +17,8 @@ import { GitHubLogin, type GitHubSettings } from "../src/login/github.ts";
 import { LoginSessions } from "../src/login/sessions.ts";
 import { PushSubscriptions } from "../src/push/notifier.ts";
 import { Queue } from "../src/queue.ts";
-import { Schedules } from "../src/schedules.ts";
+import { ActivityRecord } from "../src/record.ts";
+import { cronOf, Schedules } from "../src/schedules.ts";
 import { Sources } from "../src/sources.ts";
 import { AwakeHours } from "../src/time.ts";
 import { uiHandler } from "../src/ui-api.ts";
@@ -92,6 +93,7 @@ async function setup(
   const conversation = new Conversation(db, feed, { now, assets });
   const agents = new SubAgents(db, feed, conversation, { now });
   const schedules = new Schedules(db, { now, timeZone: "Asia/Tokyo" });
+  const record = new ActivityRecord(db, feed, { now, timeZone: "UTC", nightly: cronOf("0 4 * * *", "UTC") });
   const github = await fakeGitHub(t);
   const sessions = new LoginSessions(db, { now });
   const settings: GitHubSettings | undefined = configured
@@ -107,6 +109,7 @@ async function setup(
       assets,
       agents,
       schedules,
+      record,
       feed,
       login,
       sessions,
@@ -131,7 +134,7 @@ async function setup(
   const signIn = () => cookieOf(sessions.create(OWNER).token);
   const call = (pathname: string, cookie: string | undefined, options: Ask = {}) =>
     ask(target, pathname, { ...options, headers: { ...(cookie ? { cookie } : {}), ...options.headers } });
-  return { queue, conversation, assets, agents, schedules, feed, sessions, github, target, signIn, call, sourcesDir, clock, subscriptions };
+  return { queue, conversation, assets, agents, schedules, record, feed, sessions, github, target, signIn, call, sourcesDir, clock, subscriptions };
 }
 
 /** A Set-Cookie line as its value and its attributes, in whatever order they came. */
@@ -313,6 +316,8 @@ describe("the UI's API", () => {
       ["/api/agents", {}],
       ["/api/schedules", {}],
       ["/api/schedules/s-1", { method: "DELETE" }],
+      ["/api/record", {}],
+      ["/api/record/seen", { method: "POST" }],
     ] as const) {
       const answer = await env.call(pathname, undefined, options);
       assert.equal(answer.status, 401, pathname);
@@ -640,6 +645,41 @@ describe("the UI's API", () => {
       const answer = await env.call("/api/schedules", env.signIn(), { json: { reason: "x", cron: "0 9 * * *" } });
       assert.equal(answer.status, 404);
       assert.deepEqual(env.schedules.list("main"), []);
+    });
+  });
+
+  // What the record holds is record.test.ts's; here, that the UI reaches it (docs/ui-api.md "活動の記録").
+  describe("the activity record", () => {
+    it("gives a day of it, narrowed as asked", async (t) => {
+      const env = await setup(t);
+      env.record.activities("main", [{ kind: "turn_start", at: "2026-11-14T01:00:00.000Z", turn_id: "t-1" }]);
+      const answer = await env.call("/api/record?day=2026-11-14&tz=Asia%2FTokyo&kind=turn&failed=0", env.signIn());
+      assert.equal(answer.status, 200);
+      assert.deepEqual(answer.json().rows.map((row: { id: string }) => row.id), ["t-1"]);
+    });
+
+    it("refuses a day, a time zone or a kind it does not know", async (t) => {
+      const env = await setup(t);
+      for (const query of ["day=yesterday", "tz=Mars%2FOlympus", "kind=turns", "failed=yes"]) {
+        assert.equal((await env.call(`/api/record?${query}`, env.signIn())).status, 400, query);
+      }
+    });
+
+    it("answers 404 for a turn, a night or a sub-agent it does not have", async (t) => {
+      const env = await setup(t);
+      for (const pathname of ["/api/record/turns/t-0", "/api/record/turns/t-0/results/c-0", "/api/record/nights/1", "/api/record/sub-agents/helper"]) {
+        assert.equal((await env.call(pathname, env.signIn())).status, 404, pathname);
+      }
+    });
+
+    it("keeps when the owner opened it, which leaves no failure unseen", async (t) => {
+      const env = await setup(t);
+      env.clock.advance(1);
+      env.record.activities("main", [{ kind: "turn_start", at: "2026-11-14T01:00:00.000Z", turn_id: "t-1" }]);
+      env.record.turnEnded("main", { turn_id: "t-1", result: "failed" });
+      assert.deepEqual((await env.call("/api/record/unseen", env.signIn())).json(), { unseen: 1 });
+      assert.equal((await env.call("/api/record/seen", env.signIn(), { method: "POST" })).json().unseen, 1);
+      assert.deepEqual((await env.call("/api/record/unseen", env.signIn())).json(), { unseen: 0 });
     });
   });
 

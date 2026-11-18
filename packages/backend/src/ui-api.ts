@@ -8,7 +8,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { ICON_TYPES } from "@penelope/avatar";
-import type { AgentResponse, PostMessageResponse, PushResponse, SchedulesResponse, SubAgentsResponse } from "@penelope/contract";
+import type { AgentResponse, PostMessageResponse, PushResponse, RecordKind, RecordResultResponse, RecordUnseenResponse, SchedulesResponse, SubAgentsResponse } from "@penelope/contract";
 
 import { isA2APath } from "./a2a/endpoint.ts";
 import type { SubAgents } from "./agents.ts";
@@ -22,6 +22,7 @@ import type { LoginSessions, Session } from "./login/sessions.ts";
 import type { PushSubscriptions } from "./push/notifier.ts";
 import { webPushSubscriptionOf } from "./push/web-push.ts";
 import type { Queue } from "./queue.ts";
+import { type ActivityRecord, RecordQueryError } from "./record.ts";
 import type { Schedules } from "./schedules.ts";
 import type { Attachment } from "./sources.ts";
 import { iso } from "./time.ts";
@@ -30,6 +31,8 @@ import { AGENT_ICONS_PATH } from "./web.ts";
 export const SESSION_COOKIE = "penelope_session";
 /** Where the copies the backend keeps of what the agents made are read, by id (ADR-0032). */
 export const ASSETS_PATH = "/api/assets/";
+/** Where the activity record is read (ADR-0038). */
+export const RECORD_PATH = "/api/record";
 /** A message with its files: 64 MiB in all by default. */
 export const DEFAULT_UI_BYTES = 64 * 1024 * 1024;
 const HEARTBEAT_MS = 25_000;
@@ -46,6 +49,8 @@ export type UiOptions = {
   agents: SubAgents;
   /** Her schedules, listed and removed as her own tools do (docs/sandbox-api.md). */
   schedules: Schedules;
+  /** The activity record (ADR-0038). */
+  record: ActivityRecord;
   feed: Feed;
   login: GitHubLogin;
   sessions: LoginSessions;
@@ -66,7 +71,7 @@ export type UiOptions = {
 };
 
 export function uiHandler(options: UiOptions): Handler {
-  const { queue, conversation, assets, agents, schedules, feed, login, sessions, ownerId, now } = options;
+  const { queue, conversation, assets, agents, schedules, record, feed, login, sessions, ownerId, now } = options;
   const maxBytes = options.maxBytes ?? DEFAULT_UI_BYTES;
   const secure = options.publicUrl?.startsWith("https:") ?? false;
   const web = options.web ?? notBuilt;
@@ -165,6 +170,15 @@ export function uiHandler(options: UiOptions): Handler {
       await sendAsset(assets, url.pathname.slice(ASSETS_PATH.length), request, response);
       return;
     }
+    if (url.pathname === RECORD_PATH || url.pathname.startsWith(`${RECORD_PATH}/`)) {
+      try {
+        await recordRoute(record, request, response, url);
+      } catch (error) {
+        if (error instanceof RecordQueryError) throw new HttpError(error.status, error.message);
+        throw error;
+      }
+      return;
+    }
 
     switch (route) {
       case "POST /api/messages": {
@@ -246,6 +260,58 @@ export function uiHandler(options: UiOptions): Handler {
     throw new HttpError(404, "no such path");
   };
 }
+
+/** The activity record (docs/ui-api.md "活動の記録"): read only, but for the time the owner opened it. */
+async function recordRoute(record: ActivityRecord, request: http.IncomingMessage, response: http.ServerResponse, url: URL): Promise<void> {
+  const rest = url.pathname.slice(RECORD_PATH.length);
+  const query = url.searchParams;
+  if (rest === "/seen") {
+    if (request.method !== "POST") throw new HttpError(405, "only POST");
+    sendJson(response, 200, record.seen());
+    return;
+  }
+  if (request.method !== "GET") throw new HttpError(405, "only GET");
+  if (rest === "") {
+    const kind = query.get("kind") ?? undefined;
+    if (kind !== undefined && !RECORD_KINDS.includes(kind)) throw new HttpError(400, "kind must be turn, night, job or sub_agent");
+    const failed = query.get("failed") ?? undefined;
+    if (failed !== undefined && failed !== "0" && failed !== "1") throw new HttpError(400, "failed must be 0 or 1");
+    const day = query.get("day") ?? undefined;
+    const timeZone = query.get("tz") ?? undefined;
+    const agent = query.get("agent") ?? undefined;
+    sendJson(
+      response,
+      200,
+      record.day({
+        ...(day === undefined ? {} : { day }),
+        ...(timeZone === undefined ? {} : { timeZone }),
+        ...(agent === undefined ? {} : { agent }),
+        ...(kind === undefined ? {} : { kind: kind as RecordKind }),
+        failed: failed === "1",
+      }),
+    );
+    return;
+  }
+  if (rest === "/unseen") {
+    sendJson(response, 200, { unseen: record.unseen() } satisfies RecordUnseenResponse);
+    return;
+  }
+  const parts = rest.slice(1).split("/").map((part) => {
+    try {
+      return decodeURIComponent(part);
+    } catch {
+      throw new HttpError(404, "no such path");
+    }
+  });
+  const [kind, id, results, callId] = parts;
+  if (kind === "turns" && id && parts.length === 2) sendJson(response, 200, record.turn(id));
+  else if (kind === "turns" && id && results === "results" && callId && parts.length === 4) sendJson(response, 200, { output: record.result(id, callId) } satisfies RecordResultResponse);
+  else if (kind === "nights" && id && parts.length === 2) sendJson(response, 200, record.night(id));
+  else if (kind === "sub-agents" && id && parts.length === 2) sendJson(response, 200, record.subAgent(id, query.get("before") ?? undefined));
+  else throw new HttpError(404, "no such path");
+}
+
+const RECORD_KINDS: readonly string[] = ["turn", "night", "job", "sub_agent"] satisfies RecordKind[];
 
 /**
  * The bytes of one copy, as its type. A copy never changes, so the browser

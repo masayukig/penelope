@@ -15,8 +15,9 @@ import { Feed } from "../src/feed.ts";
 import { close, listenUnix } from "../src/http.ts";
 import { Memory } from "../src/memory.ts";
 import { Queue } from "../src/queue.ts";
+import { ActivityRecord } from "../src/record.ts";
 import { sandboxHandler } from "../src/sandbox-api.ts";
-import { Schedules } from "../src/schedules.ts";
+import { cronOf, Schedules } from "../src/schedules.ts";
 import { Sources } from "../src/sources.ts";
 import { AwakeHours } from "../src/time.ts";
 import { ask, type Ask, FakeClock, tempDir } from "./support.ts";
@@ -51,9 +52,10 @@ async function setup(
   const memory = new Memory(memoryDir, { name: "penelope-backend", email: "backend@penelope.invalid" });
   const schedules = new Schedules(db, { now: Date.now, timeZone: "UTC" });
   const inbox = new Inbox(db, queue, { now: Date.now, limits: { deadlineMs: 86_400_000, maxOpenTasks: 3 } });
+  const record = new ActivityRecord(db, feed, { now: clock.now, timeZone: "UTC", nightly: cronOf("0 4 * * *", "UTC") });
   const socketPath = path.join(dir, "sandbox.sock");
   const server = await listenUnix(
-    sandboxHandler({ token, queue, conversation, agents, schedules, memory, inbox, now: Date.now, log: () => {} }),
+    sandboxHandler({ token, queue, conversation, agents, schedules, memory, inbox, record, now: Date.now, log: () => {} }),
     socketPath,
   );
   t.after(async () => {
@@ -62,7 +64,7 @@ async function setup(
   });
   const call = (pathname: string, options: Ask = {}) =>
     ask({ socketPath }, pathname, { ...options, headers: { authorization: `Bearer ${TOKEN}`, ...options.headers } });
-  return { queue, conversation, agents, streamed, memoryDir, sourcesDir: path.join(dir, "sources"), call, socketPath, inbox, db, feed, clock, assets, assetsDir };
+  return { queue, conversation, agents, record, streamed, memoryDir, sourcesDir: path.join(dir, "sources"), call, socketPath, inbox, db, feed, clock, assets, assetsDir };
 }
 
 /** The first bytes of each kind of image a reply may carry, followed by `padding` zero bytes. */
@@ -233,6 +235,13 @@ describe("the sandbox's API", () => {
       assert.equal(streamed[0]?.event, "reply");
     });
 
+    it("are tied to the turn the runner names", async (t) => {
+      const { call, conversation } = await setup(t);
+      await call("/v1/replies", { json: { agent: "main", text: "done", turn_id: "t-1" } });
+      const [entry] = conversation.page().entries;
+      assert.equal(entry?.kind === "agent" && entry.turn_id, "t-1");
+    });
+
     it("are refused without text", async (t) => {
       const { call } = await setup(t);
       assert.equal((await call("/v1/replies", { json: { agent: "main" } })).status, 400);
@@ -400,6 +409,21 @@ describe("the sandbox's API", () => {
       await call("/v1/turns/end", { json: { agent: "main", turn_id: "t-9" } });
       assert.deepEqual(streamed, [{ event: "state", data: { agent: "main", state: "waiting" } }]);
     });
+
+    it("keeps how the turn went and what it was given for the record", async (t) => {
+      const { call, record } = await setup(t);
+      const answer = await call("/v1/turns/end", { json: { agent: "main", turn_id: "t-9", result: "failed", reason: "the model's request failed", seqs: [] } });
+      assert.equal(answer.status, 204);
+      const { turn } = record.turn("t-9");
+      assert.deepEqual([turn.result, turn.reason], ["failed", "the model's request failed"]);
+    });
+
+    it("is refused with a result, seqs or a night not of their shape", async (t) => {
+      const { call } = await setup(t);
+      for (const extra of [{ result: "crashed" }, { seqs: ["1"] }, { night: { seq: 1, stage: "dream" } }, { reason: 3 }]) {
+        assert.equal((await call("/v1/turns/end", { json: { agent: "main", turn_id: "t-9", ...extra } })).status, 400, JSON.stringify(extra));
+      }
+    });
   });
 
   describe("schedules", () => {
@@ -434,6 +458,27 @@ describe("the sandbox's API", () => {
     it("is noted", async (t) => {
       const { call } = await setup(t);
       assert.equal((await call("/v1/sessions/rotated", { json: { agent: "main" } })).status, 204);
+    });
+
+    it("keeps the steps of the night for the record", async (t) => {
+      const { call, record, clock } = await setup(t);
+      const stages = { reflection: { result: "done" }, curator: { result: "failed", reason: "no context left" }, session: { result: "done" } };
+      assert.equal((await call("/v1/sessions/rotated", { json: { agent: "main", seq: 7, stages } })).status, 204);
+      const [night] = record.day({ day: new Date(clock.now()).toISOString().slice(0, 10), kind: "night" }).rows;
+      assert.deepEqual(night?.kind === "night" && [night.result, night.stages], ["failed", stages]);
+    });
+
+    it("is refused with steps not of their shape, or with no seq of their night", async (t) => {
+      const { call } = await setup(t);
+      const ok = { result: "done" };
+      for (const body of [
+        { seq: 7, stages: { reflection: ok, curator: { result: "maybe" }, session: ok } },
+        { seq: 7, stages: { reflection: ok, curator: ok } },
+        { stages: { reflection: ok, curator: ok, session: ok } },
+        { seq: "7" },
+      ]) {
+        assert.equal((await call("/v1/sessions/rotated", { json: { agent: "main", ...body } })).status, 400, JSON.stringify(body));
+      }
     });
   });
 
