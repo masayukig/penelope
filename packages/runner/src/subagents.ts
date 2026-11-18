@@ -388,7 +388,8 @@ export class SubAgents {
     try {
       await session.prompt(input);
       let last = lastAssistant(session.messages);
-      if (last?.stopReason === "error" && !this.stopped.signal.aborted && this.failedOver?.(last)) {
+      // The router only moves down its list, so this ends when the list does; the cap is a guard.
+      for (let tries = 0; tries < 4 && last?.stopReason === "error" && !this.stopped.signal.aborted && this.failedOver?.(last); tries++) {
         this.log(`sub-agent ${record.name}: ${last.provider}/${last.model} failed; tried once more on another model`);
         await session.sendCustomMessage(MODEL_RETRY, { triggerTurn: true });
         last = lastAssistant(session.messages);

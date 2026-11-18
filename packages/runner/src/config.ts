@@ -108,20 +108,21 @@ function readRouter(value: string, problems: string[]): RouterConfig | undefined
     problems.push("PENELOPE_MODEL_ROUTER must be a JSON object");
     return undefined;
   }
-  const primary = modelName(raw.primary);
-  const fallback = modelName(raw.fallback);
+  // `models` in order, or the older `primary` and `fallback` as a list of two.
+  const names = raw.models === undefined ? [raw.primary, raw.fallback] : Array.isArray(raw.models) ? raw.models : [];
+  const models = names.map(modelName);
   const number = (name: string, fallback: number) => (raw[name] === undefined ? fallback : Number(raw[name]));
   const high = number("high", 85);
   const low = number("low", 70);
   const cacheSeconds = number("cacheSeconds", 300);
   const before = problems.length;
-  if (!primary || !fallback) problems.push("PENELOPE_MODEL_ROUTER: primary and fallback must be <provider>/<model>");
+  if (models.length < 2 || models.some((m) => !m)) problems.push("PENELOPE_MODEL_ROUTER: models (or primary and fallback) must be two or more <provider>/<model>");
   if (typeof raw.prometheus !== "string" || !/^https?:\/\//.test(raw.prometheus)) problems.push("PENELOPE_MODEL_ROUTER: prometheus must be a URL");
   if (typeof raw.query !== "string" || raw.query === "") problems.push("PENELOPE_MODEL_ROUTER: query is not set");
   if (!(low >= 0 && low <= high && high <= 100)) problems.push("PENELOPE_MODEL_ROUTER: 0 <= low <= high <= 100");
   if (!(cacheSeconds > 0)) problems.push("PENELOPE_MODEL_ROUTER: cacheSeconds must be positive");
   if (problems.length > before) return undefined;
-  return { primary: primary!, fallback: fallback!, prometheus: raw.prometheus as string, query: raw.query as string, high, low, cacheSeconds };
+  return { models: models as { provider: string; id: string }[], prometheus: raw.prometheus as string, query: raw.query as string, high, low, cacheSeconds };
 }
 
 function positiveInteger(env: Env, name: string, fallback: number, problems: string[]): number {

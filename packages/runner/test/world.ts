@@ -40,6 +40,8 @@ export async function world(
     slackSources?: string[];
     /** The model router over MODEL (primary) and BACKUP (fallback), reading this percentage used. */
     routerUsed?: number;
+    /** The router's models in order, instead of MODEL and BACKUP. */
+    routerModels?: string[];
   } = {},
 ): Promise<World> {
   const root = await mkdtemp(join(tmpdir(), "runner-"));
@@ -88,8 +90,7 @@ export async function world(
         const used = options.routerUsed;
         router = new ModelRouter(
           {
-            primary: { provider: PROVIDER, id: MODEL },
-            fallback: { provider: PROVIDER, id: BACKUP },
+            models: (options.routerModels ?? [MODEL, BACKUP]).map((id) => ({ provider: PROVIDER, id })),
             prometheus: "http://prometheus.invalid",
             query: "used",
             high: 85,

@@ -33,7 +33,7 @@ export interface Call {
   messages: Message[];
   /** The names of the tools the model was given. */
   tools: string[];
-  /** The model called: MODEL, or BACKUP. */
+  /** The model called: MODEL, BACKUP or SPARE. */
   model: string;
 }
 
@@ -44,6 +44,8 @@ export const PROVIDER = "fake";
 export const MODEL = "scripted";
 /** A second model of the provider, for the model router's fallback. */
 export const BACKUP = "backup";
+/** A third model of the provider, for a router's chain. */
+export const SPARE = "spare";
 
 let counter = 0;
 
@@ -190,7 +192,7 @@ export async function fakeRuntime(root: string, script: Script): Promise<ModelRu
       return stream;
     },
     models: [
-      ...[MODEL, BACKUP].map((id) => ({
+      ...[MODEL, BACKUP, SPARE].map((id) => ({
         id,
         name: id,
         reasoning: true,

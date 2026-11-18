@@ -82,6 +82,9 @@ interface TurnOptions {
   heartbeat?: boolean;
 }
 
+/** At most this many retries on other models in one turn (one per model after the first of the router's list). */
+const MAX_MODEL_RETRIES = 4;
+
 interface Turn {
   session: AgentSession;
   seqs: number[];
@@ -362,7 +365,7 @@ export class Runner {
     try {
       let text = input;
       let withImages = images;
-      let retried = false;
+      let retries = 0;
       const settle = async () => {
         let count = 0;
         while (count !== turn.queued.length) {
@@ -376,11 +379,12 @@ export class Runner {
         // Pi may have finished before a steer or follow-up reached it; what is
         // left in its queue is run as a prompt of the same turn.
         await settle();
-        // Before that queue, a failed request goes on once on the router's other
-        // model, so the queue is not sent to the failing one, and what comes
-        // during the retry is drained too.
-        if (!retried && this.afterError(session, recorder.turnId)) {
-          retried = true;
+        // Before that queue, a failed request goes on on the router's next model,
+        // so the queue is not sent to the failing one, and what comes during the
+        // retry is drained too. The router only moves down its list, so this ends
+        // when the list does; the cap is a guard.
+        while (retries < MAX_MODEL_RETRIES && this.afterError(session, recorder.turnId)) {
+          retries++;
           await this.retryOnAnother(session, recorder.turnId);
           await settle();
         }
