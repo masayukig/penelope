@@ -12,9 +12,10 @@ import type { Activity, ActivityRequest, DeliveredEvent } from "@penelope/contra
 
 import { Backend } from "../src/backend.ts";
 import type { Config } from "../src/config.ts";
+import { ModelRouter, ROUTER_MODEL, ROUTER_PROVIDER } from "../src/router.ts";
 import { Runner } from "../src/runner.ts";
 import { FakeBackend, TOKEN } from "./fake-backend.ts";
-import { type Call, fakeRuntime, MODEL, PROVIDER, type Script } from "./fake-model.ts";
+import { BACKUP, type Call, fakeRuntime, MODEL, PROVIDER, type Script } from "./fake-model.ts";
 
 export const closers: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -31,7 +32,16 @@ export interface World {
   start(script: Script): Promise<() => Promise<void>>;
 }
 
-export async function world(options: { turnFold?: boolean; ownerSkills?: boolean; connectors?: boolean; slackSources?: string[] } = {}): Promise<World> {
+export async function world(
+  options: {
+    turnFold?: boolean;
+    ownerSkills?: boolean;
+    connectors?: boolean;
+    slackSources?: string[];
+    /** The model router over MODEL (primary) and BACKUP (fallback), reading this percentage used. */
+    routerUsed?: number;
+  } = {},
+): Promise<World> {
   const root = await mkdtemp(join(tmpdir(), "runner-"));
   const home = join(root, "home");
   const memoryDir = join(root, "memory");
@@ -43,7 +53,7 @@ export async function world(options: { turnFold?: boolean; ownerSkills?: boolean
     agent: "main",
     backend: { url: await fake.url, token: TOKEN },
     identity: { name: "Example", role: "an operator", owner: "Owner" },
-    model: { provider: PROVIDER, id: MODEL },
+    model: options.routerUsed === undefined ? { provider: PROVIDER, id: MODEL } : { provider: ROUTER_PROVIDER, id: ROUTER_MODEL },
     home,
     memoryDir,
     sourcesDir: join(root, "sources"),
@@ -73,6 +83,26 @@ export async function world(options: { turnFold?: boolean; ownerSkills?: boolean
         calls.push(call);
         return script(call);
       });
+      let router: ModelRouter | undefined;
+      if (options.routerUsed !== undefined) {
+        const used = options.routerUsed;
+        router = new ModelRouter(
+          {
+            primary: { provider: PROVIDER, id: MODEL },
+            fallback: { provider: PROVIDER, id: BACKUP },
+            prometheus: "http://prometheus.invalid",
+            query: "used",
+            high: 85,
+            low: 70,
+            cacheSeconds: 300,
+          },
+          modelRuntime,
+          (line) => logs.push(line),
+          async () => ({ ok: true, status: 200, json: async () => ({ data: { result: [{ value: [0, String(used)] }] } }) }),
+        );
+        router.register();
+      }
+      const failedOver = router ? { failedOver: (message: Parameters<ModelRouter["failedOver"]>[0]) => router.failedOver(message) } : {};
       const controller = new AbortController();
       const runner = new Runner({
         config,
@@ -81,6 +111,7 @@ export async function world(options: { turnFold?: boolean; ownerSkills?: boolean
         settings: () => SettingsManager.inMemory({ retry: { enabled: false } }),
         log: (line) => logs.push(line),
         retryMs: 50,
+        ...failedOver,
       });
       const running = runner.run(controller.signal);
       const stop = async () => {

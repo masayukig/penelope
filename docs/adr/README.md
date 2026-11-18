@@ -42,3 +42,4 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0036 | [アバターは記憶の中で育て、最初の 1 回だけ backend が選んだアバターを写す](0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md) | Accepted |
 | 0037 | [main への push ごとに image を `main` の tag で出し、脆弱性対応の係の PR がマージされたらすぐにパッチ版を出す](0037-a-main-image-to-scan-and-a-vulnerability-fix-released-at-once.md) | Accepted |
 | 0038 | [活動の記録は backend が 1 行の要約として持ち、ターンの結果と夜の段の結果を runner が知らせる](0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md) | Accepted |
+| 0039 | [モデルは配置の設定で選んだまま、`router/auto` を選んだ配置では runner が要求ごとに主の枠の使用率で振り分ける](0039-router-auto-picks-the-model-per-request-by-the-primary-usage.md) | Accepted |
