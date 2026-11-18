@@ -54,6 +54,35 @@ describe("the database", () => {
     db.close();
   });
 
+  it("makes the record's turns, jobs and ties of the replies from what it had before the record", (t) => {
+    // Guards against: the turns and jobs from before the activity record missing from its list.
+    const file = path.join(tempDir(t), "a.sqlite");
+    const raw = new DatabaseSync(file);
+    for (const migration of MIGRATIONS.slice(0, 6)) raw.exec(migration);
+    raw.exec("PRAGMA user_version = 6");
+    const block = (kind: string, at: string) => raw.prepare("INSERT INTO activities (agent, turn_id, kind, at, body) VALUES ('main', 't-1', ?, ?, '{}')").run(kind, at);
+    block("turn_start", "2026-11-14T10:00:00.000Z");
+    block("tool_call", "2026-11-14T10:00:01.000Z");
+    block("turn_end", "2026-11-14T10:00:09.000Z");
+    raw.exec("INSERT INTO history (id, kind, agent, at, text) VALUES ('r-1', 'agent', 'main', '2026-11-14T10:00:05.000Z', 'done')");
+    const job = { job: "j", command: "make", cwd: "/", end: "exited", exit_code: 1, started_at: "2026-11-14T09:00:00.000Z", ended_at: "2026-11-14T09:01:00.000Z", seconds: 60 };
+    raw
+      .prepare("INSERT INTO events (source, id, occurred_at, received_ms, summary, delivery, inline, payload, path, line) VALUES ('job', 'j', 't', 0, 's', 'now', 1, ?, 'p', 1)")
+      .run(JSON.stringify(job));
+    raw.close();
+    const db = openDatabase(file);
+    assert.deepEqual({ ...(db.prepare("SELECT agent, started_at, ended_at, result, tools FROM turns").get() as object) }, {
+      agent: "main",
+      started_at: "2026-11-14T10:00:00.000Z",
+      ended_at: "2026-11-14T10:00:09.000Z",
+      result: null,
+      tools: 1,
+    });
+    assert.equal((db.prepare("SELECT turn_id FROM history").get() as { turn_id: string }).turn_id, "t-1");
+    assert.deepEqual({ ...(db.prepare("SELECT id, failed FROM record_jobs").get() as object) }, { id: "j", failed: 1 });
+    db.close();
+  });
+
   it("is opened again without migrating twice", (t) => {
     const file = path.join(tempDir(t), "a.sqlite");
     openDatabase(file).close();

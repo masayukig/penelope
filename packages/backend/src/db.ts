@@ -183,6 +183,104 @@ export const MIGRATIONS: readonly string[] = [
   -- The owner's files that are not copied: their names and sizes, as JSON.
   ALTER TABLE history ADD COLUMN files TEXT;
   `,
+  `
+  -- The activity record (ADR-0038): one row a turn, beside the activities
+  -- that are its flow. Times are RFC 3339 in UTC, as the activities have them.
+  CREATE TABLE turns (
+    turn_id       TEXT PRIMARY KEY,
+    agent         TEXT NOT NULL,
+    started_at    TEXT,
+    ended_at      TEXT,
+    -- As the runner said; NULL while it runs, or when it ended and the runner did not say.
+    result        TEXT CHECK (result IN ('done', 'failed', 'stopped')),
+    reason        TEXT,
+    -- When the backend learned the result.
+    recorded_at   TEXT,
+    -- The events it was given, as JSON, and how many in all.
+    triggers      TEXT NOT NULL DEFAULT '[]',
+    trigger_count INTEGER NOT NULL DEFAULT 0,
+    tools         INTEGER NOT NULL DEFAULT 0,
+    -- A turn of the nightly switch: the seq of its control event and the step.
+    night_seq     INTEGER,
+    stage         TEXT CHECK (stage IN ('reflection', 'curator')),
+    -- Where it stands in the list: its start, else the first that was heard of it.
+    at            TEXT NOT NULL
+  );
+  CREATE INDEX turns_at ON turns (at);
+  CREATE INDEX turns_agent ON turns (agent, at);
+  CREATE INDEX turns_open ON turns (agent) WHERE ended_at IS NULL AND result IS NULL;
+  CREATE INDEX turns_night ON turns (night_seq, stage) WHERE night_seq IS NOT NULL;
+  CREATE INDEX turns_failed ON turns (recorded_at) WHERE result = 'failed';
+
+  -- The turns from before the record, made from their activities; their result is unknown.
+  INSERT INTO turns (turn_id, agent, started_at, ended_at, tools, at)
+    SELECT turn_id, min(agent),
+           min(CASE WHEN kind = 'turn_start' THEN at END),
+           max(CASE WHEN kind = 'turn_end' THEN at END),
+           sum(kind = 'tool_call'),
+           coalesce(min(CASE WHEN kind = 'turn_start' THEN at END), min(at))
+      FROM activities GROUP BY turn_id;
+  -- One with no end that a later turn of the same agent followed was cut.
+  UPDATE turns SET result = 'stopped'
+   WHERE ended_at IS NULL AND EXISTS (SELECT 1 FROM turns later WHERE later.agent = turns.agent AND later.at > turns.at);
+
+  -- A turn's flow is read by its turn, and the old is removed by its time.
+  CREATE INDEX activities_turn ON activities (turn_id, row);
+  CREATE INDEX activities_at ON activities (at);
+
+  -- The turn a reply was sent in. Those from before are tied to the main agent's turn they fell in.
+  ALTER TABLE history ADD COLUMN turn_id TEXT;
+  UPDATE history SET turn_id = (
+    SELECT t.turn_id FROM turns t
+     WHERE t.agent = 'main' AND t.started_at <= history.at AND (t.ended_at IS NULL OR t.ended_at >= history.at)
+     ORDER BY t.started_at DESC LIMIT 1)
+   WHERE kind = 'agent';
+  CREATE INDEX history_turn ON history (turn_id) WHERE turn_id IS NOT NULL;
+
+  -- The nightly switches: the seq of the night's control event, its steps as
+  -- JSON, when it was due and started, and whether a step failed. A row from
+  -- before has none of them.
+  ALTER TABLE session_rotations ADD COLUMN seq INTEGER;
+  ALTER TABLE session_rotations ADD COLUMN stages TEXT;
+  ALTER TABLE session_rotations ADD COLUMN scheduled_at TEXT;
+  ALTER TABLE session_rotations ADD COLUMN started_at TEXT;
+  ALTER TABLE session_rotations ADD COLUMN failed INTEGER NOT NULL DEFAULT 0;
+  CREATE UNIQUE INDEX session_rotations_seq ON session_rotations (seq) WHERE seq IS NOT NULL;
+  CREATE INDEX session_rotations_at ON session_rotations (coalesce(started_at, at));
+
+  -- The ends of the background jobs, one line each (ADR-0030).
+  CREATE TABLE record_jobs (
+    id          TEXT PRIMARY KEY,
+    command     TEXT NOT NULL,
+    started_at  TEXT NOT NULL,
+    ended_at    TEXT NOT NULL,
+    seconds     INTEGER NOT NULL,
+    end_kind    TEXT NOT NULL,
+    exit_code   INTEGER,
+    signal      TEXT,
+    failed      INTEGER NOT NULL,
+    received_at TEXT NOT NULL
+  );
+  CREATE INDEX record_jobs_ended ON record_jobs (ended_at);
+  INSERT OR IGNORE INTO record_jobs (id, command, started_at, ended_at, seconds, end_kind, exit_code, signal, failed, received_at)
+    SELECT id, substr(json_extract(payload, '$.command'), 1, 200), json_extract(payload, '$.started_at'),
+           json_extract(payload, '$.ended_at'), json_extract(payload, '$.seconds'), json_extract(payload, '$.end'),
+           json_extract(payload, '$.exit_code'), json_extract(payload, '$.signal'),
+           json_extract(payload, '$.end') IN ('timed-out', 'signaled')
+             OR (json_extract(payload, '$.end') = 'exited' AND coalesce(json_extract(payload, '$.exit_code'), 0) <> 0),
+           strftime('%Y-%m-%dT%H:%M:%fZ', received_ms / 1000.0, 'unixepoch')
+      FROM events
+     WHERE source = 'job' AND json_valid(payload)
+       AND json_type(payload, '$.command') = 'text' AND json_type(payload, '$.started_at') = 'text'
+       AND json_type(payload, '$.ended_at') = 'text' AND json_type(payload, '$.seconds') = 'integer'
+       AND json_type(payload, '$.end') = 'text';
+
+  -- When the record began, and when the owner last opened it.
+  CREATE TABLE record_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

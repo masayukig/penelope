@@ -134,15 +134,6 @@ describe("the conversation", () => {
       ["main", "t-1", "turn_end", activities[2]],
     ]);
   });
-
-  it("keeps when a session was switched", (t) => {
-    const { conversation, db } = setup(t);
-    conversation.sessionRotated("main");
-    assert.deepEqual(
-      { ...(db.prepare("SELECT agent, at FROM session_rotations").get() as object) },
-      { agent: "main", at: "2026-11-14T09:00:00.000Z" },
-    );
-  });
 });
 
 describe("the feed", () => {

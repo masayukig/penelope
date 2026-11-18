@@ -85,9 +85,10 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 ## 状態
 
 - 状態は `PENELOPE_DATABASE` の SQLite の 1 つのファイルに置く（[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)）。待ち行列、会話の履歴、途中経過の記録、予約、セッションの切り替えの記録、ログインのセッション、A2A の Task、サブエージェントごとに runner が最後に知らせたもの（目的と閉じたか）、知らせの購読である。
-- エージェントごとの今の状態（`thinking` か `waiting`）とその状態になった時刻は別に残さず、途中経過の記録の最後の `turn_start` か `turn_end` から引く（[sandbox-api.md](sandbox-api.md) の「途中経過」）。
-- schema は migration の列で進める。版は `PRAGMA user_version` で、その数の migration が当たっている。migration は足すだけで、書き換えない。backend より新しい版のファイルは開かずに止まる。版 2 は A2A の Task、版 3 はサブエージェント（`sub_agents`）と、途中経過の記録から最後の `turn_start`・`turn_end` を引く索引、版 4 は知らせの購読（`push_subscriptions`。`endpoint` ごとに 1 行、種類と、その種類の鍵の JSON）、版 5 は作ったものの写し（`assets`）、版 6 はオーナーの画像の写し（`assets` を作り直して `agent` を空でもよくし、`reply_id` を `message_id` にした。履歴の `files`）である。
-- 出来事・会話の履歴・途中経過・A2A の Task は消さない。いつまで残すかは、量が問題になったときに決める。
+- エージェントごとの今の状態（`thinking` か `waiting`）とその状態になった時刻は別に残さず、途中経過の記録の最後の `turn_start` か `turn_end` から引く（[sandbox-api.md](sandbox-api.md) の「途中経過」）。途中経過が 30 日で消えて（「活動の記録」）どちらも無くなったエージェントは、まだターンの無いエージェントと同じく `waiting` である。
+- schema は migration の列で進める。版は `PRAGMA user_version` で、その数の migration が当たっている。migration は足すだけで、書き換えない。backend より新しい版のファイルは開かずに止まる。版 2 は A2A の Task、版 3 はサブエージェント（`sub_agents`）と、途中経過の記録から最後の `turn_start`・`turn_end` を引く索引、版 4 は知らせの購読（`push_subscriptions`。`endpoint` ごとに 1 行、種類と、その種類の鍵の JSON）、版 5 は作ったものの写し（`assets`）、版 6 はオーナーの画像の写し（`assets` を作り直して `agent` を空でもよくし、`reply_id` を `message_id` にした。履歴の `files`）、版 7 は活動の記録（下の「活動の記録」）である。
+- 版 7 に上げたファイルは、版 6 までの backend では開けない（新しい版のファイルを開かずに止まる決まりのまま）。backend の image を前の版に戻すときは、SQLite のファイルも版 7 に上げる前の backup に戻す。
+- 出来事・会話の履歴・A2A の Task は消さない。いつまで残すかは、量が問題になったときに決める。途中経過と活動の記録の 1 行は、下の「活動の記録」の期間で消す。
 - `/sources` の保存期間による削除はまだ無い。
 
 ## 作ったものの写し
@@ -133,8 +134,48 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - `PENELOPE_NIGHTLY_CRON` の時刻に、`source` が `control`、`id` が `nightly@<時刻>`、`payload` が `{kind: "nightly"}` の出来事を列に入れる。backend が止まっていて時刻を過ぎたものは、後から入れない。次の夜を待つ。
 - 時刻は 15 秒ごとに確かめる。テスト用の秒の欄で夜どうしの間が 1 分より短いときは、1 秒ごとに確かめる。
 - backend は切り替えの段を数えない。制御の出来事も、ほかの出来事と同じく、ack が無ければ `PENELOPE_REDELIVER_MINUTES` の後にもう一度渡すだけである。
-- 切り替えの知らせ（`POST /v1/sessions/rotated`）は記録に残す。
+- 切り替えの知らせ（`POST /v1/sessions/rotated`）は、段の結果とともに活動の記録に残す（下の「活動の記録」）。
 - 切り替えの途中で runner が止まったときにどこからやり直すか、整理係のターンが失敗したときにどうするかは、runner が決める。
+
+## 活動の記録
+
+[ADR-0038](adr/0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md) の、backend が持つ記録の形と、消し方を決める。UI に出す形は [ui-api.md](ui-api.md) の「活動の記録」、runner が送るものは [sandbox-api.md](sandbox-api.md) の「ターンの結果ときっかけ」と「セッションの切り替えの知らせ」にある。コードは `packages/backend/src/record.ts`。
+
+### 表
+
+- `turns`: 1 ターン 1 行。途中経過の `turn_start`（始まり）・`tool_call`（ツールの回数）・`turn_end`（終わり）と、ターンの終わりの口（結果・理由・きっかけ・夜の段）から作る。始まりを受けていないターンも、最初に受けたものの時刻で行を作る。きっかけは、ターンの終わりで受けた `seq` を出来事の列と引き合わせ、`source`・`stream`・`summary` を写して持つ。出来事の列の行が後で消えても、きっかけは残るようにするためである。
+- 返事は、会話の履歴の行の `turn_id` でターンに結び付ける。ターンの返事の数は、そこから数える。
+- `session_rotations`: 夜の切り替えの知らせ 1 回が 1 行。夜の制御の出来事の `seq`（同じ `seq` は 1 行で、後の知らせが置き換える）、段の結果の JSON、予定の時刻（出来事の `occurred_at`）、始まり（その夜の段のターンの最初の始まり、無ければ知らせの時刻）、段に失敗があるかを持つ。
+- `record_jobs`: 裏の仕事の終わり 1 件が 1 行。終わりの出来事の `payload` から、コマンドの頭・始まり・終わり・秒・終わり方・exit code・シグナル・失敗か・受けた時刻を写す。
+- `record_state`: 記録が始まった時刻（この版の backend が初めて立ち上がった時刻。逃した夜をここから数える）と、オーナーが記録を開いた時刻（オーナーの GitHub の user ID ごと）。
+- 閉じたサブエージェントは、`sub_agents` の閉じた行を使う。閉じた時刻は、閉じた知らせを受けた時刻（`updated_at`）である。
+- 逃した夜は表に書かない。読むたびに、`PENELOPE_NIGHTLY_CRON` の予定と、夜の制御の出来事（`id` が `nightly@<時刻>`）と、`session_rotations` から決める。`seq` の無い知らせ（段の結果を送らない runner）は、その夜の時刻から次の夜の時刻までに来たものを、その夜の知らせとする。
+
+### この版より前の記録
+
+- 版 7 に上げるとき、それまでの途中経過から `turns` を作る。結果ときっかけは分からない（UI では `unknown`）。終わりの無いターンのうち、同じエージェントの後のターンがあるものは `stopped` にする。
+- 会話の履歴の返事は、その時刻が始まりと終わりの間にある本体のターンに結び付ける。
+- それまでの裏の仕事の終わりの出来事から `record_jobs` を作る。
+- それまでの `session_rotations` の行は、段の結果の分からない夜として出る。
+- 記録が始まる前の夜は、逃した夜として出さない。
+
+### 消す
+
+- 途中経過（`activities`）は 30 日（`RECORD_FLOW_DAYS`）、`turns`・`session_rotations`・`record_jobs`・閉じた `sub_agents` は 1 年（`RECORD_SUMMARY_DAYS`）を過ぎたら消す。どれも時刻の索引で引く。
+- 消すのは、立ち上がったときと、その後 1 時間ごとである。1 回の DELETE は 500 行までにし、その間に event loop を譲る。SQLite は 1 つの接続で、読み書きは同じ event loop で順に回るので、ひとつの DELETE の間だけ待たせる。
+- 消した場所は SQLite のファイルの中で使い回され、ファイルは小さくならない（`VACUUM` はしない）。
+- 途中経過が消えたターンは、`turns` の行が残り、UI に「流れは消えた」と出る（`expired`）。
+- 会話の履歴の `turn_id` は、ターンの行が消えても残す。
+
+### まだ見ていない失敗
+
+- 数え方は [ui-api.md](ui-api.md) の「まだ見ていない失敗と「見た」」。
+- backend は 15 秒ごとと、記録が失敗を受けたときと、オーナーが記録を開いたときに数え直し、前に流れで送った数と違えば `record` を送る。
+
+### 失敗したとき
+
+- 記録に残すときの誤りは、ログに 1 行書くだけで、その要求（途中経過、ターンの終わり、返事、裏の仕事の終わり、切り替えの知らせ）は断らない。
+- 消す仕事が失敗したら、ログに書いて、次の 1 時間でまた消す。
 
 ## heartbeat
 

@@ -1,6 +1,6 @@
 // The conversation and the record of the turns (ADR-0002, docs/ui-api.md):
 // the owner's messages and the replies as history, what the turns did block
-// by block, and the nightly switches. What is new also goes down the feed.
+// by block. What is new also goes down the feed.
 // The images of a reply and of the owner's messages are kept by the assets
 // (ADR-0032, ADR-0034).
 import { randomUUID } from "node:crypto";
@@ -27,6 +27,7 @@ type Row = {
   trigger_source: string | null;
   trigger_summary: string | null;
   files: string | null;
+  turn_id: string | null;
 };
 
 export class Conversation {
@@ -71,8 +72,9 @@ export class Conversation {
 
   /**
    * Keeps the reply with copies of its images, tied to it, and sends it down
-   * the feed. All of it is kept or none: when the copies cannot be written,
-   * it throws AssetStoreError and the reply is not taken (ADR-0032).
+   * the feed, tied to the turn it was sent in when that is known (ADR-0038).
+   * All of it is kept or none: when the copies cannot be written, it throws
+   * AssetStoreError and the reply is not taken (ADR-0032).
    */
   reply(request: Omit<ReplyRequest, "images">, images: readonly CheckedImage[] = []): { id: string } {
     const id = randomUUID();
@@ -82,8 +84,8 @@ export class Conversation {
     try {
       transaction(this.db, () => {
         this.db
-          .prepare("INSERT INTO history (id, kind, agent, at, text, expression, in_reply_to) VALUES (?, 'agent', ?, ?, ?, ?, ?)")
-          .run(id, request.agent, at, request.text, request.expression ?? null, request.in_reply_to ?? null);
+          .prepare("INSERT INTO history (id, kind, agent, at, text, expression, in_reply_to, turn_id) VALUES (?, 'agent', ?, ?, ?, ?, ?, ?)")
+          .run(id, request.agent, at, request.text, request.expression ?? null, request.in_reply_to ?? null, request.turn_id ?? null);
         if (stored.length > 0) this.assets!.record(id, request.agent, stored);
       });
     } catch (error) {
@@ -102,6 +104,7 @@ export class Conversation {
         agent: request.agent,
         ...(request.expression === undefined ? {} : { expression: request.expression }),
         ...(trigger === undefined ? {} : { trigger }),
+        ...(request.turn_id === undefined ? {} : { turn_id: request.turn_id }),
         ...(copies.length === 0 ? {} : { images: copies }),
       },
     });
@@ -126,7 +129,7 @@ export class Conversation {
     }
     const rows = this.db
       .prepare(
-        `SELECT h.row, h.id, h.kind, h.agent, h.at, h.text, h.expression, h.files, e.source AS trigger_source, e.summary AS trigger_summary
+        `SELECT h.row, h.id, h.kind, h.agent, h.at, h.text, h.expression, h.files, h.turn_id, e.source AS trigger_source, e.summary AS trigger_summary
            FROM history h LEFT JOIN events e ON e.seq = h.in_reply_to
           WHERE h.row < ? ORDER BY h.row DESC LIMIT ?`,
       )
@@ -168,10 +171,6 @@ export class Conversation {
     if (row === undefined) return { state: "waiting" };
     return { state: row.kind === "turn_start" ? "thinking" : "waiting", since: row.at };
   }
-
-  sessionRotated(agent: AgentId): void {
-    this.db.prepare("INSERT INTO session_rotations (agent, at) VALUES (?, ?)").run(agent, iso(this.now()));
-  }
 }
 
 function entry(row: Row, images: ReplyImage[] | undefined): HistoryEntry {
@@ -186,6 +185,7 @@ function entry(row: Row, images: ReplyImage[] | undefined): HistoryEntry {
     agent: row.agent ?? "main",
     ...(row.expression === null ? {} : { expression: row.expression }),
     ...(row.trigger_source === null || row.trigger_summary === null ? {} : { trigger: { source: row.trigger_source, summary: row.trigger_summary } }),
+    ...(row.turn_id === null ? {} : { turn_id: row.turn_id }),
     ...(images === undefined ? {} : { images }),
   };
 }

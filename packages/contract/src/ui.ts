@@ -2,7 +2,7 @@
 // screens are agreed with the owner.
 
 import type { Source } from "./events.ts";
-import type { Activity, AgentId, ScheduleWhen, SubAgentStatus } from "./sandbox.ts";
+import type { Activity, AgentId, JobEndKind, NightStageResult, NightTurnStage, ScheduleWhen, SubAgentStatus, TurnResult } from "./sandbox.ts";
 
 /** `POST /api/messages` (JSON, or multipart with files). */
 export type PostMessageRequest = { text: string };
@@ -60,6 +60,8 @@ export type HistoryEntry =
       agent: AgentId;
       expression?: string;
       trigger?: Trigger;
+      /** The turn it was sent in, for the activity record (ADR-0038). Missing when the backend does not know it. */
+      turn_id?: string;
       /** The images it carries, in the order sent. Missing when there are none. */
       images?: ReplyImage[];
     };
@@ -76,7 +78,9 @@ export type StreamEvent =
   | { event: "activity"; data: { agent: AgentId; activity: Activity } }
   | { event: "state"; data: { agent: AgentId; state: AgentState } }
   /** A sub-agent was started or closed. */
-  | { event: "agent"; data: SubAgentStatus };
+  | { event: "agent"; data: SubAgentStatus }
+  /** The number of failures the owner has not seen changed (ADR-0038). */
+  | { event: "record"; data: RecordUnseenResponse };
 
 /** One sub-agent that is not closed, as `GET /api/agents` lists it. */
 export type SubAgent = {
@@ -149,4 +153,196 @@ export type Notice = {
   expression?: string;
   /** How many images the reply has, when it has any (ADR-0032). */
   images?: number;
+};
+
+// ── The activity record (ADR-0038, docs/ui-api.md "活動の記録") ──
+
+/** One event a turn was given, as the backend's queue has it. */
+export type RecordTrigger = { seq: number; source: Source; stream?: string; summary: string };
+
+/**
+ * How a turn went: as the runner said (`done`, `failed`, `stopped`),
+ * `running` while it is under way, or `unknown` when it ended and the runner
+ * did not say (an older runner, or a turn from before the record).
+ */
+export type RecordTurnResult = TurnResult | "running" | "unknown";
+
+/** The fields of every row. `at` is where it stands in the list, newest first. */
+type RecordRowBase = {
+  id: string;
+  /** RFC 3339. */
+  at: string;
+  /**
+   * RFC 3339, only on a row that is a failure (or a missed night): when the
+   * backend learned of it. A failure after the owner last opened the record
+   * is new to her.
+   */
+  failed_at?: string;
+};
+
+/** One turn of the main agent or of a sub-agent. `id` is its `turn_id`; `at` is its start. */
+export type RecordTurn = RecordRowBase & {
+  kind: "turn";
+  agent: AgentId;
+  /** Missing when its start was not heard of. */
+  started_at?: string;
+  /** Missing while it runs, and for a turn cut with no end. */
+  ended_at?: string;
+  /** Whole seconds from its start to its end, when both are known. */
+  seconds?: number;
+  result: RecordTurnResult;
+  /** Why it failed (or was stopped), in one line, when the runner said. */
+  reason?: string;
+  /**
+   * The events it was given, in the order handed, at most RECORD_TRIGGERS_MAX.
+   * Empty for a sub-agent's turn (its work came from the main agent), a turn
+   * of the nightly switch, and a turn whose events are unknown.
+   */
+  triggers: RecordTrigger[];
+  /** How many events it was given in all: may be more than `triggers` holds. */
+  trigger_count: number;
+  /** How many tools it called. */
+  tools: number;
+  /** How many replies it sent to the owner. */
+  replies: number;
+  /** For a turn of the nightly switch: the night's row and the step. */
+  night?: { id: string; stage: NightTurnStage };
+};
+
+/** One step of a night: `unknown` when the runner did not say. */
+export type RecordNightStage = { result: NightStageResult | "unknown"; reason?: string };
+
+/**
+ * One nightly switch the runner reported. `failed` when a step failed, even
+ * if later steps were made; `unknown` when it said nothing of the steps.
+ * `at` is its start: its first turn's, else when it was reported.
+ */
+export type RecordNight = RecordRowBase & {
+  kind: "night";
+  /** RFC 3339: the time it was due, when its control event is known. */
+  scheduled_at?: string;
+  started_at: string;
+  /** When the runner reported it. */
+  ended_at: string;
+  seconds: number;
+  result: "done" | "failed" | "unknown";
+  stages: { reflection: RecordNightStage; curator: RecordNightStage; session: RecordNightStage };
+};
+
+/** A night that was due and was not switched (ADR-0038). It has no page of its own. `at` is when it was due. */
+export type RecordMissedNight = RecordRowBase & {
+  kind: "missed_night";
+  scheduled_at: string;
+  failed_at: string;
+};
+
+/** The end of a background job (ADR-0030). It has no page of its own. `at` is its end. */
+export type RecordJob = RecordRowBase & {
+  kind: "job";
+  /** The head of its command, at most RECORD_COMMAND_MAX characters. */
+  command: string;
+  started_at: string;
+  ended_at: string;
+  seconds: number;
+  end: JobEndKind;
+  exit_code?: number;
+  signal?: string;
+};
+
+/** A sub-agent. `id` and `agent` are its name; in the list only closed ones, `at` when it was closed. */
+export type RecordSubAgent = RecordRowBase & {
+  kind: "sub_agent";
+  agent: AgentId;
+  purpose: string;
+  /** When it was started, when the backend heard of it. */
+  started_at?: string;
+  /** Missing while it is not closed. */
+  closed_at?: string;
+  /** How many turns it had, and how many of them failed. */
+  turns: number;
+  failed_turns: number;
+};
+
+export type RecordRow = RecordTurn | RecordNight | RecordMissedNight | RecordJob | RecordSubAgent;
+
+/** The kinds the list can be narrowed to. `night` takes the missed nights too. */
+export type RecordKind = "turn" | "night" | "job" | "sub_agent";
+
+/**
+ * `GET /api/record?day=&tz=&failed=&agent=&kind=`: one day of the record,
+ * newest first, narrowed as asked. `before` is the next older day that has
+ * rows the same narrowing keeps; missing on the last.
+ */
+export type RecordDayResponse = {
+  /** `YYYY-MM-DD` in the time zone asked for. */
+  day: string;
+  rows: RecordRow[];
+  /** The whole day's numbers, not narrowed: its turns, and its failures (not counting missed nights). */
+  turns: number;
+  failures: number;
+  before?: string;
+  /** Every sub-agent the record knows, by name, for narrowing by agent. */
+  agents: string[];
+};
+
+/** One block of a turn's flow: as the activity it was, but a tool's result carries only its size. */
+export type RecordFlowItem =
+  | Exclude<Activity, { kind: "turn_start" | "turn_end" | "tool_result" }>
+  | {
+      kind: "tool_result";
+      at: string;
+      turn_id: string;
+      call_id: string;
+      is_error: boolean;
+      /** Lines and bytes (UTF-8) of its output; the output is `GET /api/record/turns/<id>/results/<call_id>`. */
+      lines: number;
+      bytes: number;
+    };
+
+/** A reply the turn sent, with where it stands in the conversation. */
+export type RecordReply = {
+  id: string;
+  at: string;
+  text: string;
+  /** A `before` for `GET /api/history` whose page starts with this reply. */
+  history_before: string;
+};
+
+/** `GET /api/record/turns/<id>` */
+export type RecordTurnResponse = {
+  turn: RecordTurn;
+  /** Its blocks in order. Empty when `expired`. */
+  flow: RecordFlowItem[];
+  /** Whether its flow is gone with time (30 days), only the summary left. */
+  expired: boolean;
+  replies: RecordReply[];
+};
+
+/** `GET /api/record/turns/<id>/results/<call_id>`: the whole output of one tool's result. */
+export type RecordResultResponse = { output: string };
+
+/** `GET /api/record/nights/<id>`: the night, and the last turn of each of its steps that had one. */
+export type RecordNightResponse = {
+  night: RecordNight;
+  turns: { reflection?: RecordTurn; curator?: RecordTurn };
+};
+
+/** `GET /api/record/sub-agents/<name>?before=`: the sub-agent and its turns, newest first, in pages. */
+export type RecordSubAgentResponse = {
+  sub_agent: RecordSubAgent;
+  turns: RecordTurn[];
+  before?: string;
+};
+
+/** `GET /api/record/unseen`, and the `record` event of the stream. */
+export type RecordUnseenResponse = {
+  /** The failures, missed nights too, the backend learned of after the owner last opened the record. */
+  unseen: number;
+};
+
+/** `POST /api/record/seen`: what was unseen until now, and when she had opened it before. */
+export type RecordSeenResponse = {
+  unseen: number;
+  /** RFC 3339. The first time, when the record began: the failures after it are the unseen ones. */
+  previous_seen_at: string;
 };
