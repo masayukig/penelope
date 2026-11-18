@@ -49,8 +49,12 @@ The `Makefile` is the entry point for both languages, and CI only calls its targ
 - The Go module is the repository root. go.mod ignores `node_modules/` and `packages/`.
 - The TypeScript parts are npm workspaces under `packages/`. Each has `typecheck`, `test` (`node --test`) and
   `build` (`tsc`) scripts where it has code; the root's scripts run them in every workspace.
-- Before pushing, run what CI runs: `make fmt-check vet typecheck lint test tidy vuln images`, and check that
-  `git status --porcelain` is empty.
+- Before pushing, run only the local checks relevant to the change. For a changed TypeScript workspace, run
+  `npm run typecheck -w <workspace>` and `npm test -w <workspace>`. To run a single test file with `node --test`,
+  keep any flags from the workspace's test script. For Go changes, run `go test` on the affected packages and
+  `make fmt-check`. Check that `git status --porcelain` is empty.
+- CI runs the full suite (`make test`, `lint`, `tidy`, `vuln`, `images` and `e2e`, along with formatting, vetting
+  and type checks). Do not run it locally for every change; fix any failures CI reports.
 
 ### The Web UI over a mock backend
 
@@ -63,8 +67,8 @@ picked. What is changed through the UI (a message, a removed schedule) lasts unt
 
 ### Tests
 
-- `make test` runs `go test ./...` and the tests of every workspace. It passes with nothing but the Go and Node
-  toolchains: no cluster, no root, no outside service.
+- `make test` is the full test target used in CI. It includes `go test ./...` and the tests of every workspace,
+  and needs only the Go and Node toolchains: no cluster, no root, no outside service.
 - A test that needs more than that goes behind a make target and, in Go, a build tag of its own, so that `make test`
   never picks it up.
 - To run `make e2e` in several worktrees on one machine at once, give each its own `COMPOSE_PROJECT_NAME` and
