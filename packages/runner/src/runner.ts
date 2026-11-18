@@ -11,7 +11,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import type { ImageContent } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type {
   Activity,
@@ -50,6 +50,7 @@ import {
   reflectionInput,
   systemPrompt,
 } from "./prompts.ts";
+import { MODEL_RETRY } from "./router.ts";
 import { SubAgents } from "./subagents.ts";
 import { backendTools, jobTools, subAgentTools } from "./tools.ts";
 import { formatEvents } from "./turn-input.ts";
@@ -62,6 +63,11 @@ export interface RunnerOptions {
   log?: (line: string) => void;
   /** The first wait before a sub-agent's notice or a job's end is sent again (ADR-0022, ADR-0030). */
   retryMs?: number;
+  /**
+   * Whether a turn that ended in this model error is tried once more, on
+   * another model; the model router says so after a usage limit (router.ts).
+   */
+  failedOver?: (message: AssistantMessage) => boolean;
 }
 
 /** How a turn went, as its end tells the backend (docs/sandbox-api.md, "ターンの結果ときっかけ"). */
@@ -110,6 +116,7 @@ export class Runner {
   private readonly backend: Backend;
   private readonly setup: PiSetup;
   private readonly log: (line: string) => void;
+  private readonly failedOver: ((message: AssistantMessage) => boolean) | undefined;
   private readonly places: Places;
   private readonly subAgents: SubAgents;
   private readonly jobs: Jobs;
@@ -134,6 +141,7 @@ export class Runner {
     this.config = options.config;
     this.backend = options.backend;
     this.log = options.log ?? ((line) => process.stderr.write(`${line}\n`));
+    this.failedOver = options.failedOver;
     const pi = { config: options.config, modelRuntime: options.modelRuntime, settings: options.settings };
     // A sub-agent has Pi's tools alone, and its turns are not folded.
     this.subAgents = new SubAgents({
@@ -143,6 +151,7 @@ export class Runner {
       connectors: () => this.connectors(),
       log: this.log,
       retryMs: options.retryMs ?? 1000,
+      ...(options.failedOver ? { failedOver: options.failedOver } : {}),
     });
     // Only the main agent has jobs: their ends reach only it (ADR-0030).
     this.jobs = new Jobs({
@@ -353,15 +362,27 @@ export class Runner {
     try {
       let text = input;
       let withImages = images;
+      let retried = false;
+      const settle = async () => {
+        let count = 0;
+        while (count !== turn.queued.length) {
+          count = turn.queued.length;
+          await Promise.allSettled(turn.queued);
+        }
+      };
       for (;;) {
         await session.prompt(text, withImages ? { images: withImages } : undefined);
         withImages = undefined;
         // Pi may have finished before a steer or follow-up reached it; what is
         // left in its queue is run as a prompt of the same turn.
-        let count = 0;
-        while (count !== turn.queued.length) {
-          count = turn.queued.length;
-          await Promise.allSettled(turn.queued);
+        await settle();
+        // Before that queue, a failed request goes on once on the router's other
+        // model, so the queue is not sent to the failing one, and what comes
+        // during the retry is drained too.
+        if (!retried && this.afterError(session, recorder.turnId)) {
+          retried = true;
+          await this.retryOnAnother(session, recorder.turnId);
+          await settle();
         }
         if (session.pendingMessageCount === 0) break;
         const { steering, followUp } = session.clearQueue();
@@ -422,6 +443,25 @@ export class Runner {
     if (last?.stopReason === "error") return { result: "failed", reason: last.errorMessage ?? "The model's request failed." };
     if (last?.stopReason === "aborted") return { result: "failed", reason: "The run was cancelled." };
     return { result: "done" };
+  }
+
+  /**
+   * A model error ends Pi's run without a throw, and the turn would end with
+   * nothing said. It is logged; whether the turn goes on once more, because the
+   * router moved to another model, is returned. Not while the runner stops.
+   */
+  private afterError(session: AgentSession, turnId: string): boolean {
+    const failed = lastAssistant(session.messages);
+    if (failed?.stopReason !== "error") return false;
+    this.log(`turn ${turnId}: ${failed.provider}/${failed.model} failed: ${failed.errorMessage ?? "no message"}`);
+    return !this.stopping && (this.failedOver?.(failed) ?? false);
+  }
+
+  private async retryOnAnother(session: AgentSession, turnId: string): Promise<void> {
+    this.log(`turn ${turnId}: tried once more on another model`);
+    await session.sendCustomMessage(MODEL_RETRY, { triggerTurn: true });
+    const again = lastAssistant(session.messages);
+    if (again?.stopReason === "error") this.log(`turn ${turnId}: ${again.provider}/${again.model} failed too: ${again.errorMessage ?? "no message"}`);
   }
 
   /** The request before folding; what it threw, if it did. Events that come meanwhile wait for the next turn. */

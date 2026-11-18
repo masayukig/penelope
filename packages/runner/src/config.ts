@@ -6,6 +6,8 @@ import { join } from "node:path";
 import type { AgentId } from "@penelope/contract";
 import { DEFAULT_MAX_CHARS, SEGMENT } from "@penelope/slack";
 
+import { ROUTER_MODEL, ROUTER_PROVIDER, type RouterConfig } from "./router.ts";
+
 /** Where the sandbox's image carries the skills of the repository (Dockerfile, docs/pod.md). */
 export const IMAGE_SKILLS_DIR = "/opt/penelope/skills";
 
@@ -28,6 +30,8 @@ export interface Config {
   /** Left out, Pi's own settings choose the model. */
   model?: { provider: string; id: string };
   thinkingLevel?: ThinkingLevel;
+  /** The virtual model router/auto (PENELOPE_MODEL_ROUTER, docs/model-router.md); left out, there is none. */
+  router?: RouterConfig;
   /** HOME: the working directory of the session (ADR-0011). */
   home: string;
   memoryDir: string;
@@ -84,6 +88,42 @@ export class ConfigError extends Error {
 
 type Env = Readonly<Record<string, string | undefined>>;
 
+function modelName(value: unknown): { provider: string; id: string } | undefined {
+  if (typeof value !== "string") return undefined;
+  const slash = value.indexOf("/");
+  if (slash <= 0 || slash === value.length - 1) return undefined;
+  return { provider: value.slice(0, slash), id: value.slice(slash + 1) };
+}
+
+/** PENELOPE_MODEL_ROUTER: a JSON object (docs/model-router.md). */
+function readRouter(value: string, problems: string[]): RouterConfig | undefined {
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(value) as Record<string, unknown>;
+  } catch {
+    problems.push("PENELOPE_MODEL_ROUTER must be JSON");
+    return undefined;
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    problems.push("PENELOPE_MODEL_ROUTER must be a JSON object");
+    return undefined;
+  }
+  const primary = modelName(raw.primary);
+  const fallback = modelName(raw.fallback);
+  const number = (name: string, fallback: number) => (raw[name] === undefined ? fallback : Number(raw[name]));
+  const high = number("high", 85);
+  const low = number("low", 70);
+  const cacheSeconds = number("cacheSeconds", 300);
+  const before = problems.length;
+  if (!primary || !fallback) problems.push("PENELOPE_MODEL_ROUTER: primary and fallback must be <provider>/<model>");
+  if (typeof raw.prometheus !== "string" || !/^https?:\/\//.test(raw.prometheus)) problems.push("PENELOPE_MODEL_ROUTER: prometheus must be a URL");
+  if (typeof raw.query !== "string" || raw.query === "") problems.push("PENELOPE_MODEL_ROUTER: query is not set");
+  if (!(low >= 0 && low <= high && high <= 100)) problems.push("PENELOPE_MODEL_ROUTER: 0 <= low <= high <= 100");
+  if (!(cacheSeconds > 0)) problems.push("PENELOPE_MODEL_ROUTER: cacheSeconds must be positive");
+  if (problems.length > before) return undefined;
+  return { primary: primary!, fallback: fallback!, prometheus: raw.prometheus as string, query: raw.query as string, high, low, cacheSeconds };
+}
+
 function positiveInteger(env: Env, name: string, fallback: number, problems: string[]): number {
   const value = env[name];
   if (value === undefined || value === "") return fallback;
@@ -122,6 +162,10 @@ export function readConfig(env: Env): Config {
       problems.push(`PENELOPE_THINKING must be one of ${THINKING_LEVELS.join(", ")}`);
     }
   }
+  const router = env.PENELOPE_MODEL_ROUTER ? readRouter(env.PENELOPE_MODEL_ROUTER, problems) : undefined;
+  const routed = model?.provider === ROUTER_PROVIDER && model.id === ROUTER_MODEL;
+  if (routed && !env.PENELOPE_MODEL_ROUTER) problems.push("PENELOPE_MODEL=router/auto needs PENELOPE_MODEL_ROUTER");
+  if (!routed && env.PENELOPE_MODEL_ROUTER) problems.push("PENELOPE_MODEL_ROUTER needs PENELOPE_MODEL=router/auto");
   const promptFileMaxBytes = positiveInteger(env, "PENELOPE_PROMPT_FILE_MAX_BYTES", 65536, problems);
   const imageMaxBytes = positiveInteger(env, "PENELOPE_IMAGE_MAX_BYTES", 5 * 1024 * 1024, problems);
   const pollWaitSeconds = positiveInteger(env, "PENELOPE_POLL_WAIT_SECONDS", 30, problems);
@@ -147,6 +191,7 @@ export function readConfig(env: Env): Config {
     identity,
     ...(model ? { model } : {}),
     ...(thinkingLevel ? { thinkingLevel } : {}),
+    ...(router ? { router } : {}),
     home,
     memoryDir: env.PENELOPE_MEMORY || "/memory",
     ...(env.PENELOPE_OWNER_SKILLS_DIR ? { ownerSkillsDir: env.PENELOPE_OWNER_SKILLS_DIR } : {}),
