@@ -45,4 +45,6 @@ printf '%s' '<text>' | curl -sS --fail-with-body -F 'text=<-' [-F 'to=+81…' | 
   and `group`. `502`: signal-cli or Signal refused it. `503`: signal-cli is not connected just now; try again in a while.
 - What you send to a group is read by everyone in it at once, and nothing checks it before it goes. Keep your owner's private
   matters out of it.
+- While you work on a direct message, or a group message that mentions you or quotes you, its conversation shows you typing,
+  until you send there or a few minutes pass. Sending stops it, so a short "looking into it" message also ends it.
 - Signal's text has no markup. Write plain text.
