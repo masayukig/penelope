@@ -10,7 +10,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import type { RecordDayResponse, RecordRow, RecordTurn } from "@penelope/contract";
 
 import { App } from "../src/ui/App.tsx";
-import { words } from "../src/ui/words.ts";
+import { timeOf, words } from "../src/ui/words.ts";
 import { FakeBackend } from "./fake-backend.ts";
 
 const w = words.record;
@@ -335,11 +335,12 @@ describe("the other pages of the activity record", () => {
 });
 
 describe("a reply in the conversation", () => {
-  it("links to the turn that sent it", async () => {
+  it("links its time to the turn that sent it", async () => {
     const backend = new FakeBackend();
-    backend.history = [{ kind: "agent", id: "r-1", at: new Date().toISOString(), text: "done", agent: "main", turn_id: "t-9" }];
+    const at = new Date().toISOString();
+    backend.history = [{ kind: "agent", id: "r-1", at, text: "done", agent: "main", turn_id: "t-9" }];
     start(backend);
-    const link = await within(await screen.findByRole("log")).findByRole("link", { name: w.seeTurn });
+    const link = await within(await screen.findByRole("log")).findByRole("link", { name: w.seeTurn(timeOf(at)) });
     assert.equal(new URL((link as HTMLAnchorElement).href).hash, "#/record/turns/t-9");
   });
 });

@@ -1080,16 +1080,15 @@ button.record-row-body:hover {
 }
 
 /* "See the turn" beside a reply's time: a faint link, as tall as a finger. */
-.reply-time {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
+/* The time of a reply that opens its turn: plain until pointed at or focused. */
 .reply-turn {
   min-height: 44px;
   margin: -12px 0;
   display: inline-flex;
   align-items: center;
+}
+.reply-turn:focus-visible {
+  text-decoration: underline;
 }
 .astryx-chat-message[data-pointed] {
   animation: pointed 2s ease-out;
