@@ -113,8 +113,8 @@ class FakeSignalCli {
   }
 
   listen = () => new Promise<void>((resolve) => this.server.listen(this.path, resolve));
-  push(envelope: unknown) {
-    for (const client of this.clients) client.write(`${JSON.stringify({ jsonrpc: "2.0", method: "receive", params: { envelope, account: AGENT } })}\n`);
+  push(envelope: unknown, account: string | undefined = AGENT) {
+    for (const client of this.clients) client.write(`${JSON.stringify({ jsonrpc: "2.0", method: "receive", params: { envelope, account } })}\n`);
   }
   close = () => new Promise<void>((resolve) => {
     for (const client of this.clients) client.destroy();
@@ -168,6 +168,8 @@ describe("the Signal plugin against signal-cli", () => {
     });
     try {
       await until(() => cli.clients.length === 1 && lines.includes("connected"));
+      // Guards against: an allowed sender's message to another number of a multi-account daemon taken as ours.
+      cli.push(message({ message: "not ours", attachments: [{ id: "x.png", contentType: "image/png", filename: "x.png", size: 3 }] }), "+819000000009");
       cli.push(message({ message: "hi" }, STRANGER));
       cli.push(message({ message: "look", attachments: [{ id: "a1.png", contentType: "image/png", filename: "photo.png", size: 3 }] }));
       await until(() => delivered.length === 1 && cli.calls.some((call) => call.method === "sendReceipt"));
@@ -181,6 +183,16 @@ describe("the Signal plugin against signal-cli", () => {
       );
       assert.deepEqual(cli.calls[1]!.params, { account: AGENT, recipient: OWNER, targetTimestamp: [1794819600000], type: "read" });
       assert.ok(lines.includes("envelope events=0 dropped=1"));
+      assert.ok(lines.includes("envelope events=0 dropped=1 (another account)"));
+
+      // Guards against: a body cut off midway rejecting the handler and taking the process down.
+      await new Promise<void>((resolve) => {
+        const cut = http.request({ socketPath: sendSocket, path: "/v1/send", method: "POST", headers: { "content-type": "text/plain", "content-length": 1000 } });
+        cut.on("error", () => resolve());
+        cut.write("x".repeat(10));
+        setTimeout(() => (cut.destroy(), resolve()), 50);
+      });
+      await until(() => lines.some((line) => line.startsWith("send aborted")));
 
       const form = new FormData();
       form.set("text", "here it is\n");
