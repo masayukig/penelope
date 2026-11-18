@@ -103,12 +103,14 @@ function Reply({ item, wide, onOpen }: { item: AgentItem; wide: boolean; onOpen:
         item.turn_id === undefined ? (
           timeOf(item.at)
         ) : (
-          <span className="reply-time">
-            <span>{timeOf(item.at)}</span>
-            <Link href={hashOf({ place: "log", page: { kind: "turn", id: item.turn_id } })} color="secondary" hasUnderline className="reply-turn">
-              {words.record.seeTurn}
-            </Link>
-          </span>
+          <Link
+            href={hashOf({ place: "log", page: { kind: "turn", id: item.turn_id } })}
+            label={words.record.seeTurn(timeOf(item.at))}
+            color="secondary"
+            className="reply-turn"
+          >
+            {timeOf(item.at)}
+          </Link>
         )
       }
     />

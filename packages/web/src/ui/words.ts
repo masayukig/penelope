@@ -141,7 +141,7 @@ export const words = {
     replies: "このターンで出した返事",
     noReplies: "このターンでは返事を出していません。",
     toTalk: "会話でこの返事を見る",
-    seeTurn: "ターンを見る",
+    seeTurn: (time: string) => `${time} ・ このターンを見る`,
     subTurns: (n: number) => `このサブエージェントのターン ・ ${n}`,
     moreTurns: (n: number) => `残りの ${n} 件を見る`,
     openResult: (lines: number, size: string) => `結果を開く（${lines} 行 ・ ${size}）`,

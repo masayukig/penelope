@@ -57,7 +57,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 - 返事とオーナーのメッセージを、新しい順に返す。応答は `{entries, before?}`。`before` は次の（より古い）ページを取るための不透明な cursor で、最後のページには無い。
 - 1 件は `kind`（`owner` か `agent`）・`id`・`at`・`text` を持つ。`agent` のものは、さらに `agent`（エージェントの ID）と `expression` を持つ。
 - `agent` のものは、答えている出来事（返事の `in_reply_to`）を backend が知っていれば、`trigger` として、その出来事の `source` と `summary` を持つ。出来事の `payload` は載せない。UI はこれを、エージェントが何をきっかけに話したかの札にする。
-- `agent` のものは、backend が返事を出したターンを知っていれば `turn_id` を持つ（[ADR-0038](adr/0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md)）。Web UI は「ターンを見る」で `GET /api/record/turns/<turn_id>` を開く（「活動の記録」）。
+- `agent` のものは、backend が返事を出したターンを知っていれば `turn_id` を持つ（[ADR-0038](adr/0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md)）。Web UI は返事の時刻のリンクで `GET /api/record/turns/<turn_id>` を開く（「活動の記録」）。
 - `agent` のものは、画像を添えた返事なら `images` として、送られた順の画像の一覧を持つ（型は `ReplyImage`、「画像」）。画像の無い返事には欄が無い。
 - `owner` のものは、添付があれば `images`（写した画像の一覧。型は `ReplyImage`、「画像」）と `files`（写さなかったファイルの `{name, size}` の一覧。型は `OwnerFile`）を、それぞれ送られた順に持つ。無い欄は載せない。[ADR-0034](adr/0034-images-the-owner-sends-copied-by-the-backend.md) より前に送られたメッセージは、どちらも持たない。
 
@@ -250,7 +250,7 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 
 - 左の「場所」の「活動の記録」に置く。見た目は [docs/design](design/README.md) の 15 章。PC もスマートフォンも同じ中身で、幅は会話と同じく 720px までで中央に寄せる。
 - 一覧と 1 件の画面はアドレスを持つ。backend は `/` のほかの道で Web UI を返さないので（「Web UI の配り方」）、アドレスは # の後ろに置く（`#/record`、`#/record/turns/<id>`、`#/record/nights/<id>`、`#/record/sub-agents/<名前>`）。ほかの場所も `#/talk` などのアドレスを持つ。
-- 会話の返事は、`turn_id` を持てば、時刻の横に「ターンを見る」を出し、そのターンのアドレスへ移る。ターンの画面の「会話でこの返事を見る」は `#/talk?reply=<id>&before=<history_before>` に移り、会話がその返事を持っていなければ `GET /api/history?before=<history_before>` を読んで足し、その返事を画面に出す。そのページと今の会話のあいだのページは、上にスクロールすると読まれる。
+- 会話の返事は、`turn_id` を持てば、時刻をリンクにし、そのターンのアドレスへ移る。ターンの画面の「会話でこの返事を見る」は `#/talk?reply=<id>&before=<history_before>` に移り、会話がその返事を持っていなければ `GET /api/history?before=<history_before>` を読んで足し、その返事を画面に出す。そのページと今の会話のあいだのページは、上にスクロールすると読まれる。
 - まだ見ていない失敗の数は、最初につなぐときとつなぎ直すときに `GET /api/record/unseen` を読み、その後は流れの `record` で直す。左のレールの「活動の記録」とスマートフォンのメニューのボタン（とメニューの中の「活動の記録」）に出す。活動の記録の場所にいるあいだは出さない。
 - 活動の記録の場所を開くと `POST /api/record/seen` を 1 回送る。そこにいるあいだに数が 1 以上になったら（新しい失敗が来たら）、もう 1 回送り、返った `unseen` を知らせの件数に足す。「新しい」の札は、最初に送ったときの `previous_seen_at` より後の `failed_at` を持つ行に付ける。
 - 一覧は、ブラウザの時間帯を `tz` に渡して今日を読み、下までスクロールしたら `before` の日を読む。行の無い日は出さない。流れがターンの始まりか終わり、サブエージェントを閉じたこと、`record` を送るたびに、今日をもう 1 回読んで置き換える。
