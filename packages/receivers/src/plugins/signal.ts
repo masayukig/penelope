@@ -201,6 +201,12 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
             });
 
           const receive = async (params: unknown) => {
+            // A daemon with several numbers names the one it came to; only the configured one's are
+            // taken, before any file is fetched or receipt sent. A single-number daemon (`-a`) leaves it out.
+            if (isObject(params) && params.account !== undefined && params.account !== settings.account) {
+              io.log("envelope events=0 dropped=1 (another account)");
+              return;
+            }
             const made = isObject(params) ? eventOf(params.envelope, allowed) : undefined;
             if (!made) {
               io.log("envelope events=0 dropped=1");
@@ -353,7 +359,7 @@ function sendServer(path: string, senders: readonly string[], call: (method: str
     log(`send status=${status}`);
     response.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
   };
-  const server = http.createServer(async (request, response) => {
+  const handle = async (request: http.IncomingMessage, response: http.ServerResponse) => {
     if (request.url !== "/v1/send") return answer(response, 404, { error: "not found" });
     if (request.method !== "POST") return answer(response, 405, { error: "POST only" });
     const parts: Buffer[] = [];
@@ -385,6 +391,15 @@ function sendServer(path: string, senders: readonly string[], call: (method: str
       const message = error instanceof Error ? error.message : "error";
       return answer(response, error instanceof RpcError && message.includes("not connected") ? 503 : 502, { error: message });
     }
+  };
+  // A body cut off midway (the client gone) rejects the read; that request ends there and the
+  // process, with the other receivers in it, goes on.
+  const server = http.createServer((request, response) => {
+    handle(request, response).catch((error: unknown) => {
+      log(`send aborted (${error instanceof Error ? error.message : "error"})`);
+      if (!response.headersSent && !response.destroyed) answer(response, 400, { error: "the body could not be read" });
+      else response.destroy();
+    });
   });
   server.on("error", (error: NodeJS.ErrnoException) => log(`cannot serve ${path} (${error.code ?? error.name})`));
   rmSync(path, { force: true });
