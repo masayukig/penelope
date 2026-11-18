@@ -552,7 +552,7 @@ Slack の出来事をターンに描いて載せるには、配置が、この�
 
 ## Signal のプラグイン
 
-Signal の 1 対 1 の会話で、許した相手の発言・ファイル・リアクションを受け、エージェントが返す道を持つ（[ADR-0040](adr/0040-signal-through-signal-cli-in-a-receivers-plugin-with-a-send-socket.md)）。`plugin` は `signal`、種類は接続。Signal には bot の API が無いので、配置がエージェントの番号で登録した [signal-cli](https://github.com/AsamK/signal-cli) を daemon として同じ Pod に置き、その JSON-RPC を Unix socket で使う。実装は `packages/receivers/src/plugins/signal.ts` にある。
+Signal の 1 対 1 の会話で許した相手の、また許したグループで誰もの、発言・ファイル・リアクションを受け、エージェントが返す道を持つ（[ADR-0040](adr/0040-signal-through-signal-cli-in-a-receivers-plugin-with-a-send-socket.md)）。`plugin` は `signal`、種類は接続。Signal には bot の API が無いので、配置がエージェントの番号で登録した [signal-cli](https://github.com/AsamK/signal-cli) を daemon として同じ Pod に置き、その JSON-RPC を Unix socket で使う。実装は `packages/receivers/src/plugins/signal.ts` にある。
 
 ### 設定
 
@@ -561,6 +561,8 @@ Signal の 1 対 1 の会話で、許した相手の発言・ファイル・リ�
 | `socket` | なし（必須） | signal-cli の JSON-RPC の Unix socket（`signal-cli daemon --socket <場所>`）。絶対パス |
 | `account` | なし（必須） | エージェントの番号（E.164、`+81…`）。JSON-RPC の呼び出しごとに `account` として渡す（daemon が複数の番号を持つ形でも動く） |
 | `senders` | なし（必須） | 受ける相手で、送ってよい相手。番号（E.164）か Signal の UUID の一覧。1 つ以上 |
+| `groups` | `{}` | 受けて、送ってよいグループ。`{"<名前>": "<グループ ID>"}`。名前は英小文字・数字・`-` で 1〜32 文字（`-` で始まらない）で、`stream` と送り口の `group` になる。ID は signal-cli の `listGroups` の `id`（base64）。同じ ID を 2 度書くと起動しない |
+| `names` | `[]` | エージェントの名前（2 文字以上）。グループの発言の本文にあれば `now` にする（下の「`delivery`」） |
 | `send_socket` | なし | 送り口（下の「送り口」）を待ち受ける Unix socket。省けば送り口を持たない |
 | `max_file_bytes` | `20971520`（20 MiB） | 取ってくるファイル 1 つの大きさの上限。1〜62914560（60 MiB）の整数 |
 | `rpc_timeout_seconds` | `30` | JSON-RPC の 1 回の呼び出しを待つ秒数 |
@@ -582,17 +584,28 @@ Signal の 1 対 1 の会話で、許した相手の発言・ファイル・リ�
 | --- | --- |
 | `dataMessage` の本文かファイルのあるもの | 発言 |
 | `dataMessage.reaction` | リアクションの付け外し |
-| ほか（`groupInfo` のある発言、`senders` にない相手、既読・入力中・`syncMessage`、本文もファイルも無いもの） | 捨てる |
+| ほか（`groups` に無いグループの発言、1 対 1 で `senders` にない相手、既読・入力中・`syncMessage`、本文もファイルも無いもの） | 捨てる |
 
-相手は `sourceNumber` か `sourceUuid` が `senders` にあるかで見る（`sourceUuid` が `null` で届くことがあるため両方を見る）。
+- 1 対 1 は、相手の `sourceNumber` か `sourceUuid` が `senders` にあるかで見る（`sourceUuid` が `null` で届くことがあるため両方を見る）。
+- `dataMessage.groupInfo.groupId` が `groups` にあるグループの発言は、**送り主を問わず**受ける（[ADR-0041](adr/0041-signal-groups-the-owner-allowed-received-from-every-member.md)）。グループの中の会話の流れを読めないと、加わるかどうかを決められないためである。
+- Signal では、連絡先の誰かがエージェントを承認なしにグループへ足せる（受け側では防げない）。`groups` に無いグループの発言は捨てるだけで、足されたことは知らせない。「知らないグループを本人に聞き、断られたら抜けてブロックする」仕組みはまだ無い（下の「未決」）。
 
 | 欄 | 作り方 |
 | --- | --- |
-| `id` | `<相手の番号（無ければ UUID）>/<発言の timestamp>`。リアクションはリアクションの発言の timestamp |
+| `id` | 1 対 1 は `<相手の番号（無ければ UUID）>/<発言の timestamp>`、グループは `group.<名前>/<送り主>/<発言の timestamp>`。リアクションはリアクションの発言の timestamp |
 | `occurred_at` | 発言の timestamp の時刻 |
-| `stream` | `dm.<番号の + を除いたもの>`（無ければ UUID）を「`stream` の写し方」で写したもの |
-| `delivery` | 発言は `now`、リアクションは `batch` |
-| `summary` | `Signal <名前>: <本文>`（ファイルがあれば後ろに `(<数> file(s))`）、リアクションは `Signal <名前> reacted <絵文字>`（外したら `took off`）。`<名前>` は相手のプロフィールの名前、無ければ番号。改行と 200 文字の扱いは Alertmanager と同じ |
+| `stream` | 1 対 1 は `dm.<番号の + を除いたもの>`（無ければ UUID）、グループは `group.<名前>` を「`stream` の写し方」で写したもの |
+| `delivery` | 下の「`delivery`」 |
+| `summary` | `Signal <名前>: <本文>`（グループは `Signal <グループの名前> <名前>: <本文>`。ファイルがあれば後ろに `(<数> file(s))`）、リアクションは `Signal <名前> reacted <絵文字>`（外したら `took off`）。`<名前>` は相手のプロフィールの名前、無ければ番号。改行と 200 文字の扱いは Alertmanager と同じ |
+
+#### `delivery`
+
+- 1 対 1 の発言は `now`、リアクションはどこでも `batch`。
+- グループの発言は、次のどれかなら `now`、ほかは `batch`（`batch` は backend の待ちの後にまとめて渡るので、会話が少し落ち着いてから読むことになる）。
+  - エージェントへのメンション（`mentions[].number` が `account`。signal-cli は自分の番号を入れる）
+  - エージェントの発言の引用（`quote.authorNumber` が `account`）
+  - 本文に `names` のどれかがある（NFKC・小文字・カタカナをひらがなにして、部分一致。別の人や別の言葉に当たることもある）
+  - エージェントがそのグループに送った後 10 分以内の発言か、グループの直前の発言がエージェントのものであるときの次の発言（何時間後でも）。覚えはメモリだけで、立ち上がり直すと消える
 
 `payload`（型は `SignalPayload`）:
 
@@ -600,11 +613,16 @@ Signal の 1 対 1 の会話で、許した相手の発言・ファイル・リ�
 | --- | --- |
 | `type` | `message` か `reaction` |
 | `from` | `number`・`uuid`・`name`（あるものだけ） |
+| `group` | グループのときだけ。`name`（設定の名前）と `title`（Signal のグループ名。signal-cli が渡したときだけ） |
+| `mentions_me` | グループでエージェントへのメンションがあれば `true` |
+| `own` | 送り口からグループに送ったエージェント自身の発言なら `true`（下の「送り口」） |
 | `timestamp` | Signal の発言の時刻（ミリ秒）。リアクションと引用はこれで指す |
 | `text` | 本文（あるときだけ） |
-| `quote` | 引用した返事のとき、引用元の `timestamp` と `text` |
+| `quote` | 引用した返事のとき、引用元の `timestamp` と `text`。グループでは引用元の送り主 `author`（番号か UUID）と、エージェントの発言なら `mine: true` |
 | `files` | 付いたファイル。1 件は `name`・`mimetype`・`size`・`attached` |
 | `reaction` | `emoji`・`target_timestamp`・`removed` |
+
+- 本文のメンションの印（U+FFFC）は `@<名前>` にする。エージェントへのものは `@you`、名前の分からない相手は `@someone`。
 
 - 発言は `payload.text` を持つので、配置がこの有効化の `source` を backend の `PENELOPE_INLINE_SOURCES` に書けば、本文がそのままターンに載る（[events.md](events.md) の「`inline`」）。添付の画像も画像として載る。
 - ファイルは `getAttachment` で取り、出来事の添付として送る。上限を超えるもの、合わせて 60 MiB を超えるもの、取れなかったものは `attached` を `false` にする。種類は問わない。
@@ -615,19 +633,20 @@ Signal の 1 対 1 の会話で、許した相手の発言・ファイル・リ�
 
 | 要求 | 中身 |
 | --- | --- |
-| `POST /v1/send` | form（`multipart/form-data` か urlencoded）。`text`、`to`（省けば `senders` の最初）、`file`（何度でも）。上限 64 MiB |
+| `POST /v1/send` | form（`multipart/form-data` か urlencoded）。`text`、宛先は `to`（`senders` の 1 つ）か `group`（`groups` の名前）のどちらか（両方省けば `senders` の最初）、`file`（何度でも）、引用して返すなら `quote_timestamp` と `quote_author`（両方）。上限 64 MiB |
 
 | 応答 | 意味 |
 | --- | --- |
 | `200` | `{"timestamp": <送った発言の Signal の時刻>}` |
-| `400` | form でない、本文もファイルも無い |
-| `403` | `to` が `senders` に無い |
-| `502` | signal-cli が断った、Signal が受けなかった（`results` に `SUCCESS` でないものがある） |
+| `400` | form でない、本文もファイルも無い、`to` と `group` の両方がある、`quote_` の 2 つの片方だけか形が違う |
+| `403` | `to` が `senders` に無い、`group` が `groups` に無い |
+| `502` | signal-cli が断った、Signal が受けなかった（1 対 1 は `results` に `SUCCESS` でないものがある、グループはメンバーの誰も `SUCCESS` でない） |
 | `503` | signal-cli につながっていない |
 
-- 本文は末尾の空白と改行を除いて `send` の `message` に、ファイルは `data:<種類>;filename=<名前>;base64,…` の形で `attachments` に入れる。
+- 本文は末尾の空白と改行を除いて `send` の `message` に、ファイルは `data:<種類>;filename=<名前>;base64,…` の形で `attachments` に入れる。グループは `groupId`、引用は `quoteTimestamp`・`quoteAuthor` で渡す。
   - `<名前>` はパーセントエンコードする（`encodeURIComponent`）。signal-cli は data URI の引数の値を URL デコードするので、そのままだと `%` は壊れ、`+` は空白になる。
   - `<種類>` は form のファイルの `Content-Type` の `type/subtype`（`;` から後の引数は落とす）。それが無いか `application/octet-stream` なら、名前の拡張子（`png`・`jpg`・`jpeg`・`gif`・`webp`・`mp4`・`mov`・`m4a`・`ogg`・`pdf`）から決め、どれでもなければ `application/octet-stream` のまま。curl の `-F file=@x.webp` は WebP や MP4 を `application/octet-stream` で送り、そのまま渡すと Signal は画像や動画でなくファイルとして見せるためである。
+- グループに送れたら、その発言を `own: true` の出来事（`batch`）としてそのグループの `stream` に入れる。Signal は自分の送った発言を受信として返さないので、そうしないとグループの記録にエージェントの発言が残らない（Slack のエージェント自身の発言と同じ扱い）。1 対 1 の返事は入れない。
 - 応答の body は `{error}` の JSON。ログは `send status=<番号>` だけで、本文と宛先は書かない。
 - 使い方は sandbox の image の skill `signal` にある。
 
@@ -644,7 +663,9 @@ Signal の 1 対 1 の会話で、許した相手の発言・ファイル・リ�
 
 ### 未決
 
-- グループ、入力中の表示、エージェントからのリアクション、編集・削除の扱い。
+- 入力中の表示、エージェントからのリアクション、編集・削除の扱い。
+- 知らないグループに足されたときに本人に聞き、断られたら抜けてブロックすること。いまは `groups` に無いグループを黙って捨てる。
+- グループへの投稿の判定と本人の承認。penelope には投稿の判定が無く（ADR-0033）、Sentinel の ask（ADR-0005）もまだ無いので、グループへの送り口は判定も承認も通さずに送る。
 
 ## 後に足すプラグイン
 

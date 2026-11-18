@@ -10,11 +10,12 @@ import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
 import { SettingsError, type ConnectionEvent } from "../src/plugin.ts";
-import { eventOf, signal, signalPlugin } from "../src/plugins/signal.ts";
+import { eventOf, fold, signal, signalPlugin, type Audience } from "../src/plugins/signal.ts";
 
 const OWNER = "+15550000001";
 const AGENT = "+15550000002";
 const STRANGER = "+15550000003";
+const GROUP = "Z3JvdXAtb25lLWlkLW1hZGUtdXA=";
 const env = { readFile: () => "" };
 const SETTINGS = { socket: "/run/signal/cli.sock", account: AGENT, senders: [OWNER] };
 
@@ -31,7 +32,10 @@ function refused(settings: Record<string, unknown>): string {
 describe("the Signal plugin's settings", () => {
   test("take a socket, the account and the senders", () => {
     assert.equal(signal.kind, "connection");
-    signal.create({ ...SETTINGS, senders: [OWNER, "0b0e5b1c-1111-4222-8333-444455556666"], send_socket: "/run/signal-send/send.sock", max_file_bytes: 1024, rpc_timeout_seconds: 5 }, env);
+    signal.create(
+      { ...SETTINGS, senders: [OWNER, "0b0e5b1c-1111-4222-8333-444455556666"], groups: { family: GROUP }, names: ["いおり"], send_socket: "/run/signal-send/send.sock", max_file_bytes: 1024, rpc_timeout_seconds: 5 },
+      env,
+    );
   });
 
   test("refuse what they cannot run with, naming the field", () => {
@@ -41,11 +45,17 @@ describe("the Signal plugin's settings", () => {
     assert.equal(refused({ ...SETTINGS, senders: [] }), "senders: must be a list of one or more phone numbers or UUIDs");
     assert.equal(refused({ ...SETTINGS, senders: [OWNER, "alice"] }), "senders[1]: must be a phone number in E.164 or a UUID");
     assert.equal(refused({ ...SETTINGS, max_file_bytes: 0 }), "max_file_bytes: must be an integer from 1 to 62914560");
+    assert.equal(refused({ ...SETTINGS, groups: [GROUP] }), "groups: must map a name to a group ID");
+    assert.equal(refused({ ...SETTINGS, groups: { Family: GROUP } }), "groups.Family: the name must be 1-32 of a-z, 0-9 and -, not starting with -");
+    assert.equal(refused({ ...SETTINGS, groups: { family: "not an id!" } }), "groups.family: must be a group ID as signal-cli's listGroups gives it (base64)");
+    assert.equal(refused({ ...SETTINGS, groups: { family: GROUP, again: GROUP } }), "groups.again: the same group ID is named twice");
+    assert.equal(refused({ ...SETTINGS, names: ["い"] }), "names[0]: must be a name of 2 characters or more");
   });
 });
 
 const message = (dataMessage: Record<string, unknown>, from = OWNER) => ({ sourceNumber: from, sourceUuid: null, sourceName: "Owner", timestamp: 1794819600000, dataMessage: { timestamp: 1794819600000, ...dataMessage } });
-const allowed = new Set([OWNER]);
+const allowed: Audience = { account: AGENT, senders: new Set([OWNER]), groups: new Map([[GROUP, "family"]]), names: [fold("イオリ")] };
+const inGroup = (dataMessage: Record<string, unknown>, from = STRANGER) => message({ groupInfo: { groupId: GROUP, groupName: "Family", type: "DELIVER" }, ...dataMessage }, from);
 
 describe("the events it makes", () => {
   test("a message from an allowed sender comes now, its text inline", () => {
@@ -75,8 +85,35 @@ describe("the events it makes", () => {
     assert.deepEqual(made.event.payload.reaction, { emoji: "👍", target_timestamp: 1794819500000, removed: false });
   });
 
-  test("groups, strangers, receipts and empty messages are dropped", () => {
+  test("anyone's message in an allowed group comes batched, in the group's stream", () => {
+    const made = eventOf(inGroup({ message: "dinner at 7?" }), allowed)!;
+    assert.equal(made.groupId, GROUP);
+    assert.deepEqual(made.event, {
+      id: `group.family/${STRANGER}/1794819600000`,
+      occurred_at: "2026-11-16T09:00:00.000Z",
+      stream: "group.family",
+      delivery: "batch",
+      summary: "Signal family Owner: dinner at 7?",
+      payload: { type: "message", from: { number: STRANGER, name: "Owner" }, group: { name: "family", title: "Family" }, timestamp: 1794819600000, text: "dinner at 7?" },
+    });
+    assert.equal(eventOf(inGroup({ reaction: { emoji: "👍", targetSentTimestamp: 1, isRemove: false } }), allowed)!.event.stream, "group.family");
+  });
+
+  test("what is for the agent in a group comes now: a mention, a quote of hers, her name, or what follows her post", () => {
+    const mention = eventOf(inGroup({ message: "\uFFFC can you? \uFFFC", mentions: [{ number: AGENT, start: 0, length: 1 }, { number: OWNER, name: "Masa", start: 11, length: 1 }] }), allowed)!;
+    assert.equal(mention.event.delivery, "now");
+    assert.equal(mention.event.payload.text, "@you can you? @Masa");
+    assert.equal(mention.event.payload.mentions_me, true);
+    const quote = eventOf(inGroup({ message: "yes", quote: { id: 5, authorNumber: AGENT, text: "shall I?" } }), allowed)!;
+    assert.equal(quote.event.delivery, "now");
+    assert.deepEqual(quote.event.payload.quote, { timestamp: 5, text: "shall I?", author: AGENT, mine: true });
+    assert.equal(eventOf(inGroup({ message: "ask いおり" }), allowed)!.event.delivery, "now");
+    assert.equal(eventOf(inGroup({ message: "hi" }), { ...allowed, followsOwn: (id, at) => id === GROUP && at === 1794819600000 })!.event.delivery, "now");
+  });
+
+  test("other groups, strangers, receipts and empty messages are dropped", () => {
     assert.equal(eventOf(message({ message: "hi", groupInfo: { groupId: "g" } }), allowed), undefined);
+    assert.equal(eventOf(message({ message: "hi", groupInfo: { groupId: "b3RoZXI=" } }), allowed), undefined);
     assert.equal(eventOf(message({ message: "hi" }, STRANGER), allowed), undefined);
     assert.equal(eventOf({ sourceNumber: OWNER, receiptMessage: { isRead: true } }, allowed), undefined);
     assert.equal(eventOf(message({}), allowed), undefined);
@@ -153,7 +190,7 @@ describe("the Signal plugin against signal-cli", () => {
     const lines: string[] = [];
     let take = false;
     const sendSocket = join(dir, "send.sock");
-    const connection = signalPlugin({ backoffMs: () => 10 }).create({ ...SETTINGS, socket: cli.path, send_socket: sendSocket }, env);
+    const connection = signalPlugin({ backoffMs: () => 10 }).create({ ...SETTINGS, groups: { family: GROUP }, socket: cli.path, send_socket: sendSocket }, env);
     const handle = connection.start({
       deliver: async (events) => {
         if (!take) {
@@ -218,6 +255,37 @@ describe("the Signal plugin against signal-cli", () => {
       stranger.set("to", STRANGER);
       assert.equal((await post(sendSocket, stranger)).status, 403);
       assert.equal((await post(sendSocket, new FormData())).status, 400);
+
+      // To a group, as a quoted reply: her post goes into the group's stream, and what follows it comes now.
+      const toGroup = new FormData();
+      toGroup.set("text", "7 is fine");
+      toGroup.set("group", "family");
+      toGroup.set("quote_timestamp", "1794819600000");
+      toGroup.set("quote_author", STRANGER);
+      assert.deepEqual(await post(sendSocket, toGroup), { status: 200, body: { timestamp: 1794819700000 } });
+      assert.deepEqual(cli.calls.at(-1), {
+        method: "send",
+        params: { account: AGENT, groupId: GROUP, message: "7 is fine", quoteTimestamp: 1794819600000, quoteAuthor: STRANGER },
+      });
+      await until(() => delivered.length === 2);
+      assert.equal(delivered[1]!.id, `group.family/${AGENT}/1794819700000`);
+      assert.equal(delivered[1]!.delivery, "batch");
+      assert.deepEqual(delivered[1]!.payload, { type: "message", from: { number: AGENT }, group: { name: "family" }, own: true, timestamp: 1794819700000, text: "7 is fine" });
+      cli.push({ ...inGroup({ message: "great" }), timestamp: 1794819800000, dataMessage: { ...inGroup({}).dataMessage, message: "great", timestamp: 1794819800000 } });
+      await until(() => delivered.length === 3);
+      assert.equal(delivered[2]!.delivery, "now");
+      const both = new FormData();
+      both.set("text", "hi");
+      both.set("group", "family");
+      both.set("to", OWNER);
+      assert.equal((await post(sendSocket, both)).status, 400);
+      const otherGroup = new FormData();
+      otherGroup.set("text", "hi");
+      otherGroup.set("group", "work");
+      assert.equal((await post(sendSocket, otherGroup)).status, 403);
+      cli.sendResult = { timestamp: 1794819900000, results: [{ type: "UNREGISTERED_FAILURE" }, { type: "SUCCESS" }] };
+      assert.equal((await post(sendSocket, toGroup)).status, 200, "a group's send fails only when no member took it");
+
       cli.sendResult = { timestamp: 1, results: [{ type: "UNREGISTERED_FAILURE" }] };
       const refusedForm = new FormData();
       refusedForm.set("text", "hi");
