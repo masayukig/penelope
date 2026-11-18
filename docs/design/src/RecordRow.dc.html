@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>活動の記録の 1 行</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="--color-text-primary: light-dark(#000000, #ffffff); --color-text-secondary: light-dark(#474747, #9e9e9e); --color-border: light-dark(#00000014, #ffffff1A); --color-neutral: light-dark(#0000000F, #ffffff1A); --color-error: light-dark(#c9303a, #ff705d); --color-on-error: light-dark(#ffffff, #111111); --color-text-error: light-dark(#c0262c, #ffaea7); --color-text-success: light-dark(#2f7d33, #90ca90); --color-text-warning: light-dark(#836700, #eec448); width: 100%; box-sizing: border-box; display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--color-border); color: var(--color-text-primary); font-family: Figtree, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif; font-size: 14px; line-height: 1.5">
+
+<span style="flex: 0 0 48px; padding-top: 2px; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--color-text-secondary)">{{r.time}}</span>
+
+<span style="flex: 0 0 20px; height: 22px; display: flex; align-items: center; justify-content: center">
+<sc-if value="{{r.gOk}}" hint-placeholder-val="{{ true }}">
+<svg role="img" aria-label="ふつうに終わった" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-secondary)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.500l4.500 4.500L19 7.500"/></svg>
+</sc-if>
+<sc-if value="{{r.gFail}}" hint-placeholder-val="{{ false }}">
+<svg role="img" aria-label="失敗" width="18" height="18" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="var(--color-error)"/><path d="M8 8l8 8M16 8l-8 8" stroke="var(--color-on-error)" stroke-width="2.6" stroke-linecap="round"/></svg>
+</sc-if>
+<sc-if value="{{r.gStop}}" hint-placeholder-val="{{ false }}">
+<svg role="img" aria-label="止められた" width="14" height="14" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3" fill="var(--color-text-secondary)"/></svg>
+</sc-if>
+<sc-if value="{{r.gWarn}}" hint-placeholder-val="{{ false }}">
+<svg role="img" aria-label="注意" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-warning)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L2 21h20L12 3z"/><path d="M12 10v5M12 18v.500"/></svg>
+</sc-if>
+<sc-if value="{{r.gNight}}" hint-placeholder-val="{{ false }}">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-secondary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.500A8 8 0 0 1 9.500 4a8 8 0 1 0 10.500 10.500z"/></svg>
+</sc-if>
+<sc-if value="{{r.gJob}}" hint-placeholder-val="{{ false }}">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-secondary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l5 5-5 5"/><path d="M12 18h8"/></svg>
+</sc-if>
+<sc-if value="{{r.gSub}}" hint-placeholder-val="{{ false }}">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-secondary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.500"/><rect x="13" y="13" width="7" height="7" rx="1.500"/><path d="M7.500 11v3.500a2 2 0 0 0 2 2H13"/></svg>
+</sc-if>
+<sc-if value="{{r.gGroup}}" hint-placeholder-val="{{ false }}">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-secondary)" stroke-width="2" stroke-linecap="round"><path d="M5 7h14M5 12h14M5 17h14"/></svg>
+</sc-if>
+</span>
+
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0">
+<span style="flex: none; font-weight: 600">{{r.label}}</span>
+<sc-if value="{{r.isNew}}" hint-placeholder-val="{{ false }}">
+<span style="flex: none; padding: 1px 8px; border-radius: 9999px; background: var(--color-error); color: var(--color-on-error); font-size: 11px; font-weight: 600">新しい</span>
+</sc-if>
+<sc-if value="{{r.hasWho}}" hint-placeholder-val="{{ false }}">
+<code style="flex: none; font-family: ui-monospace, 'SF Mono', Monaco, Consolas, monospace; font-size: 12px; font-weight: 600">{{r.who}}</code>
+</sc-if>
+<sc-if value="{{r.hasText}}" hint-placeholder-val="{{ true }}">
+<span style="flex: 1 1 0; min-width: 40%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">{{r.text}}</span>
+</sc-if>
+<sc-if value="{{r.hasChip}}" hint-placeholder-val="{{ false }}">
+<span style="flex: 1 1 0; min-width: 40%; display: flex">
+<span style="min-width: 0; max-width: 100%; box-sizing: border-box; display: flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; background: var(--color-neutral); font-size: 12px; color: var(--color-text-secondary)">
+<span style="flex: none; font-weight: 600">{{r.chipKind}}</span>
+<span style="min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">{{r.chipDetail}}</span>
+</span>
+</span>
+</sc-if>
+<sc-if value="{{r.hasMono}}" hint-placeholder-val="{{ false }}">
+<code style="flex: 1 1 0; min-width: 40%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-family: ui-monospace, 'SF Mono', Monaco, Consolas, monospace; font-size: 12px">{{r.mono}}</code>
+</sc-if>
+<sc-if value="{{r.hasSteps}}" hint-placeholder-val="{{ false }}">
+<span style="display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: 13px">
+<sc-for list="{{r.steps}}" as="st" hint-placeholder-count="3">
+<span style="display: flex; align-items: center; gap: 4px">
+<sc-if value="{{st.sep}}" hint-placeholder-val="{{ false }}">
+<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-secondary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+</sc-if>
+<sc-if value="{{st.ok}}" hint-placeholder-val="{{ true }}">
+<svg role="img" aria-label="済み" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.500l4.500 4.500L19 7.500"/></svg>
+</sc-if>
+<sc-if value="{{st.fail}}" hint-placeholder-val="{{ false }}">
+<svg role="img" aria-label="失敗" width="14" height="14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="var(--color-error)"/><path d="M8 8l8 8M16 8l-8 8" stroke="var(--color-on-error)" stroke-width="2.6" stroke-linecap="round"/></svg>
+</sc-if>
+<sc-if value="{{st.none}}" hint-placeholder-val="{{ false }}">
+<svg role="img" aria-label="行われなかった" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-secondary)" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"/></svg>
+</sc-if>
+<span style="color: {{st.color}}; font-weight: {{st.weight}}">{{st.name}}</span>
+</span>
+</sc-for>
+</span>
+</sc-if>
+<span style="flex: none; margin-left: auto; font-size: 12px; color: var(--color-text-secondary); white-space: nowrap">{{r.meta}}</span>
+</div>
+<sc-if value="{{r.hasNote}}" hint-placeholder-val="{{ false }}">
+<span style="font-size: 13px; color: {{r.noteColor}}; overflow-wrap: anywhere">{{r.note}}</span>
+</sc-if>
+</div>
+
+<sc-if value="{{r.isLink}}" hint-placeholder-val="{{ true }}">
+<a href="{{r.href}}" aria-label="{{r.openLabel}}" style="flex: 0 0 32px; height: 44px; margin: -11px 0; display: flex; align-items: center; justify-content: center; color: var(--color-text-secondary)">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+</a>
+</sc-if>
+<sc-if value="{{r.isGroup}}" hint-placeholder-val="{{ false }}">
+<button type="button" onClick="{{r.toggle}}" aria-expanded="{{r.openStr}}" aria-label="{{r.openLabel}}" style="flex: 0 0 32px; height: 44px; margin: -11px 0; padding: 0; border: 0; background: transparent; color: var(--color-text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center">
+<svg aria-hidden="true" style="transform: {{r.rot}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+</button>
+</sc-if>
+<sc-if value="{{r.isPlain}}" hint-placeholder-val="{{ false }}">
+<span aria-hidden="true" style="flex: 0 0 32px"></span>
+</sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"r":{"editor":null,"default":null},"$preview":{"width":760,"height":70}}'>
+class Component extends DCLogic {
+renderVals() {
+const d = { time: '14:12', label: 'alertmanager', kind: 'fail', isNew: true, text: '[FIRING warning] HighMemoryUsage', meta: '48 秒 ・ ツール 6', note: '失敗した ・ モデルの呼び出しが 3 回続けて落ちた', bad: true, href: 'HybridTurnFailed.dc.html' };
+const r = this.props.r || d;
+const k = r.kind || 'ok';
+const steps = (r.steps || []).map((s, i) => ({
+name: s.name, sep: i > 0, ok: s.s === 'ok', fail: s.s === 'fail', none: s.s === 'none',
+color: s.s === 'fail' ? 'var(--color-text-error)' : (s.s === 'none' ? 'var(--color-text-secondary)' : 'inherit'),
+weight: s.s === 'fail' ? '600' : '400'
+}));
+return { r: {
+time: r.time || '', label: r.label || '', meta: r.meta || '',
+gOk: k === 'ok', gFail: k === 'fail', gStop: k === 'stop', gWarn: k === 'warn', gNight: k === 'night', gJob: k === 'job', gSub: k === 'sub', gGroup: k === 'group',
+isNew: !!r.isNew,
+hasWho: !!r.who, who: r.who || '',
+hasChip: !!r.chipKind, chipKind: r.chipKind || '', chipDetail: r.chipDetail || '',
+hasText: !!r.text, text: r.text || '',
+hasMono: !!r.mono, mono: r.mono || '',
+hasSteps: steps.length > 0, steps: steps,
+hasNote: !!r.note, note: r.note || '', noteColor: r.bad ? 'var(--color-text-error)' : 'var(--color-text-secondary)',
+isLink: !!r.href, href: r.href || '#', openLabel: (r.label || '') + ' ' + (r.time || '') + ' を開く',
+isGroup: !!r.toggle, toggle: r.toggle || (() => {}), openStr: r.open ? 'true' : 'false', rot: r.open ? 'rotate(180deg)' : 'none',
+isPlain: !r.href && !r.toggle
+} };
+}
+}
+</script>
+</body>
+</html>

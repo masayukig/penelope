@@ -1,4 +1,4 @@
-// The stream of replies, activity, state and sub-agents (GET /api/stream), kept open:
+// The stream of replies, activity, state, sub-agents and the unseen failures (GET /api/stream), kept open:
 // when the line drops it connects again, and each connection asks for all
 // the backend kept (Last-Event-ID: 0), so that the state and the turn under
 // way are rebuilt from it (docs/ui-api.md).
@@ -25,7 +25,7 @@ const BACKOFF_MS = [1_000, 2_000, 5_000, 10_000];
 /** The backend sends a comment every 25 seconds; a line quiet for longer is taken as dropped. */
 const QUIET_MS = 60_000;
 
-const EVENTS = new Set(["reply", "activity", "state", "agent"]);
+const EVENTS = new Set(["reply", "activity", "state", "agent", "record"]);
 
 export function openStream(options: StreamOptions): { close: () => void } {
   const sleep = options.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));

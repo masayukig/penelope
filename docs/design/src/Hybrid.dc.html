@@ -20,7 +20,10 @@ a{color:#474747}a:hover{color:#000000}
 <a href="#talk" aria-label="会話" style="width: 44px; min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border-radius: 0.625rem; background: {{talkBg}}; color: {{talkFg}}; text-decoration: none">
 <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4V5z"/></svg>
 </a>
-<a href="#log" aria-label="活動の記録" style="width: 44px; min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border-radius: 0.625rem; color: var(--color-text-secondary); text-decoration: none">
+<a href="#log" aria-label="{{logLabel}}" style="width: 44px; min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; position: relative; border-radius: 0.625rem; background: {{logBg}}; color: {{logFg}}; text-decoration: none">
+<sc-if value="{{hasFails}}" hint-placeholder-val="{{ false }}">
+<span style="position: absolute; top: 2px; right: 0; min-width: 18px; height: 18px; box-sizing: border-box; padding: 0 5px; border-radius: 9999px; background: light-dark(#c9303a, #ff705d); color: light-dark(#ffffff, #111111); font-size: 11px; font-weight: 700; line-height: 18px; text-align: center">{{fails}}</span>
+</sc-if>
 <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
 </a>
 <a href="#memory" aria-label="記憶" style="width: 44px; min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border-radius: 0.625rem; color: var(--color-text-secondary); text-decoration: none">
@@ -57,6 +60,16 @@ a{color:#474747}a:hover{color:#000000}
 <dc-import name="Schedule" pad="24px" hint-size="100%,900px"></dc-import>
 </div>
 </sc-if>
+<sc-if value="{{isRecord}}" hint-placeholder-val="{{ false }}">
+<div style="height: calc(100vh - 56px); overflow: auto">
+<dc-import name="Record" day="{{rday}}" pad="24px" hint-size="100%,900px"></dc-import>
+</div>
+</sc-if>
+<sc-if value="{{isDetail}}" hint-placeholder-val="{{ false }}">
+<div style="height: calc(100vh - 56px); overflow: auto">
+<dc-import name="RecordDetail" kind="{{rkind}}" pad="12px" hint-size="100%,900px"></dc-import>
+</div>
+</sc-if>
 </main>
 
 <sc-if value="{{open}}" hint-placeholder-val="{{ true }}">
@@ -77,21 +90,32 @@ a{color:#474747}a:hover{color:#000000}
 
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"mode":{"editor":"enum","options":["busy","empty","offline"],"default":"busy"},"attach":{"editor":"boolean","default":false},"subs":{"editor":"int","default":0,"min":0,"max":6},"closed":{"editor":"boolean","default":false},"page":{"editor":"enum","options":["talk","schedule"],"default":"talk"},"$preview":{"width":1360,"height":820}}'>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"mode":{"editor":"enum","options":["busy","empty","offline"],"default":"busy"},"attach":{"editor":"boolean","default":false},"subs":{"editor":"int","default":0,"min":0,"max":6},"closed":{"editor":"boolean","default":false},"page":{"editor":"enum","options":["talk","schedule","record","detail"],"default":"talk"},"rday":{"editor":"text","default":"failures"},"rkind":{"editor":"text","default":"turn"},"fails":{"editor":"int","default":0,"min":0,"max":99},"$preview":{"width":1360,"height":820}}'>
 class Component extends DCLogic {
 renderVals() {
 const st = this.state || {};
 const open = st.open === undefined ? !this.props.closed : st.open;
 const subs = Number(this.props.subs ?? 0);
 const mode = this.props.mode ?? 'busy';
+const pg = this.props.page ?? 'talk';
+const on = 'var(--color-neutral)', fg = 'var(--color-text-primary)', mu = 'var(--color-text-secondary)';
 return {
 mode: mode,
-isTalk: (this.props.page ?? 'talk') === 'talk',
-isSchedule: this.props.page === 'schedule',
-talkBg: this.props.page === 'schedule' ? 'transparent' : 'var(--color-neutral)',
-talkFg: this.props.page === 'schedule' ? 'var(--color-text-secondary)' : 'var(--color-text-primary)',
-evBg: this.props.page === 'schedule' ? 'var(--color-neutral)' : 'transparent',
-evFg: this.props.page === 'schedule' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+isTalk: pg === 'talk',
+isSchedule: pg === 'schedule',
+isRecord: pg === 'record',
+isDetail: pg === 'detail',
+rday: this.props.rday ?? 'failures',
+rkind: this.props.rkind ?? 'turn',
+fails: Number(this.props.fails ?? 0),
+hasFails: Number(this.props.fails ?? 0) > 0,
+logLabel: Number(this.props.fails ?? 0) > 0 ? ('活動の記録（まだ見ていない失敗 ' + Number(this.props.fails) + ' 件）') : '活動の記録',
+talkBg: pg === 'talk' ? on : 'transparent',
+talkFg: pg === 'talk' ? fg : mu,
+logBg: (pg === 'record' || pg === 'detail') ? on : 'transparent',
+logFg: (pg === 'record' || pg === 'detail') ? fg : mu,
+evBg: pg === 'schedule' ? on : 'transparent',
+evFg: pg === 'schedule' ? fg : mu,
 subs: subs,
 hasSubs: subs > 0,
 attach: !!this.props.attach,

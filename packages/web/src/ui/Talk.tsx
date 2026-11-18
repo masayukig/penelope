@@ -8,6 +8,7 @@ import { type DragEvent, type ReactNode, useEffect, useRef, useState } from "rea
 import type { TimelineItem } from "../model/store.ts";
 import { Composer } from "./Composer.tsx";
 import { AttachIcon } from "./icons.tsx";
+import { useJump } from "./jump.ts";
 import { EmptyTimeline, Timeline } from "./Timeline.tsx";
 import { words } from "./words.ts";
 
@@ -22,12 +23,17 @@ export type TalkProps = {
   topInset?: boolean;
   /** How tight the timeline is: the phone's narrow screen takes compact. */
   density?: "compact" | "spacious";
+  /** One of her replies to show, from the activity record: its id, and the page of the history that starts with it. */
+  jump?: { id: string; before: string } | undefined;
+  /** Reads the page of the history that starts at `before` into the timeline. */
+  onJump?: (before: string) => Promise<void>;
 };
 
-export function Talk({ items, busy, offline, onSend, onOlder, strip, topInset = false, density = "spacious" }: TalkProps) {
+export function Talk({ items, busy, offline, onSend, onOlder, strip, topInset = false, density = "spacious", jump, onJump }: TalkProps) {
   const [files, setFiles] = useState<File[]>([]);
   const add = (more: File[]) => setFiles((list) => [...list, ...more]);
   const drop = useFileDrop(add);
+  useJump(items, jump, onJump);
   return (
     <div className="talk" {...drop.handlers}>
       <ChatLayout

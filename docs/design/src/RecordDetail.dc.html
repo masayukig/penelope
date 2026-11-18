@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>活動の記録の 1 件を開いた画面</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="--color-background-body: light-dark(#f1f1f1, #1b1b1b); --color-background-surface: light-dark(#ffffff, #262626); --color-text-primary: light-dark(#000000, #ffffff); --color-text-secondary: light-dark(#474747, #9e9e9e); --color-border: light-dark(#00000014, #ffffff1A); --color-neutral: light-dark(#0000000F, #ffffff1A); --color-error: light-dark(#c9303a, #ff705d); --color-on-error: light-dark(#ffffff, #111111); --color-error-muted: light-dark(#ffc4be, #ff98903D); --color-on-error-muted: light-dark(#76000c, #ffaea7); --color-text-error: light-dark(#c0262c, #ffaea7); --color-text-success: light-dark(#2f7d33, #90ca90); width: 100%; box-sizing: border-box; padding: {{pad}} 20px 48px; background: var(--color-background-body); color: var(--color-text-primary); font-family: Figtree, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif; font-size: 14px; line-height: 1.6">
+<div style="width: 100%; max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px">
+
+<a href="HybridRecordFail.dc.html" style="align-self: flex-start; min-height: 44px; display: flex; align-items: center; gap: 6px; color: var(--color-text-secondary); text-decoration: none; font-size: 13px">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+<span>活動の記録</span>
+</a>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<h1 style="margin: 0; font-size: 24px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere">{{title}}</h1>
+<div style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: {{statusColor}}">
+<sc-if value="{{sOk}}" hint-placeholder-val="{{ true }}">
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.500l4.500 4.500L19 7.500"/></svg>
+</sc-if>
+<sc-if value="{{sFail}}" hint-placeholder-val="{{ false }}">
+<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="var(--color-error)"/><path d="M8 8l8 8M16 8l-8 8" stroke="var(--color-on-error)" stroke-width="2.6" stroke-linecap="round"/></svg>
+</sc-if>
+<span>{{statusText}}</span>
+</div>
+</div>
+
+<sc-if value="{{sFail}}" hint-placeholder-val="{{ false }}">
+<p role="status" style="margin: 0; padding: 12px 16px; border-radius: 0.75rem; background: var(--color-error-muted); color: var(--color-on-error-muted); overflow-wrap: anywhere">{{reason}}</p>
+</sc-if>
+
+<dl style="margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 20px">
+<sc-for list="{{facts}}" as="f" hint-placeholder-count="4">
+<dt style="color: var(--color-text-secondary)">{{f.k}}</dt>
+<dd style="margin: 0; overflow-wrap: anywhere">{{f.v}}</dd>
+</sc-for>
+</dl>
+
+<sc-if value="{{isNight}}" hint-placeholder-val="{{ false }}">
+<ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">
+<li style="display: flex; flex-direction: column; gap: 4px; padding: 14px 0; border-top: 1px solid var(--color-border)">
+<div style="display: flex; align-items: center; gap: 8px; font-weight: 600">
+<svg role="img" aria-label="済み" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-success)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.500l4.500 4.500L19 7.500"/></svg>
+<span>1. 振り返り</span>
+</div>
+<dc-import name="RecordRow" r="{{ nightTurn1 }}" hint-size="100%,44px"></dc-import>
+</li>
+<li style="display: flex; flex-direction: column; gap: 4px; padding: 14px 0; border-top: 1px solid var(--color-border)">
+<div style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--color-text-error)">
+<svg role="img" aria-label="失敗" width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="var(--color-error)"/><path d="M8 8l8 8M16 8l-8 8" stroke="var(--color-on-error)" stroke-width="2.6" stroke-linecap="round"/></svg>
+<span>2. 整理係 ・ ここで止まった</span>
+</div>
+<dc-import name="RecordRow" r="{{ nightTurn2 }}" hint-size="100%,60px"></dc-import>
+</li>
+<li style="display: flex; flex-direction: column; gap: 4px; padding: 14px 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border)">
+<div style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--color-text-secondary)">
+<svg role="img" aria-label="行われなかった" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"/></svg>
+<span>3. 新しいセッション ・ 行われなかった</span>
+</div>
+</li>
+</ol>
+</sc-if>
+
+<sc-if value="{{isSub}}" hint-placeholder-val="{{ false }}">
+<section style="display: flex; flex-direction: column">
+<h2 style="margin: 0; padding-bottom: 8px; border-bottom: 1px solid var(--color-border); font-size: 12px; font-weight: 600; color: var(--color-text-secondary)">このサブエージェントのターン ・ 12</h2>
+<sc-for list="{{subTurns}}" as="t" hint-placeholder-count="4">
+<dc-import name="RecordRow" r="{{ t }}" hint-size="100%,44px"></dc-import>
+</sc-for>
+<button type="button" style="align-self: flex-start; min-height: 44px; margin-top: 8px; padding: 0 14px; border: 1px solid var(--color-border); border-radius: 0.625rem; background: transparent; color: var(--color-text-secondary); font: inherit; font-size: 13px; cursor: pointer">残りの 8 件を見る</button>
+</section>
+</sc-if>
+
+<sc-if value="{{hasFlow}}" hint-placeholder-val="{{ true }}">
+<section style="display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; padding-bottom: 8px; border-bottom: 1px solid var(--color-border); font-size: 12px; font-weight: 600; color: var(--color-text-secondary)">流れ</h2>
+<dc-import name="Activity" record="{{ true }}" hint-size="100%,420px"></dc-import>
+</section>
+</sc-if>
+
+<sc-if value="{{isExpired}}" hint-placeholder-val="{{ false }}">
+<p style="margin: 0; padding: 16px; border-radius: 0.75rem; background: var(--color-neutral); color: var(--color-text-secondary)">このターンの流れは 30 日で消えました。残っているのは上の要約だけです。</p>
+</sc-if>
+
+<sc-if value="{{hasReply}}" hint-placeholder-val="{{ true }}">
+<section style="display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; padding-bottom: 8px; border-bottom: 1px solid var(--color-border); font-size: 12px; font-weight: 600; color: var(--color-text-secondary)">このターンで出した返事</h2>
+<p style="margin: 0; text-wrap: pretty">メモリの使用量が上がっていたのは、バッチの Job が重なったためでした。いまは下がっています。上限の見直しが要るかは、明日の同じ時間帯を見てから決めます。</p>
+<a href="Hybrid.dc.html" style="align-self: flex-start; min-height: 44px; display: flex; align-items: center; color: var(--color-text-secondary); font-size: 13px">会話でこの返事を見る</a>
+</section>
+</sc-if>
+
+<sc-if value="{{noReply}}" hint-placeholder-val="{{ false }}">
+<p style="margin: 0; font-size: 13px; color: var(--color-text-secondary)">このターンでは返事を出していません。</p>
+</sc-if>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"kind":{"editor":"enum","options":["turn","failed","expired","night","sub"],"default":"turn"},"pad":{"editor":"text","default":"24px"},"$preview":{"width":760,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() {
+const k = this.props.kind ?? 'turn';
+const T = 'HybridTurn.dc.html';
+const chip = { turn: 'alertmanager ・ [FIRING warning] HighMemoryUsage', failed: 'alertmanager ・ [FIRING warning] HighMemoryUsage', expired: '予約 ・ 毎朝 9:00' };
+const turnFacts = (time, who, tools, reply) => [
+{ k: '時刻', v: time }, { k: '誰の', v: who }, { k: 'ツール', v: tools }, { k: '返事', v: reply }
+];
+let title = chip[k] || '', statusText = 'ふつうに終わった', facts = [], reason = '';
+if (k === 'turn') facts = turnFacts('11月17日(火) 14:52:08 〜 14:53:20（1 分 12 秒）', '本体', '6 回', '1 通');
+if (k === 'failed') { statusText = '失敗した'; reason = 'モデルの呼び出しが 3 回続けて落ちた。最後の答えは 529（混み合っている）でした。'; facts = turnFacts('11月17日(火) 14:12:31 〜 14:13:19（48 秒）', '本体', '6 回', 'なし'); }
+if (k === 'expired') facts = turnFacts('10月12日(月) 9:00:02 〜 9:00:41（39 秒）', '本体', '4 回', '1 通');
+if (k === 'night') { title = '夜の切り替え'; statusText = '整理係で止まった'; reason = '記憶の整理が時間切れになった。新しいセッションは始まっていません。'; facts = [{ k: '時刻', v: '11月17日(火) 3:00:00 〜 3:10:02（10 分 2 秒）' }, { k: '予定', v: '毎晩 3:00' }]; }
+if (k === 'sub') { title = 'renovate-review'; statusText = '閉じた'; facts = [{ k: '目的', v: 'Renovate の PR をまとめて確かめる' }, { k: '起こした', v: '11月17日(火) 9:02' }, { k: '閉じた', v: '11月17日(火) 10:30' }, { k: 'ターン', v: '12（失敗なし）' }]; }
+const bad = k === 'failed' || k === 'night';
+return {
+pad: this.props.pad ?? '24px',
+title: title, statusText: statusText, reason: reason, facts: facts,
+sOk: !bad, sFail: bad,
+statusColor: bad ? 'var(--color-text-error)' : 'inherit',
+isNight: k === 'night', isSub: k === 'sub', isExpired: k === 'expired',
+hasFlow: k === 'turn' || k === 'failed',
+hasReply: k === 'turn', noReply: k === 'failed',
+nightTurn1: { kind: 'ok', time: '3:00', label: '夜の切り替え', text: '振り返り', meta: '3 分 40 秒 ・ ツール 9', href: T },
+nightTurn2: { kind: 'fail', time: '3:03', label: '夜の切り替え', who: '整理係', text: '記憶の整理', meta: '6 分 22 秒 ・ ツール 21', note: '失敗した ・ 記憶の整理が時間切れになった', bad: true, href: 'HybridTurnFailed.dc.html' },
+subTurns: [
+{ kind: 'ok', time: '10:28', label: '本体から', text: '結果をまとめて返して', meta: '51 秒 ・ ツール 2', href: T },
+{ kind: 'ok', time: '10:11', label: '裏の仕事の終わり', text: 'gh pr checks（exit 0）', meta: '1 分 30 秒 ・ ツール 7', href: T },
+{ kind: 'ok', time: '9:40', label: '本体から', text: '続きの依頼', meta: '4 分 2 秒 ・ ツール 18', href: T },
+{ kind: 'ok', time: '9:02', label: '本体から', text: '最初の依頼', meta: '2 分 44 秒 ・ ツール 11', href: T }
+]
+};
+}
+}
+</script>
+</body>
+</html>

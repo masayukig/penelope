@@ -1,7 +1,18 @@
 // A stand-in for the backend's API for the UI (docs/ui-api.md), answered
 // through the fetch the App is given. The test writes to the stream as the
 // backend would, and drops the line when it wants.
-import type { AgentResponse, HistoryEntry, PushSubscriptionRequest, ScheduleEntry, StreamEvent, SubAgent } from "@penelope/contract";
+import type {
+  AgentResponse,
+  HistoryEntry,
+  PushSubscriptionRequest,
+  RecordDayResponse,
+  RecordNightResponse,
+  RecordSubAgentResponse,
+  RecordTurnResponse,
+  ScheduleEntry,
+  StreamEvent,
+  SubAgent,
+} from "@penelope/contract";
 
 type Line = { write: (text: string) => void; end: () => void };
 
@@ -18,6 +29,26 @@ export class FakeBackend {
   readonly scheduleRemovals: string[] = [];
   /** While set, DELETE /api/schedules/<id> answers 500. */
   failRemovals = false;
+  /** The pages of the history GET /api/history?before= answers, by cursor. */
+  readonly historyPages = new Map<string, HistoryEntry[]>();
+  /** The cursors GET /api/history was read with. */
+  readonly historyBefores: string[] = [];
+  /** The activity record's days, by `YYYY-MM-DD`; GET /api/record without a day answers `today`. */
+  readonly recordDays = new Map<string, RecordDayResponse>();
+  today = "2026-11-17";
+  /** The queries GET /api/record was read with. */
+  readonly recordQueries: URLSearchParams[] = [];
+  readonly recordTurns = new Map<string, RecordTurnResponse>();
+  /** The outputs of the tools' results, by `<turn>/<call>`. */
+  readonly recordResults = new Map<string, string>();
+  readonly recordNights = new Map<string, RecordNightResponse>();
+  /** A sub-agent's pages, by name and then by cursor ("" for the first). */
+  readonly recordSubAgents = new Map<string, Map<string, RecordSubAgentResponse>>();
+  unseen = 0;
+  /** When the owner opened the record before, as POST /api/record/seen answers. */
+  previousSeenAt = "2026-11-17T00:00:00.000Z";
+  /** How many times POST /api/record/seen was sent. */
+  seenTold = 0;
   signedIn = true;
   /** While down, nothing can be reached. */
   down = false;
@@ -41,7 +72,13 @@ export class FakeBackend {
       return new Response(null, { status: 204 });
     }
     if (!this.signedIn) return json(401, { error: "not signed in" });
-    if (method === "GET" && url.pathname === "/api/history") return json(200, { entries: [...this.history].reverse() });
+    if (method === "GET" && url.pathname === "/api/history") {
+      const before = url.searchParams.get("before");
+      if (before === null) return json(200, { entries: [...this.history].reverse() });
+      this.historyBefores.push(before);
+      return json(200, { entries: this.historyPages.get(before) ?? [] });
+    }
+    if (url.pathname.startsWith("/api/record")) return this.record(method, url);
     if (method === "GET" && url.pathname === "/api/agents") {
       this.agentsRead++;
       return json(200, { agents: this.agents });
@@ -104,6 +141,38 @@ export class FakeBackend {
     }
     return json(404, { error: "no such path" });
   };
+
+  private record(method: string, url: URL): Response {
+    const path = url.pathname;
+    if (method === "GET" && path === "/api/record") {
+      this.recordQueries.push(url.searchParams);
+      const day = url.searchParams.get("day") ?? this.today;
+      return json(200, this.recordDays.get(day) ?? { day, rows: [], turns: 0, failures: 0, agents: [] });
+    }
+    if (method === "GET" && path === "/api/record/unseen") return json(200, { unseen: this.unseen });
+    if (method === "POST" && path === "/api/record/seen") {
+      this.seenTold++;
+      const answer = { unseen: this.unseen, previous_seen_at: this.previousSeenAt };
+      this.unseen = 0;
+      return json(200, answer);
+    }
+    const parts = path.split("/").slice(3).map(decodeURIComponent);
+    if (method === "GET" && parts[0] === "turns" && parts.length === 4 && parts[2] === "results") {
+      const output = this.recordResults.get(`${parts[1]}/${parts[3]}`);
+      return output === undefined ? json(404, { error: "gone" }) : json(200, { output });
+    }
+    const found =
+      parts.length !== 2
+        ? undefined
+        : parts[0] === "turns"
+          ? this.recordTurns.get(parts[1]!)
+          : parts[0] === "nights"
+            ? this.recordNights.get(parts[1]!)
+            : parts[0] === "sub-agents"
+              ? this.recordSubAgents.get(parts[1]!)?.get(url.searchParams.get("before") ?? "")
+              : undefined;
+    return found === undefined ? json(404, { error: "no such record" }) : json(200, found);
+  }
 
   /** Waits until the UI has the stream open, `count` times in all. */
   async connected(count = 1): Promise<void> {

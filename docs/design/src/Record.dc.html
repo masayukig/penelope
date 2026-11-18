@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>活動の記録の一覧</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="--color-background-body: light-dark(#f1f1f1, #1b1b1b); --color-background-surface: light-dark(#ffffff, #262626); --color-text-primary: light-dark(#000000, #ffffff); --color-text-secondary: light-dark(#474747, #9e9e9e); --color-border: light-dark(#00000014, #ffffff1A); --color-neutral: light-dark(#0000000F, #ffffff1A); --color-accent: light-dark(#1b1b1b, #f1f1f1); --color-on-accent: light-dark(#ffffff, #111111); --color-error: light-dark(#c9303a, #ff705d); --color-on-error: light-dark(#ffffff, #111111); --color-error-muted: light-dark(#ffc4be, #ff98903D); --color-on-error-muted: light-dark(#76000c, #ffaea7); width: 100%; box-sizing: border-box; padding: {{pad}} 20px 48px; background: var(--color-background-body); color: var(--color-text-primary); font-family: Figtree, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif; font-size: 14px; line-height: 1.6">
+<div style="width: 100%; max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px">
+
+<h1 style="margin: 0; font-size: 28px; font-weight: 600; line-height: 1.3">活動の記録</h1>
+
+<sc-if value="{{isEmpty}}" hint-placeholder-val="{{ false }}">
+<div style="padding: 64px 0; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center">
+<p style="margin: 0; font-size: 20px; font-weight: 600">まだ記録はありません</p>
+<p style="margin: 0; color: var(--color-text-secondary)">エージェントが動くと、ターンや夜の切り替えがここに並びます。</p>
+</div>
+</sc-if>
+
+<sc-if value="{{hasRows}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 24px">
+
+<sc-if value="{{hasUnseen}}" hint-placeholder-val="{{ false }}">
+<div role="status" style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 16px; border-radius: 0.75rem; background: var(--color-error-muted); color: var(--color-on-error-muted)">
+<svg aria-hidden="true" style="flex: none" width="18" height="18" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="var(--color-error)"/><path d="M8 8l8 8M16 8l-8 8" stroke="var(--color-on-error)" stroke-width="2.6" stroke-linecap="round"/></svg>
+<span style="font-weight: 600">前に見たあとの失敗が 3 件あります</span>
+</div>
+</sc-if>
+
+<div style="display: flex; align-items: center; gap: 8px; overflow-x: auto">
+<button type="button" onClick="{{toggleFail}}" aria-pressed="{{failStr}}" style="flex: none; min-height: 44px; padding: 0 14px; border: 1px solid {{failBorder}}; border-radius: 9999px; background: {{failBg}}; color: {{failFg}}; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">失敗だけ</button>
+<button type="button" aria-haspopup="listbox" style="flex: none; min-height: 44px; padding: 0 12px 0 14px; border: 1px solid var(--color-border); border-radius: 9999px; background: transparent; color: var(--color-text-primary); font: inherit; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px">
+<span>誰の: すべて</span>
+<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+</button>
+<button type="button" aria-haspopup="listbox" style="flex: none; min-height: 44px; padding: 0 12px 0 14px; border: 1px solid var(--color-border); border-radius: 9999px; background: transparent; color: var(--color-text-primary); font: inherit; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px">
+<span>種類: すべて</span>
+<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+</button>
+</div>
+
+<sc-for list="{{days}}" as="day" hint-placeholder-count="2">
+<section style="display: flex; flex-direction: column">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-bottom: 8px; border-bottom: 1px solid var(--color-border); font-size: 12px; color: var(--color-text-secondary)">
+<h2 style="margin: 0; font-size: 12px; font-weight: 600">{{day.label}}</h2>
+<span>{{day.summary}}</span>
+</div>
+<sc-for list="{{day.rows}}" as="row" hint-placeholder-count="6">
+<div style="display: flex; flex-direction: column">
+<dc-import name="RecordRow" r="{{ row }}" hint-size="100%,44px"></dc-import>
+<sc-if value="{{row.open}}" hint-placeholder-val="{{ false }}">
+<div style="padding-left: 24px; background: var(--color-neutral)">
+<sc-for list="{{row.kids}}" as="kid" hint-placeholder-count="3">
+<dc-import name="RecordRow" r="{{ kid }}" hint-size="100%,44px"></dc-import>
+</sc-for>
+</div>
+</sc-if>
+</div>
+</sc-for>
+</section>
+</sc-for>
+
+<p style="margin: 0; font-size: 12px; color: var(--color-text-secondary)">一覧は 1 年残ります。ターンの中の流れは 30 日で消えます。</p>
+
+</div>
+</sc-if>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"day":{"editor":"enum","options":["normal","failures","missed","empty"],"default":"failures"},"pad":{"editor":"text","default":"24px"},"$preview":{"width":760,"height":1100}}'>
+class Component extends DCLogic {
+renderVals() {
+const v = this.props.day ?? 'failures';
+const st = this.state || {};
+const bad = v === 'failures';
+const onlyFail = !!st.onlyFail;
+const openId = st.openId === undefined ? (bad ? 'h14' : null) : st.openId;
+const T = 'HybridTurn.dc.html';
+const grp = (id, time, n, mix, kids) => ({ id: id, kind: 'group', time: time, label: 'ターン ' + n, meta: mix, kids: kids || [], open: openId === id, toggle: () => this.setState({ openId: openId === id ? null : id }) });
+const kids14 = [
+{ kind: 'ok', time: '14:41', label: 'Slack', text: 'メンション 1 件', meta: '12 秒 ・ ツール 3 ・ 返事', href: T },
+{ kind: 'ok', time: '14:33', label: '本体から', who: 'cluster-test', text: '続きの依頼', meta: '2 分 10 秒 ・ ツール 14', href: T },
+{ kind: 'ok', time: '14:20', label: '自分から', text: '静かな時間が続いた', meta: '6 秒 ・ ツール 0', href: T },
+{ kind: 'stop', time: '14:08', label: '予約', text: '毎時の見回り', meta: '止められた ・ 31 秒', href: T },
+{ kind: 'ok', time: '14:02', label: 'オーナー', text: '発言 2 件をまとめて', meta: '40 秒 ・ ツール 5 ・ 返事', href: T }
+];
+const failTurn = { kind: 'fail', time: '14:12', label: 'alertmanager', isNew: true, text: '[FIRING warning] HighMemoryUsage', meta: '48 秒 ・ ツール 6', note: '失敗した ・ モデルの呼び出しが 3 回続けて落ちた', bad: true, href: 'HybridTurnFailed.dc.html' };
+const failJob = { kind: 'fail', time: '13:40', label: '裏の仕事', isNew: true, mono: 'make test', meta: '9 分 4 秒', note: '失敗した ・ exit 2', bad: true };
+const okJob = { kind: 'job', time: '11:05', label: '裏の仕事', mono: 'kubectl wait --for=condition=Ready pod -l app=web --timeout=600s', meta: 'exit 0 ・ 3 分 12 秒' };
+const sub = { kind: 'sub', time: '10:30', label: '閉じたサブエージェント', who: 'renovate-review', meta: 'ターン 12 ・ 9:02 に起こした', note: 'Renovate の PR をまとめて確かめる', href: 'HybridRecordSub.dc.html' };
+const ok3 = [{ name: '振り返り', s: 'ok' }, { name: '整理係', s: 'ok' }, { name: '新しいセッション', s: 'ok' }];
+const nightOk = { kind: 'night', time: '3:00', label: '夜の切り替え', steps: ok3, meta: '4 分 20 秒', href: 'HybridRecordNight.dc.html' };
+const nightBad = { kind: 'fail', time: '3:00', label: '夜の切り替え', isNew: true, steps: [{ name: '振り返り', s: 'ok' }, { name: '整理係', s: 'fail' }, { name: '新しいセッション', s: 'none' }], meta: '10 分 2 秒', note: '整理係で止まった ・ 記憶の整理が時間切れになった', bad: true, href: 'HybridRecordNight.dc.html' };
+const missed = { kind: 'warn', time: '3:00', label: '逃した夜', note: '3:00 の予定の切り替えが行われませんでした。' };
+let today = [
+grp('h15', '15時台', 3, 'Slack 1 ・ 自分から 2'),
+bad ? failTurn : null,
+grp('h14', '14時台', 5, 'オーナー 1 ・ Slack 1 ・ 予約 1 ・ ほか 2', kids14),
+bad ? failJob : null,
+grp('h13', '13時台', 4, 'GitHub 2 ・ 自分から 2'),
+okJob,
+sub,
+grp('h09', '9時台', 8, 'オーナー 5 ・ 予約 1 ・ ほか 2'),
+grp('h06', '6〜8時台', 9, '予約 3 ・ 自分から 6'),
+v === 'missed' ? missed : (bad ? nightBad : nightOk)
+].filter((r) => r);
+let yest = [
+grp('y22', '22時台', 4, 'Slack 3 ・ 自分から 1'),
+grp('y09', '9〜21時台', 61, 'オーナー 12 ・ Slack 20 ・ ほか 29'),
+nightOk
+];
+if (onlyFail) { today = today.filter((r) => r.bad); yest = []; }
+const days = [{ label: '今日 ・ 11月17日(火)', summary: bad ? 'ターン 30 ・ 失敗 3' : 'ターン 29 ・ 失敗なし', rows: today }];
+if (yest.length) days.push({ label: '昨日 ・ 11月16日(月)', summary: 'ターン 65 ・ 失敗なし', rows: yest });
+return {
+pad: this.props.pad ?? '24px',
+isEmpty: v === 'empty',
+hasRows: v !== 'empty',
+hasUnseen: bad,
+days: days,
+toggleFail: () => this.setState({ onlyFail: !onlyFail }),
+failStr: onlyFail ? 'true' : 'false',
+failBg: onlyFail ? 'var(--color-accent)' : 'transparent',
+failFg: onlyFail ? 'var(--color-on-accent)' : 'var(--color-text-primary)',
+failBorder: onlyFail ? 'var(--color-accent)' : 'var(--color-border)'
+};
+}
+}
+</script>
+</body>
+</html>
