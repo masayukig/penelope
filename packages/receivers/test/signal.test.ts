@@ -305,6 +305,14 @@ describe("the Signal plugin against signal-cli", () => {
       otherGroup.set("text", "hi");
       otherGroup.set("group", "work");
       assert.equal((await post(sendSocket, otherGroup)).status, 403);
+      // owner_request asks for the owner's approval, which a deployment without approvals cannot give: refused, not sent.
+      const calls = cli.calls.length;
+      const asked = new FormData();
+      asked.set("text", "hi");
+      asked.set("group", "family");
+      asked.set("owner_request", "1");
+      assert.deepEqual(await post(sendSocket, asked), { status: 400, body: { error: "owner_request: this deployment does not hold group posts for the owner (no approvals)" } });
+      assert.equal(cli.calls.length, calls);
       cli.sendResult = { timestamp: 1794819900000, results: [{ type: "UNREGISTERED_FAILURE" }, { type: "SUCCESS" }] };
       assert.equal((await post(sendSocket, toGroup)).status, 200, "a group's send fails only when no member took it");
 
@@ -587,6 +595,25 @@ describe("approvals: the judge and the owner between the agent and a group", () 
       assert.equal(down.status, 202);
       assert.equal(down.body.reason, "no judge's verdict");
       assert.ok(s.lines.includes("judge: no verdict (http-500)"));
+
+      // Asked for by the owner in the DM: held for her at once, not judged, even what the judge would send back; 👍 sends it.
+      const judged = judge.asked.length;
+      const requested = await post(s.sendSocket, form({ text: "bad", group: "family", owner_request: "1" }));
+      assert.equal(requested.status, 202);
+      assert.equal(requested.body.reason, "your owner asked for it in their DM; they approve it before it goes");
+      assert.equal(judge.asked.length, judged);
+      assert.match(s.toOwner().at(-1)!.params.message as string, /\n---\nbad\n---\n理由: 本人の依頼（DM）\n期限: /);
+      const sends = s.groupSends().length;
+      await s.react("👍");
+      await until(() => s.groupSends().length === sends + 1);
+      assert.equal(s.groupSends().at(-1)!.params.message, "bad");
+      // A file alone, too, is held when the owner asked for it; the flag is only for group posts and only as 1.
+      const file = form({ group: "family", owner_request: "1" });
+      file.append("file", new Blob([new Uint8Array([1])], { type: "image/png" }), "a.png");
+      assert.equal((await post(s.sendSocket, file)).status, 202);
+      assert.equal(s.groupSends().length, sends + 1);
+      assert.equal((await post(s.sendSocket, form({ text: "x", owner_request: "1" }))).status, 400);
+      assert.equal((await post(s.sendSocket, form({ text: "x", group: "family", owner_request: "yes" }))).status, 400);
 
       // The owner's DM: never judged, never held.
       const asked = judge.asked.length;

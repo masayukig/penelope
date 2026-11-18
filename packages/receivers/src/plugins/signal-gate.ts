@@ -106,7 +106,7 @@ const CONTEXT_CHARS = 500;
 /** Lines kept per group to find the one a reply quotes. */
 const KEPT_LINES = 50;
 
-const VERDICT_WORDS = { owner: "判定が本人に回した", "no-verdict": "判定できなかった", "rewrite-limit": "同じ返信先で 3 回突き返された" } as const;
+const VERDICT_WORDS = { owner: "判定が本人に回した", "no-verdict": "判定できなかった", "rewrite-limit": "同じ返信先で 3 回突き返された", "owner-request": "本人の依頼（DM）" } as const;
 const RESULT_WORDS = { sent: "送った", declined: "見送った", expired: "期限切れで送らなかった", failed: "送れなかった（Signal に断られたか、届いたか分からない）" } as const;
 export type HeldResult = keyof typeof RESULT_WORDS;
 
@@ -172,8 +172,13 @@ export class Gate {
     this.lines.set(groupId, kept);
   }
 
-  /** A post to a group: judged, then sent, sent back or held. Files alone are not judged (natsumi ADR 0044). */
-  async post(draft: Draft): Promise<Sent> {
+  /**
+   * A post to a group: judged, then sent, sent back or held. Files alone are not judged (natsumi ADR 0044). One the agent
+   * says the owner asked for in their DM (`ownerRequest`) is held for the owner at once, files alone too: the judge sees
+   * only the group, so it would send back what the owner asked for. It is only ever held, never sent without a 👍.
+   */
+  async post(draft: Draft, ownerRequest = false): Promise<Sent> {
+    if (ownerRequest) return this.hold(draft, "owner-request", []);
     if (draft.text === undefined) return this.options.send(draft);
     const key = `${draft.groupId}/${draft.quote?.timestamp ?? ""}`;
     let verdict: "send" | "owner" | "return" | "no-verdict" | "rewrite-limit" = "no-verdict";
@@ -354,7 +359,12 @@ export class Gate {
       status: 202,
       body: {
         held: id,
-        reason: verdict === "owner" ? "the judge flagged it" : verdict === "rewrite-limit" ? `sent back ${MAX_RETURNS} times on this target already` : "no judge's verdict",
+        reason: {
+          owner: "the judge flagged it",
+          "rewrite-limit": `sent back ${MAX_RETURNS} times on this target already`,
+          "no-verdict": "no judge's verdict",
+          "owner-request": "your owner asked for it in their DM; they approve it before it goes",
+        }[verdict],
         ...(flagged.length > 0 ? { issues: flagged.map((issue) => ({ name: issue.name, score: Math.round(issue.score * 100) / 100 })) } : {}),
         note: "held for your owner on Signal; what they decide comes as an event in the group's stream",
       },
