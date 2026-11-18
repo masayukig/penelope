@@ -371,6 +371,39 @@ describe("the Signal plugin while the intake refuses or it stops", () => {
     }
   });
 
+  test("her post to a group the intake refuses is handed over again, not sent again, and answered 200", async () => {
+    const cli = new FakeSignalCli(join(dir, "own.sock"));
+    await cli.listen();
+    const lines: string[] = [];
+    const delivered: ConnectionEvent[] = [];
+    let refusals = 2;
+    const sendSocket = join(dir, "own-send.sock");
+    const connection = signalPlugin({ backoffMs: () => 5 }).create({ ...SETTINGS, groups: { family: GROUP }, socket: cli.path, send_socket: sendSocket }, env);
+    const handle = connection.start({
+      deliver: async (events) => {
+        if (refusals-- > 0) return false; // a backend restarting
+        delivered.push(...events);
+        return true;
+      },
+      log: (line) => lines.push(line),
+      now: () => new Date(),
+    });
+    try {
+      await until(() => lines.includes("connected"));
+      const form = new FormData();
+      form.set("text", "7 is fine");
+      form.set("group", "family");
+      assert.equal((await post(sendSocket, form)).status, 200);
+      // Guards against: her post, which Signal never gives back, lost for good after one refusal.
+      await until(() => delivered.length === 1);
+      assert.equal(delivered[0]!.id, `group.family/${AGENT}/1794819700000`);
+      assert.equal(cli.calls.filter((call) => call.method === "send").length, 1);
+    } finally {
+      await handle.stop();
+      await cli.close();
+    }
+  });
+
   test("an event the intake keeps refusing is dropped after 30 minutes, without a receipt", async () => {
     const cli = new FakeSignalCli(join(dir, "refused.sock"));
     await cli.listen();

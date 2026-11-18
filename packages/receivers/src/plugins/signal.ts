@@ -308,6 +308,25 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
               socket.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params: { account: settings.account, ...params } })}\n`);
             });
 
+          // Neither signal-cli (a received envelope) nor Signal (the agent's own post) gives it again, so
+          // an event is handed over until the intake takes it, for REDELIVER_MS at most; one that comes
+          // while the plugin stops is tried once. Resolves whether it was taken.
+          const handOver = async (event: ConnectionEvent, what: string) => {
+            const since = io.now().getTime();
+            for (let attempt = 1; !(await io.deliver([event])); attempt++) {
+              if (stopped) {
+                io.log(`${what} events=1 dropped=0 taken=false (stopping)`);
+                return false;
+              }
+              if (io.now().getTime() - since >= REDELIVER_MS) {
+                io.log(`${what} events=1 dropped=1 taken=false (refused for ${REDELIVER_MS / 60000} minutes, ${attempt} tries)`);
+                return false;
+              }
+              await sleep(backoffMs(attempt));
+            }
+            return true;
+          };
+
           const receive = async (params: unknown) => {
             // A daemon with several numbers names the one it came to; only the configured one's are
             // taken, before any file is fetched or receipt sent. A single-number daemon (`-a`) leaves it out.
@@ -340,20 +359,7 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
                 io.log(`cannot fetch a file (${error instanceof Error ? error.message : "error"})`);
               }
             }
-            // signal-cli does not push it again, so it is handed over until the intake takes it, for
-            // REDELIVER_MS at most; one that comes while the plugin stops is tried once.
-            const since = io.now().getTime();
-            for (let attempt = 1; !(await io.deliver([{ ...event, ...(files.length > 0 ? { files } : {}) }])); attempt++) {
-              if (stopped) {
-                io.log("envelope events=1 dropped=0 taken=false (stopping)");
-                return;
-              }
-              if (io.now().getTime() - since >= REDELIVER_MS) {
-                io.log(`envelope events=1 dropped=1 taken=false (refused for ${REDELIVER_MS / 60000} minutes, ${attempt} tries)`);
-                return;
-              }
-              await sleep(backoffMs(attempt));
-            }
+            if (!(await handOver({ ...event, ...(files.length > 0 ? { files } : {}) }, "envelope"))) return;
             io.log(`envelope events=1 dropped=0 taken=true`);
             const sender = event.payload.from.number ?? event.payload.from.uuid!;
             if (event.payload.type === "message") {
@@ -433,8 +439,9 @@ export function signalPlugin(options: SignalPluginOptions = {}): ConnectionPlugi
               summary: summaryLine(`Signal ${group.name} (you):${text !== undefined ? ` ${text}` : ""}${files > 0 ? ` (${files} file${files === 1 ? "" : "s"})` : ""}`),
               payload: { type: "message", from: { number: settings.account }, group: { name: group.name }, own: true, timestamp, ...(text !== undefined ? { text } : {}) },
             };
+            // Only the hand-over is tried again, in the background: the send itself went through and is answered 200.
             chain = chain.then(async () => {
-              if (!(await io.deliver([event]))) io.log("own post events=1 taken=false");
+              await handOver(event, "own post");
             });
           };
           const sender = settings.sendSocket ? sendServer(settings.sendSocket, { senders: settings.senders, groups: settings.groups, call, log: io.log, posted }) : undefined;
