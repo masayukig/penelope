@@ -42,7 +42,9 @@ printf '%s' '<text>' | curl -sS --fail-with-body -F 'text=<-' [-F 'to=+81…' | 
   gif, webp, mp4, mov, m4a, ogg, pdf); anything else arrives on Signal as a plain file, not as a picture or a video.
 - It answers `{"timestamp": …}`, Signal's time of what you sent, which a reaction or a quote points back at.
 - `403`: `to` is not one of the allowed senders, or `group` not one of the groups. `400`: neither text nor a file, or both `to`
-  and `group`. `502`: signal-cli or Signal refused it. `503`: signal-cli is not connected just now; try again in a while.
+  and `group`. `502`: signal-cli or Signal refused it, or signal-cli gave no answer in time (`no answer in time`, the
+  connection closed). In the last case it may have gone out all the same: do not send it again as it is, say it may not have
+  arrived instead. `503`: signal-cli is not connected just now, nothing was sent; try again in a while.
 - What you send to a group is read by everyone in it at once, and nothing checks it before it goes. Keep your owner's private
   matters out of it.
 - While you work on a direct message, or a group message that mentions you or quotes you, its conversation shows you typing,
