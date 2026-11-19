@@ -10,7 +10,7 @@ import { test } from "node:test";
 import type { SelfEventRequest, SubAgentStatus, TurnEndRequest } from "@penelope/contract";
 
 import { type FakeBackend, until } from "./fake-backend.ts";
-import type { Answer, Call, Script } from "./fake-model.ts";
+import { OTHER_MODEL, PROVIDER, type Answer, type Call, type Script } from "./fake-model.ts";
 import { acked, activities, ui, world } from "./world.ts";
 
 const SUB_AGENT_TOOLS = ["subagent_close", "subagent_list", "subagent_send", "subagent_start"];
@@ -112,6 +112,15 @@ test("a sub-agent runs in the background, and its last words reach the main agen
 
   const after = await ask(fake, "subagent_list");
   assert.equal(JSON.parse(after.output)[0].state, "waiting");
+});
+
+test("a sub-agent uses the deployment's saved model on its own turn", async () => {
+  const { fake, start, calls } = await world();
+  fake.modelSelection = { model: `${PROVIDER}/${OTHER_MODEL}`, thinking: "low" };
+  await start(script(() => ({ text: "ready" })));
+  await ask(fake, "subagent_start", { name: "model-check", purpose: "Check the model", prompt: "first" });
+  await until(() => notices(fake).length === 1);
+  assert.equal(subCalls(calls, "first")[0]?.modelId, OTHER_MODEL);
 });
 
 test("the sub-agent's tools are Pi's, without the main agent's own", async () => {

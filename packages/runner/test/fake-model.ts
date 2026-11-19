@@ -20,6 +20,8 @@ export interface Answer {
 
 /** What the model was given for one call. */
 export interface Call {
+  modelId: string;
+  reasoning: string | undefined;
   systemPrompt: string;
   /** The text of every user message so far, in order. */
   userTexts: string[];
@@ -40,6 +42,7 @@ export type Script = (call: Call) => Answer | Promise<Answer>;
 
 export const PROVIDER = "fake";
 export const MODEL = "scripted";
+export const OTHER_MODEL = "org/other";
 
 let counter = 0;
 
@@ -123,6 +126,8 @@ export async function fakeRuntime(root: string, script: Script): Promise<ModelRu
         const rest = context.messages.filter((m) => m.role !== "system");
         const last = rest.at(-1);
         const call = script({
+          modelId: model.id,
+          reasoning: options?.reasoning,
           systemPrompt: system.map((m) => getSystemMessageText(m)).join("\n"),
           userTexts: userTexts(rest),
           lastRole: last?.role ?? "",
@@ -184,17 +189,15 @@ export async function fakeRuntime(root: string, script: Script): Promise<ModelRu
       })();
       return stream;
     },
-    models: [
-      {
-        id: MODEL,
-        name: MODEL,
+    models: [MODEL, OTHER_MODEL].map((id) => ({
+        id,
+        name: id,
         reasoning: true,
         input: ["text", "image"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: 200_000,
         maxTokens: 8_192,
-      },
-    ],
+    })),
   });
   await runtime.setRuntimeApiKey(PROVIDER, "unused");
   return runtime;

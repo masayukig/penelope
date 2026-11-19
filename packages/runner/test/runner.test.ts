@@ -8,7 +8,7 @@ import type { DeliveredEvent, SessionRotatedRequest, TurnEndRequest, TurnLine } 
 import type { Config } from "../src/config.ts";
 import { curatorSystemPrompt, FOLDING, foldAskInput, type Places, reflectionInput } from "../src/prompts.ts";
 import { until } from "./fake-backend.ts";
-import type { Answer, Call, Script } from "./fake-model.ts";
+import { MODEL, OTHER_MODEL, PROVIDER, type Answer, type Call, type Script } from "./fake-model.ts";
 import { acked, activities, closers, ui, world } from "./world.ts";
 
 function slack(seq: number, delivery: "now" | "batch"): DeliveredEvent {
@@ -73,8 +73,23 @@ test("an event becomes a turn; the reply, the activities, the turn's end and the
   assert.ok(sent.every((a) => a.turn_id === turnId));
   assert.deepEqual(fake.sent("POST", "/v1/turns/end"), [{ agent: "main", turn_id: turnId, result: "done", seqs: [1] }]);
 
-  const order = fake.order().filter((r) => r !== "POST /v1/activity" && r !== "POST /v1/replies");
+  const order = fake.order().filter((r) => r === "POST /v1/turns/end" || r === "POST /v1/events/ack");
   assert.deepEqual(order, ["POST /v1/turns/end", "POST /v1/events/ack"]);
+});
+
+test("the owner's new model and thinking level apply on the next turn without losing the conversation", async () => {
+  const { fake, start, calls } = await world({ turnFold: false });
+  await start(() => ({ text: "Received" }));
+  fake.push(ui(1, "first"));
+  await until(() => acked(fake).includes(1));
+  assert.equal(calls[0]?.modelId, MODEL);
+
+  fake.modelSelection = { model: `${PROVIDER}/${OTHER_MODEL}`, thinking: "low" };
+  fake.push(ui(2, "second"));
+  await until(() => acked(fake).includes(2));
+  assert.equal(calls[1]?.modelId, OTHER_MODEL);
+  assert.equal(calls[1]?.reasoning, "low");
+  assert.deepEqual(calls[1]?.userTexts.flatMap((input) => events(input).map((line) => line.text)), ["first", "second"]);
 });
 
 test("the system prompt is hers, with her memory after it", async () => {

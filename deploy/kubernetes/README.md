@@ -106,7 +106,8 @@ base が決めている場所:
 | `backend.env` | `PENELOPE_AVATAR=example`、`PENELOPE_AGENT_NAME` | 最初に写すアバターと、UI に出す名前（下の「アバター」） |
 | `sandbox/env` | `PENELOPE_NAME` | システムプロンプトに入る名前。`PENELOPE_AGENT_NAME` と同じにする |
 | `sandbox/env` | `PENELOPE_ROLE`・`PENELOPE_OWNER` | 役目とオーナー（システムプロンプトに入る） |
-| `sandbox/env`・`sandbox/models.json` | `PENELOPE_MODEL=openai/gpt-5.5`、provider `openai` | Pi の provider とモデル |
+| `sandbox/env`・`sandbox/models.json` | `PENELOPE_MODEL=openai/gpt-5.5`、provider `openai` | Pi の既定のモデルと選べるモデルの定義 |
+| `sandbox/env` | `PENELOPE_THINKING`（任意） | 既定の思考の深さ。未指定は Pi の設定に従う |
 | `sandbox/env` | `PENELOPE_OWNER_EXTENSIONS_DIR`（任意、見本では未設定） | オーナーの Pi 拡張を読み取り専用で mount した絶対パス（下の「Pi 拡張」） |
 | `sandbox/surrogates.env`・`sandbox/models.json`・`sentinel/sentinel.yaml` | `surrogate-example-*` | 自分のサロゲート（下の「サロゲート」） |
 | `sentinel/sentinel.yaml` | `api.openai.com`・`sd-webui.example.com`・`helper.agents.example.com` | 鍵を差し替えるホスト |
@@ -162,6 +163,12 @@ kubectl -n "$ns" create secret generic penelope-receivers \
 - Slack の bot の token は、receivers（受ける）と Sentinel（`slackctl post` で送る）の両方が使うので、2 つの Secret に同じ値を入れる。Slack App の用意は [docs/receivers.md](../../docs/receivers.md) の「Slack App の用意」。
 - GitHub の OAuth App の callback は `<公開の URL>/auth/github/callback`。
 - 鍵を変えたら Pod を作り直す（`kubectl -n "$ns" rollout restart statefulset/penelope`）。receivers は鍵を起動のときにだけ読む。
+
+## モデルの設定
+
+`PENELOPE_MODEL` と `PENELOPE_THINKING` は、オーナーが Web UI の「設定」で選ぶまでの既定である。保存した組は backend の SQLite に残り、本体・サブエージェント・夜の整理係の次のターンから使う。候補を増やすには sandbox の `models.json` にモデルを追加し、必要な鍵の差し替えは従来どおり Sentinel に設定する。候補には Pi が認証を確認できたモデルだけが出る。候補から保存済みのモデルが外れたら、runner は既定で動き、そのことをログに残す。
+
+設定用の schema 8 への migration は一方通行である。更新前に SQLite を backup し、版 7 までの backend に戻すときは更新前の backup も戻す。
 
 ## アバター
 

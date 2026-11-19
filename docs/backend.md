@@ -86,8 +86,8 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 
 - 状態は `PENELOPE_DATABASE` の SQLite の 1 つのファイルに置く（[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)）。待ち行列、会話の履歴、途中経過の記録、予約、セッションの切り替えの記録、ログインのセッション、A2A の Task、サブエージェントごとに runner が最後に知らせたもの（目的と閉じたか）、知らせの購読である。
 - エージェントごとの今の状態（`thinking` か `waiting`）とその状態になった時刻は別に残さず、途中経過の記録の最後の `turn_start` か `turn_end` から引く（[sandbox-api.md](sandbox-api.md) の「途中経過」）。途中経過が 30 日で消えて（「活動の記録」）どちらも無くなったエージェントは、まだターンの無いエージェントと同じく `waiting` である。
-- schema は migration の列で進める。版は `PRAGMA user_version` で、その数の migration が当たっている。migration は足すだけで、書き換えない。backend より新しい版のファイルは開かずに止まる。版 2 は A2A の Task、版 3 はサブエージェント（`sub_agents`）と、途中経過の記録から最後の `turn_start`・`turn_end` を引く索引、版 4 は知らせの購読（`push_subscriptions`。`endpoint` ごとに 1 行、種類と、その種類の鍵の JSON）、版 5 は作ったものの写し（`assets`）、版 6 はオーナーの画像の写し（`assets` を作り直して `agent` を空でもよくし、`reply_id` を `message_id` にした。履歴の `files`）、版 7 は活動の記録（下の「活動の記録」）である。
-- 版 7 に上げたファイルは、版 6 までの backend では開けない（新しい版のファイルを開かずに止まる決まりのまま）。backend の image を前の版に戻すときは、SQLite のファイルも版 7 に上げる前の backup に戻す。
+- schema は migration の列で進める。版は `PRAGMA user_version` で、その数の migration が当たっている。migration は足すだけで、書き換えない。backend より新しい版のファイルは開かずに止まる。版 2 は A2A の Task、版 3 はサブエージェント（`sub_agents`）と、途中経過の記録から最後の `turn_start`・`turn_end` を引く索引、版 4 は知らせの購読（`push_subscriptions`。`endpoint` ごとに 1 行、種類と、その種類の鍵の JSON）、版 5 は作ったものの写し（`assets`）、版 6 はオーナーの画像の写し（`assets` を作り直して `agent` を空でもよくし、`reply_id` を `message_id` にした。履歴の `files`）、版 7 は活動の記録（下の「活動の記録」）、版 8 はオーナーが保存したモデルと思考の深さ（`model_settings`、配置ごとに 1 組）である。モデル候補は runner から受け取り、SQLite には保存しない。
+- migration は一方通行である。版 8 に上げたファイルは版 7 までの backend では開けない。backend の image を前の版に戻すときは、SQLite も版 8 に上げる前の backup に戻す。版 7 以前も同様。
 - 出来事・会話の履歴・A2A の Task は消さない。いつまで残すかは、量が問題になったときに決める。途中経過と活動の記録の 1 行は、下の「活動の記録」の期間で消す。
 - `/sources` の保存期間による削除はまだ無い。
 

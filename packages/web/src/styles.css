@@ -152,6 +152,56 @@ body {
   gap: 16px;
 }
 
+/* Settings share the same central column on desktop and phone. */
+.settings-card, .settings-form {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.settings-card {
+  padding: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-container);
+  background: var(--color-background-surface);
+}
+.settings-note {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+.settings-model-detail {
+  overflow-wrap: anywhere;
+}
+.settings-current, .settings-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+.settings-current {
+  padding: 12px;
+  border-radius: var(--radius-element);
+  background: var(--color-neutral);
+}
+.settings-form label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+.settings-form select {
+  min-height: 44px;
+  min-width: 0;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-element);
+  background: var(--color-background-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-weight: 400;
+  text-overflow: ellipsis;
+}
+
 /* Her schedules (docs/design/README.md, 12): by day, one row each, a thin line under each. */
 .schedules-page {
   gap: 28px;

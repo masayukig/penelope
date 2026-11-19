@@ -5,6 +5,7 @@
 export * from "./agents.ts";
 export * from "./images.ts";
 export * from "./record.ts";
+export * from "./settings.ts";
 export type * from "./events.ts";
 export type * from "./sandbox.ts";
 export type * from "./turn.ts";

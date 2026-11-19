@@ -18,11 +18,13 @@ import {
 import type { TurnResult } from "@penelope/contract";
 
 import type { Config } from "./config.ts";
+import type { TurnModels } from "./model-settings.ts";
 import { type ExtensionNotice, type MemoryExtensionTrials, SessionExtensions } from "./extensions.ts";
 
 export interface PiSetup {
   config: Config;
   modelRuntime: ModelRuntime;
+  turnModels: TurnModels;
   /** Pi's settings. A deployment reads them from Pi's directory. */
   settings: () => SettingsManager;
   log: (line: string) => void;
@@ -175,6 +177,7 @@ export async function openSession(
       onError: ({ extensionPath, event, error }) => disk.report("handler_error", extensionPath, `${event}: ${error}`),
     });
   }
+  setup.turnModels.remember(session, disk !== undefined);
   return {
     session,
     async beforeTurn() {

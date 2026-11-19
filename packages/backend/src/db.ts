@@ -281,6 +281,14 @@ export const MIGRATIONS: readonly string[] = [
     value TEXT NOT NULL
   );
   `,
+  `
+  -- The owner's settings, one selection for the entire deployment (ADR-0043).
+  CREATE TABLE model_settings (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    model     TEXT NOT NULL,
+    thinking  TEXT NOT NULL
+  );
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

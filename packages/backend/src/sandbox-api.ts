@@ -13,6 +13,7 @@ import type { Conversation } from "./conversation.ts";
 import { isTime } from "./envelope.ts";
 import { type Handler, HttpError, readJson, sendEmpty, sendJson } from "./http.ts";
 import type { Memory } from "./memory.ts";
+import type { ModelSettings } from "./model-settings.ts";
 import type { Queue } from "./queue.ts";
 import type { ActivityRecord, TurnEnd } from "./record.ts";
 import { ScheduleError, type Schedules } from "./schedules.ts";
@@ -38,6 +39,7 @@ export type SandboxOptions = {
   inbox: Inbox;
   /** The activity record (ADR-0038). */
   record: ActivityRecord;
+  modelSettings: ModelSettings;
   now: () => number;
   maxBytes?: number;
   /** The limit of a reply's body, which carries its images. */
@@ -78,6 +80,13 @@ export function sandboxHandler(options: SandboxOptions): Handler {
     }
 
     switch (route) {
+      case "PUT /v1/model-settings": {
+        const report = withAgent(await body());
+        mainOnly(report.agent, "reports model availability");
+        options.modelSettings.report(report);
+        sendJson(response, 200, { selection: options.modelSettings.selection() });
+        return;
+      }
       case "POST /v1/events/ack": {
         const { seqs } = withAgent(await body());
         if (!Array.isArray(seqs) || !seqs.every((seq) => Number.isSafeInteger(seq))) {

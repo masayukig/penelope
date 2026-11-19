@@ -11,6 +11,7 @@ import { SubAgents } from "../src/agents.ts";
 import { Assets } from "../src/assets.ts";
 import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
+import { ModelSettings } from "../src/model-settings.ts";
 import { Feed } from "../src/feed.ts";
 import { close, listenUnix } from "../src/http.ts";
 import { Memory } from "../src/memory.ts";
@@ -55,7 +56,7 @@ async function setup(
   const record = new ActivityRecord(db, feed, { now: clock.now, timeZone: "UTC", nightly: cronOf("0 4 * * *", "UTC") });
   const socketPath = path.join(dir, "sandbox.sock");
   const server = await listenUnix(
-    sandboxHandler({ token, queue, conversation, agents, schedules, memory, inbox, record, now: Date.now, log: () => {} }),
+    sandboxHandler({ token, queue, conversation, agents, schedules, memory, inbox, record, modelSettings: new ModelSettings(db), now: Date.now, log: () => {} }),
     socketPath,
   );
   t.after(async () => {

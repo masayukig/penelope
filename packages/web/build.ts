@@ -23,6 +23,7 @@ export async function buildUi(dist: string, { minify, nodeEnv }: BuildOptions): 
 
   const result = await build({
     entryPoints: [path.join(here, "src/main.tsx")],
+    conditions: ["penelope-source", "module"],
     bundle: true,
     format: "esm",
     target: "es2022",

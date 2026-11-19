@@ -38,6 +38,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 | `GET /api/assets/<id>` | 返事とオーナーのメッセージに添えられた画像の写し |
 | `GET /api/push`・`POST /api/push/subscriptions`・`POST /api/push/subscriptions/delete` | 返事の知らせ（Web Push）の鍵と、購読の登録と解除 |
 | `GET /api/schedules`・`DELETE /api/schedules/<id>` | エージェントの予約の一覧と取り消し |
+| `GET /api/settings`・`PUT /api/settings` | モデルと思考の深さの設定 |
 | `GET /api/record`・`GET /api/record/<種類>/<id>`・`GET /api/record/unseen`・`POST /api/record/seen` | 活動の記録（「活動の記録」） |
 | `GET /api/approvals`・`POST /api/approvals/<id>` | 承認（後の波） |
 
@@ -156,6 +157,13 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 - `/api/`・`/auth/`・`/a2a/` のほかの道では、backend が `PENELOPE_WEB_DIR` にある Web UI の build（`packages/web` の `dist/`）を配る。`/` は `index.html` である。無いファイルは `404`。
 - `/manifest.webmanifest` は backend がその場で作る。名前はエージェントの名前、アイコンはアバターの `neutral` の画像（無ければ build の `icon.svg`）である。ホーム画面に置いて開くため（PWA）。
 - `assets/` の下のファイルは中身で名前が決まるので、長く cache させる。ほかは毎回確かめさせる。
+
+## 設定
+
+- `GET /api/settings` は `{selection, default, models}`（`SettingsResponse`）。`selection` は保存した `{model, thinking}`、`default` は runner が知らせた本体の既定の組。それぞれ無ければ `null`。
+- `model` は `<provider>/<model>`。最初の `/` より後ろ全体がモデルの ID。候補の `models` は runner から届いた `{provider, id, name, context_window, thinking_levels}` の一覧。`context_window` はトークン数。一覧が届いていないか期限切れなら `models: []`、`default: null`。
+- `PUT /api/settings` は `{model, thinking}` を配置の設定として保存し、`200` で `GET` と同じ形を返す。候補に無いモデルや、そのモデルが対応しない深さは `400`。いずれもオーナーのログインが必要で、sandbox や A2A の token は使えない。
+- PC・スマートフォンとも「場所」の「設定」に置く。保存済みか既定かを示し、候補ごとに名前・provider/ID・コンテキストの大きさ・使える思考の深さを確認できる。保存すると本体・サブエージェント・夜の振り返りと整理係の次のターンから効く。今走っているターンは変わらない。
 
 ## 予約
 
