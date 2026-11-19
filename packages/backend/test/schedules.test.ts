@@ -76,7 +76,7 @@ describe("the scheduler", () => {
     const [fired] = queue.take({ after: 0 });
     assert.equal(fired?.source, "cron");
     assert.equal(fired?.summary, "look at the CI");
-    assert.equal(fired?.occurred_at, "2026-11-14T09:00:00.000Z");
+    assert.equal(Date.parse(fired!.occurred_at), clock.ms);
     assert.equal(fired?.delivery, "now");
     assert.equal(fired?.inline, false);
     assert.deepEqual(schedules.list("main"), [made]);
@@ -87,7 +87,7 @@ describe("the scheduler", () => {
     clock.set("2026-11-15T09:00:00Z");
     scheduler.tick();
     const next = queue.take({ after: 1 }).filter((e) => e.source === "cron");
-    assert.deepEqual(next.map((e) => e.occurred_at), ["2026-11-15T09:00:00.000Z"]);
+    assert.deepEqual(next.map((e) => Date.parse(e.occurred_at)), [clock.ms]);
   });
 
   it("writes the schedule's id and reason as the payload", (t) => {

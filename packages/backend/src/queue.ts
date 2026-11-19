@@ -7,7 +7,7 @@ import type { DeliveredAttachment, DeliveredEvent, Delivery, Event } from "@pene
 
 import { transaction } from "./db.ts";
 import type { Attachment, Sources } from "./sources.ts";
-import { type AwakeHours, iso } from "./time.ts";
+import { type AwakeHours, deliveryTimeIn, iso } from "./time.ts";
 
 export type QueueOptions = {
   now: () => number;
@@ -46,12 +46,14 @@ export class Queue {
   private readonly db: DatabaseSync;
   private readonly sources: Sources;
   private readonly options: QueueOptions;
+  private readonly deliveryTime: (value: string) => string;
   private readonly listeners = new Set<() => void>();
 
   constructor(db: DatabaseSync, sources: Sources, options: QueueOptions) {
     this.db = db;
     this.sources = sources;
     this.options = options;
+    this.deliveryTime = deliveryTimeIn(options.awake.timeZone);
   }
 
   /**
@@ -138,7 +140,7 @@ export class Queue {
         .all(now, after, now - this.options.redeliverMs, limit) as Row[];
       const mark = this.db.prepare("UPDATE events SET delivered_ms = ? WHERE seq = ?");
       for (const row of rows) mark.run(now, row.seq);
-      return rows.map(delivered);
+      return rows.map((row) => delivered(row, this.deliveryTime(row.occurred_at)));
     });
   }
 
@@ -223,13 +225,13 @@ export class Queue {
   }
 }
 
-function delivered(row: Row): DeliveredEvent {
+function delivered(row: Row, occurred_at: string): DeliveredEvent {
   const base = {
     seq: row.seq,
     source: row.source,
     id: row.id,
     ...(row.stream === null ? {} : { stream: row.stream }),
-    occurred_at: row.occurred_at,
+    occurred_at,
     received_at: iso(row.received_ms),
     summary: row.summary,
     delivery: row.delivery,

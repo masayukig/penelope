@@ -52,6 +52,7 @@ type DeliveredBase = {
   source: Source;
   id: string;
   stream?: string;
+  /** RFC 3339 in the backend's configured time zone, or the stored value if it cannot be converted. */
   occurred_at: string;
   /** RFC 3339, when the backend took it in. */
   received_at: string;

@@ -16,6 +16,7 @@ type TurnEventBase = TurnLineBase & {
   /** The backend's order; what `reply`'s `in_reply_to` takes. */
   seq: number;
   delivery: Delivery;
+  /** The occurrence time as delivered by the backend. */
   occurred_at: string;
   summary: string;
   /** Files that came with it, under /sources/<source>/files/. */

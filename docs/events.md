@@ -112,6 +112,8 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 | `occurred_at`・`source`・`stream`・`id`・`summary` | 封筒のもの（`stream` は無ければ省く） |
 | `attachments` | 添付のパスの一覧（無ければ省く） |
 | `payload` | 封筒の `payload` そのまま |
+
+- `occurred_at` は SQLite と `/sources` のどちらにも、受け取った表記のまま保存する。runner への配送時だけ変換する。
 - ファイルの日付は、`received_at` を backend の設定の時間帯（[backend.md](backend.md) の `PENELOPE_TIME_ZONE`）で読んだ日である。
 - 添付のファイルの名前は、送られた名前の最後の段から、英字・数字・`.`・`_`・`-` のほかを `_` に替え、先頭の `.` を落とし、100 文字までにしたもの。空になれば `file`。1 つの出来事の中で同じ名前が重なれば、拡張子の前に `-2`・`-3`… を付ける。`<seq>-` が前に付くので、出来事をまたいでは重ならない。
 - 保存期間は backend の設定。日付のファイルごとに消す。消す仕組みはまだ無い（[backend.md](backend.md) の「状態」）。
@@ -145,7 +147,8 @@ runner は sandbox 向けの口で出来事を受け取り（[sandbox-api.md](sa
 | `seq` | backend の順番。`reply` の `in_reply_to` はこれを取る |
 | `source`・`stream` | 封筒のもの。`stream` が無ければ省く |
 | `delivery` | `now` か `batch` |
-| `occurred_at`・`summary` | 封筒のもの |
+| `occurred_at` | 配送時の値をそのまま載せる（[sandbox-api.md](sandbox-api.md) の「出来事を取る」） |
+| `summary` | 封筒のもの |
 | `text` | inline の出来事だけ。`payload` の `text`（文字列）。無ければ `payload` を JSON にした文字列 |
 | `appended` | inline でない出来事だけ。中身を足した場所。`path` と `lines`（`[from, to]`、1 始まり・両端を含む） |
 | `attachments` | 添付があるときだけ。1 件は `path`・`mime_type`・`size`（sandbox 向けの口の添付と同じ） |
