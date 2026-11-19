@@ -45,8 +45,10 @@
 | --- | --- | --- |
 | 1 | `PENELOPE_OWNER_SKILLS_DIR` が指す場所（オーナーの skill）。読み取りで mount するので、エージェントは書き換えられない。設定が無ければ無い | 配置 |
 | 2 | 記憶の `skills/` | エージェント |
-| 3 | `/opt/penelope/skills/`（sandbox の image の中。リポジトリの `packages/runner/image/skills/`）。配置は設定しない | このリポジトリ |
+| 3 | `/opt/penelope/skills/`（sandbox の image の中。リポジトリの `packages/runner/image/skills/`）。配置は `PENELOPE_IMAGE_SKILLS` で一覧に載せるものを選べる | このリポジトリ |
 
+- sandbox の `PENELOPE_IMAGE_SKILLS` が未設定なら、image の skill はすべて一覧の対象になる。設定する場合は `goals,self-portrait` のように名前（`SKILL.md` が入っているディレクトリ名）をカンマで区切る。名前の前後の空白と空の項目は無視し、空の値なら image の skill を 1 つも載せない。image にない名前は runner のログに出して飛ばす。
+- この選択は本人・サブエージェント・夜の整理係のセッションに適用し、拡張の読み直し後も保つ。オーナーと記憶の skill は絞らない。一覧に載らない skill も image の中に残り、ファイルは読める（[ADR-0042](adr/0042-select-image-skills-per-deployment.md)）。
 - image の skill は、image の道具の使い方（`slack`・`sd-webui`・`a2a`・`github`）と、どの配置にも同じ skill（`self-portrait`・`goals`）である。配置の値は持たず、それは配置のコネクタの文書にある。image の skill とコネクタは名前で突き合わせない。
 - コネクタの文書は `<名前>.md` の並びで、runner は `PENELOPE_CONNECTORS_DIR` が指す場所から読み、一覧をシステムプロンプトに出す（[sentinel-config.md](sentinel-config.md) の「コネクタの文書」）。読み取りで mount する。設定が無いか、場所が無ければ、コネクタの一覧は無い。
 - 自分で作った VM への ssh の鍵は、エージェントが HOME に自分で作る（[ADR-0021](adr/0021-her-own-ssh-key-in-home-for-the-vms-she-makes.md)）。配置は ssh の鍵も ssh-agent も置かない。ssh の接続は、ほかの外向きと同じく Sentinel へ向け直され、既定の扱いに従う。

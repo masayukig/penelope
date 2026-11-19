@@ -88,6 +88,7 @@ base が決めている場所:
 | sandbox `PENELOPE_BACKEND_URL` | `https://backend.penelope.internal`（Pod の `hostAliases`。Sentinel が backend の socket へつなぐ） |
 | sandbox `PENELOPE_CONNECTORS_DIR` | `/etc/penelope/connectors` |
 | sandbox `PENELOPE_OWNER_SKILLS_DIR` | `/skills` |
+| sandbox `PENELOPE_IMAGE_SKILLS` | 未設定（image のすべての skill が一覧の対象） |
 | Sentinel の受け口 | `15001`（TCP）・`15053`（名前解決）。`sentinel.yaml` の `listen` をこれに合わせる |
 | Sentinel の API server 向けの token | `/run/secrets/penelope-sentinel/kube/token`・`ca.crt`（`kubernetes.default.svc` を登録するときに使う） |
 
@@ -185,7 +186,9 @@ kubectl -n "$ns" create secret generic penelope-receivers \
 
 ## skill
 
-image に入っている skill（道具の使い方の `slack`・`sd-webui`・`a2a`・`github`・`avatar` と、`self-portrait`・`goals`・`extensions`）は、配置の設定なしで効く。init container `skills`（`base/init/skills.sh`）が置くのは、その配置だけの skill である。同じ名前があれば、配置の skill が image の skill より先に一覧に載る（[docs/pod.md](../../docs/pod.md) の「volume」）。
+image の skill は設定しなければすべて一覧の対象になる。絞るには、配置の sandbox の環境変数 `PENELOPE_IMAGE_SKILLS` に載せる名前をカンマ区切りで書く（例: `goals,self-portrait`）。空の値なら image の skill は載らない。image にない名前は runner がログに出して飛ばす。一覧から外した skill のファイルも image に残る。
+
+init container `skills`（`base/init/skills.sh`）が置くオーナーの skill と、記憶の skill はこの設定では絞らない。同じ名前があれば、オーナー、記憶、image の順で先のものが一覧に載る（[docs/pod.md](../../docs/pod.md) の「volume」）。
 
 - ConfigMap `penelope-skills` の `<名前>.SKILL.md` は `/skills/<名前>/SKILL.md` になる。
 - `skills.list` の 1 行は `<git の URL> <枝> <skill>...` で、そのリポジトリの `skills/<skill>/` を写す。リポジトリは public であること（向け直しの前に、鍵なしで取る）。

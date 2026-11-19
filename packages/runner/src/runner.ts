@@ -139,7 +139,7 @@ export class Runner {
     this.backend = options.backend;
     this.log = options.log ?? ((line) => process.stderr.write(`${line}\n`));
     this.extensionTrials = new MemoryExtensionTrials(join(this.config.home, ".penelope-extension-trials.json"), this.log);
-    const pi = { config: options.config, modelRuntime: options.modelRuntime, settings: options.settings };
+    const pi = { config: options.config, modelRuntime: options.modelRuntime, settings: options.settings, log: this.log };
     // A sub-agent has Pi's tools alone, and its turns are not folded.
     this.subAgents = new SubAgents({
       config: options.config,

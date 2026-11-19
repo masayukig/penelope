@@ -111,6 +111,8 @@ async function writeMemoryExtension(config: Config): Promise<void> {
 
 test("the main session reloads extensions between turns without loading them in the curator", async () => {
   const { fake, start, calls, config } = await world();
+  config.imageSkills = [];
+  await skills(config.imageSkillsDir, { goals: "Goals of the image." });
   config.ownerExtensionsDir = join(config.home, "..", "owner-extensions");
   const ownerEntries = join(config.ownerExtensionsDir, "extensions");
   await mkdir(ownerEntries, { recursive: true });
@@ -127,6 +129,7 @@ test("the main session reloads extensions between turns without loading them in 
   const afterReload = calls.at(-1)!;
   assert.ok(afterReload.tools.includes("owner_greet") && afterReload.tools.includes("memory_greet"));
   assert.match(afterReload.systemPrompt, /A new skill in memory/);
+  assert.doesNotMatch(afterReload.systemPrompt, /Goals of the image/, "reload keeps the empty image skill allow-list");
   assert.ok(afterReload.userTexts.some((text) => text.includes('"text":"hello"')), "reload preserves the current session");
   assert.ok(!JSON.stringify(afterReload.messages).includes("first turn thinking"), "folding still applies after reload");
 
@@ -244,6 +247,23 @@ test("the image's skills are listed, and a name the owner or the memory also has
   assert.ok(!prompt.includes("Goals of the image."));
   assert.ok(prompt.includes("Her own portrait."));
   assert.ok(!prompt.includes("Portrait of the image."));
+});
+
+test("an image skill allow-list selects only the named image skills in the main session", async () => {
+  const { fake, start, calls, config, logs } = await world({ ownerSkills: true });
+  config.imageSkills = ["goals", "missing"];
+  await skills(config.imageSkillsDir, { goals: "Goals of the image.", slack: "Slack of the image." });
+  await skills(config.ownerSkillsDir!, { example: "A skill of the owner." });
+  await skills(join(config.memoryDir, "skills"), { diary: "Her own diary." });
+  await start(() => ({ text: "hello" }));
+  fake.push(ui(1, "hello"));
+  await until(() => acked(fake).includes(1));
+  const prompt = calls[0]!.systemPrompt;
+  assert.match(prompt, /Goals of the image/);
+  assert.doesNotMatch(prompt, /Slack of the image/);
+  assert.match(prompt, /A skill of the owner/);
+  assert.match(prompt, /Her own diary/);
+  assert.match(logs.join("\n"), /image skill "missing"/);
 });
 
 test("a read-only directory of the owner's skills is read and left as it was", async () => {

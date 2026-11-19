@@ -2,7 +2,7 @@
 // the curator's, which starts empty every night. Pi's own tools are kept as
 // Pi sets them; the backend's tools are added beside them.
 
-import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import {
@@ -25,6 +25,7 @@ export interface PiSetup {
   modelRuntime: ModelRuntime;
   /** Pi's settings. A deployment reads them from Pi's directory. */
   settings: () => SettingsManager;
+  log: (line: string) => void;
   tools: ToolDefinition[];
   /** The runner's own factories, given to Pi as they are. */
   extensions: ExtensionFactory[];
@@ -107,8 +108,23 @@ export async function openSession(
   async function refreshSkillPaths(): Promise<void> {
     skillPaths.length = 0;
     // Pi keeps the first skill of a name: the owner's, then her own, then the image's.
-    for (const dir of [config.ownerSkillsDir, join(config.memoryDir, "skills"), config.imageSkillsDir]) {
+    for (const dir of [config.ownerSkillsDir, join(config.memoryDir, "skills")]) {
       if (dir && (await exists(dir))) skillPaths.push(dir);
+    }
+    if (config.imageSkills === undefined) {
+      if (await exists(config.imageSkillsDir)) skillPaths.push(config.imageSkillsDir);
+      return;
+    }
+    // Pi accepts individual Markdown files, so only the selected image skills are loaded.
+    for (const name of new Set(config.imageSkills)) {
+      if (/^[a-z0-9-]+$/.test(name)) {
+        const file = join(config.imageSkillsDir, name, "SKILL.md");
+        if ((await stat(file).catch(() => undefined))?.isFile()) {
+          skillPaths.push(file);
+          continue;
+        }
+      }
+      setup.log(`PENELOPE_IMAGE_SKILLS: image skill ${JSON.stringify(name)} not found; skipping`);
     }
   }
   await refreshSkillPaths();

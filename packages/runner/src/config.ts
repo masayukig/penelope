@@ -39,6 +39,8 @@ export interface Config {
   connectorsDir?: string;
   /** The skills that come with the image, listed after the owner's and the memory's; not set by the deployment. */
   imageSkillsDir: string;
+  /** Which image skills to list. Undefined lists all; an empty list lists none. */
+  imageSkills?: string[];
   sourcesDir: string;
   /** Pi's directory: its settings, credentials, models and skills. */
   agentDir: string;
@@ -143,6 +145,7 @@ export function readConfig(env: Env): Config {
   if (problems.length > 0) throw new ConfigError(problems.join("; "));
 
   const agentDir = env.PI_CODING_AGENT_DIR || join(home, ".pi", "agent");
+  const imageSkills = env.PENELOPE_IMAGE_SKILLS?.split(",").map((name) => name.trim()).filter(Boolean);
   return {
     agent: "main",
     backend,
@@ -166,5 +169,6 @@ export function readConfig(env: Env): Config {
     turnFold: fold !== "off",
     slack: { sources: slackSources, maxChars: slackMaxChars },
     imageSkillsDir: IMAGE_SKILLS_DIR,
+    ...(imageSkills !== undefined ? { imageSkills } : {}),
   };
 }
