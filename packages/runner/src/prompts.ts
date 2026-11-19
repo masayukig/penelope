@@ -64,7 +64,7 @@ const MEMORY_SHAPE = (places: Places, owner: string) => `- personality.md: the p
 function otherSkills({ ownerSkills, imageSkills }: Places, owner: string): string {
   const others = [
     ...(ownerSkills ? [`${owner}'s skills, in ${ownerSkills}/, which is read-only`] : []),
-    ...(imageSkills ? [`the skills that come with the image, in ${imageSkills}/`] : []),
+    ...(imageSkills ? [`the image skills selected for this deployment, from ${imageSkills}/`] : []),
   ];
   if (others.length === 0) return "";
   const order = [...(ownerSkills ? [`${owner}'s`] : []), "the memory's", ...(imageSkills ? ["the image's"] : [])];
@@ -210,7 +210,7 @@ export function subAgentSystemPrompt(
   options: { connectors?: { dir: string; list: Connector[] } } = {},
 ): string {
   const { name } = identity;
-  const dirs = [`${places.memory}/skills/`, ...(places.ownerSkills ? [`${places.ownerSkills}/`] : []), ...(places.imageSkills ? [`${places.imageSkills}/`] : [])];
+  const dirs = [`${places.memory}/skills/`, ...(places.ownerSkills ? [`${places.ownerSkills}/`] : [])];
   const skills = dirs.length === 1 ? dirs[0] : `${dirs.slice(0, -1).join(", ")} and ${dirs.at(-1)}`;
   const prompt = `You are a sub-agent of ${name}, ${identity.role}, whose owner is ${identity.owner}. ${name} started you, named \`${agent.name}\`, for this purpose: ${agent.purpose}
 
@@ -224,6 +224,6 @@ ${SENTINEL(identity.owner)}${connectorsSection(options.connectors)}
 
 # Skills
 
-The skills in ${skills} are listed at the end of this system prompt.${agent.role ? `\n\n${agent.role.path} follows as it was when this session started.` : ""}`;
+The skills in ${skills}${places.imageSkills ? `, along with the image skills selected for this deployment from ${places.imageSkills}/,` : ""} are listed at the end of this system prompt.${agent.role ? `\n\n${agent.role.path} follows as it was when this session started.` : ""}`;
   return agent.role ? `${prompt}\n\n# ${agent.role.path}\n\n${agent.role.body.trim()}\n` : `${prompt}\n`;
 }
