@@ -3,7 +3,7 @@
 // Pi sets them; the backend's tools are added beside them.
 
 import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   type AgentSession,
@@ -15,8 +15,10 @@ import {
   type SettingsManager,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import type { TurnResult } from "@penelope/contract";
 
 import type { Config } from "./config.ts";
+import { type ExtensionNotice, type MemoryExtensionTrials, SessionExtensions } from "./extensions.ts";
 
 export interface PiSetup {
   config: Config;
@@ -24,8 +26,10 @@ export interface PiSetup {
   /** Pi's settings. A deployment reads them from Pi's directory. */
   settings: () => SettingsManager;
   tools: ToolDefinition[];
-  /** Given to Pi as they are; nothing is loaded from disk. */
+  /** The runner's own factories, given to Pi as they are. */
   extensions: ExtensionFactory[];
+  /** Opt in to owner and memory extensions, only for the main session. */
+  diskExtensions?: { trials: MemoryExtensionTrials; log: (line: string) => void };
 }
 
 /** Which session is hers, and the last nightly event that switched it. */
@@ -80,6 +84,13 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+export interface OpenSession {
+  session: AgentSession;
+  /** Refresh changed disk extensions and return any new diagnostics for this turn. */
+  beforeTurn(): Promise<ExtensionNotice[]>;
+  finishTurn(result: TurnResult): Promise<void>;
+}
+
 /**
  * A session with the given system prompt, over `sessionManager`, working in
  * `cwd` (HOME unless given). The skills are found from HOME whatever `cwd` is.
@@ -89,27 +100,44 @@ export async function openSession(
   systemPrompt: string,
   sessionManager: SessionManager,
   cwd = setup.config.home,
-): Promise<AgentSession> {
-  const { config, modelRuntime } = setup;
+): Promise<OpenSession> {
+  const { config, modelRuntime, diskExtensions } = setup;
   const settingsManager = setup.settings();
-  // Pi keeps the first skill of a name: the owner's, then her own, then the image's.
-  const skillPaths = [];
-  for (const dir of [config.ownerSkillsDir, join(config.memoryDir, "skills"), config.imageSkillsDir]) {
-    if (dir && (await exists(dir))) skillPaths.push(dir);
+  const skillPaths: string[] = [];
+  async function refreshSkillPaths(): Promise<void> {
+    skillPaths.length = 0;
+    // Pi keeps the first skill of a name: the owner's, then her own, then the image's.
+    for (const dir of [config.ownerSkillsDir, join(config.memoryDir, "skills"), config.imageSkillsDir]) {
+      if (dir && (await exists(dir))) skillPaths.push(dir);
+    }
   }
+  await refreshSkillPaths();
+  const disk = diskExtensions && new SessionExtensions(
+    config.ownerExtensionsDir,
+    resolve(config.memoryDir, "extensions"),
+    diskExtensions.trials,
+    diskExtensions.log,
+  );
+  let loaded = await disk?.prepare();
   const resourceLoader = new DefaultResourceLoader({
     cwd: config.home,
     agentDir: config.agentDir,
     settingsManager,
     noExtensions: true,
     extensionFactories: setup.extensions,
+    ...(disk ? { additionalExtensionPaths: disk.paths } : {}),
     noContextFiles: true,
     noPromptTemplates: true,
     noThemes: true,
-    ...(skillPaths.length > 0 ? { additionalSkillPaths: skillPaths } : {}),
+    additionalSkillPaths: skillPaths,
     systemPrompt,
   });
+  function reportLoadErrors(): void {
+    if (!disk) return;
+    for (const { path, error } of resourceLoader.getExtensions().errors) disk.report("load_error", path, error);
+  }
   await resourceLoader.reload();
+  reportLoadErrors();
   let model;
   if (config.model) {
     model = modelRuntime.getModel(config.model.provider, config.model.id);
@@ -126,7 +154,31 @@ export async function openSession(
     sessionManager,
     customTools: setup.tools,
   });
-  return session;
+  if (disk) {
+    await session.bindExtensions({
+      onError: ({ extensionPath, event, error }) => disk.report("handler_error", extensionPath, `${event}: ${error}`),
+    });
+  }
+  return {
+    session,
+    async beforeTurn() {
+      if (!disk) return [];
+      const key = await disk.prepare();
+      if (key !== loaded) {
+        // The loader retains the paths arrays and resolves them again on reload.
+        loaded = undefined;
+        await refreshSkillPaths();
+        await session.waitForIdle();
+        await session.reload();
+        loaded = key;
+        reportLoadErrors();
+      }
+      return disk.takeNotes();
+    },
+    async finishTurn(result) {
+      await disk?.finish(result);
+    },
+  };
 }
 
 type Message = AgentSession["messages"][number];

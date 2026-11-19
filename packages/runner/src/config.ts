@@ -33,6 +33,8 @@ export interface Config {
   memoryDir: string;
   /** The owner's skills, mounted read-only; left out, there are none. */
   ownerSkillsDir?: string;
+  /** The owner's Pi extensions, mounted read-only; left out, there are none. */
+  ownerExtensionsDir?: string;
   /** The connectors' documents, one <name>.md each (ADR-0020); left out, there are none. */
   connectorsDir?: string;
   /** The skills that come with the image, listed after the owner's and the memory's; not set by the deployment. */
@@ -150,6 +152,7 @@ export function readConfig(env: Env): Config {
     home,
     memoryDir: env.PENELOPE_MEMORY || "/memory",
     ...(env.PENELOPE_OWNER_SKILLS_DIR ? { ownerSkillsDir: env.PENELOPE_OWNER_SKILLS_DIR } : {}),
+    ...(env.PENELOPE_OWNER_EXTENSIONS_DIR ? { ownerExtensionsDir: env.PENELOPE_OWNER_EXTENSIONS_DIR } : {}),
     ...(env.PENELOPE_CONNECTORS_DIR ? { connectorsDir: env.PENELOPE_CONNECTORS_DIR } : {}),
     sourcesDir: env.PENELOPE_SOURCES || "/sources",
     agentDir,

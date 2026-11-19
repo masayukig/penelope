@@ -34,6 +34,7 @@
 | projected の ServiceAccount の token | — | 読み取り | 読み取り | — |
 | 受信の鍵の Secret | — | — | — | 読み取り |
 | オーナーの skill（例 `/skills`、配置が置く） | 読み取り | — | — | — |
+| オーナーの Pi 拡張（例 `/etc/penelope/extensions`、任意） | 読み取り | — | — | — |
 | コネクタの文書（`/etc/penelope/connectors/`、配置が置く） | 読み取り | — | — | — |
 | 配置のアバターの置き場（`PENELOPE_AVATARS_DIR`、任意） | — | 読み取り | — | — |
 
@@ -55,6 +56,36 @@
 - 管理口の socket も sandbox に mount しない（[ADR-0005](adr/0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md)）。
 - backend の sandbox 向けの口の socket は、backend と Sentinel だけが mount する。Sentinel は backend の登録の `upstream` でこの socket につなぐ（[sentinel-config.md](sentinel-config.md) の「上流」）。
 - コンテナの UID が違うので、配置は共有する volume を 1 つのグループに置く。そのグループを Pod の `supplementalGroups` で全コンテナに与え、共有するディレクトリを set-group-ID にする。`fsGroup` は使わない。kubelet が volume の中身を丸ごとそのグループに開け、backend の SQLite と sandbox の HOME を持ち主だけのものに保てないためである。持ち主と権限は init container が付ける（見本は [deploy/kubernetes/](../deploy/kubernetes/README.md) の「volume と持ち主」）。backend は sandbox が書いた `/memory` の作業ツリーを読み、`/memory/.git`・SQLite・`/sources` を書く。sandbox は `/sources` を読む。socket は backend が誰でも書ける mode で作るので、見えるかどうかは mount だけで決まる。
+
+## Pi 拡張
+
+runner は本人のセッションを開くときと、置き場が変わってターンの前に読み直すとき、次の順に置き場を Pi に渡す（[ADR-0039](adr/0039-load-owner-and-memory-extensions-in-the-main-session.md)）。
+
+| 順 | 置き場所 | 持ち主 |
+| --- | --- | --- |
+| 1 | `PENELOPE_OWNER_EXTENSIONS_DIR` が指す絶対パス。任意。sandbox に読み取り専用で mount する | 配置 |
+| 2 | `/memory/extensions/`。無ければ読み込まない | エージェント |
+
+- 各置き場は Pi のローカル拡張ソースとして扱う。単独の拡張なら直下の `index.ts` に置く。複数なら、配下の `extensions/` に各 `.ts` ファイルか `index.ts` を持つサブディレクトリを置く。たとえば記憶で複数の拡張を使うときは `/memory/extensions/extensions/greet.ts` に置く。詳しい規則は sandbox の `/opt/penelope/runner/node_modules/@earendil-works/pi-coding-agent/docs/extensions.md` にある。
+- HOME や作業ディレクトリからは拡張を自動検出しない。サブエージェントと夜の整理係のセッションには読み込まない。runner は対話 UI を起動しない。
+- 書き換えは進行中のターンには反映されない。次に本人のターンを始める前に、拡張の置き場の追加・変更・削除を見て、変わっていればセッションの拡張を読み直す。このとき skill も読み直す。夜の切り替えや runner の再起動でセッションを開くときも読み込む。
+- Pi が報告した読み込みエラーやハンドラの例外は、sandbox のログと次のターンの入力に出す。読み込みエラーの拡張は読み込まず、ハンドラの例外は Pi の扱いに従う（例: `tool_call` の例外はそのツール呼び出しを止める）。
+- 記憶の拡張は、初めて試す内容の指紋を HOME の `.penelope-extension-trials.json` に未確認として記録してから読む。その最初のターンが `done` なら確認済みにする。それ以外で終わるか、未確認のまま runner が再起動したら、その内容は次のターンから読み込まない。外した場所と理由はログとターンの入力に出す。未確認の内容に変更すると再び試せるが、すでに外した内容に戻しても読み込まない。オーナーの拡張はこの仕組みでは外さない。
+
+### 記憶の拡張を戻す
+
+最初のターンが `done` でも振る舞いがおかしい場合や、ハンドラが戻らずターンが終わらない場合（runner にターン全体の時間上限はない）は、自動では検出しない。本人のセッションが動くなら、オーナーは拡張を外すよう頼める。動かない場合は、runner の外から sandbox のシェルを開く（Kubernetes なら `kubectl exec -it <pod> -c sandbox -- sh`）。
+
+記憶の `.git` は sandbox から読み取り専用で、`git restore --worktree` も index のロックを作るため使えない。動いていたコミットの `extensions/` だけを取り出し、作業ツリーを戻す。以下の `<正常なコミット>` はコミットの参照に置き換える。
+
+```sh
+backup=$(mktemp -d)
+git -C /memory archive --format=tar --output="$backup/extensions.tar" '<正常なコミット>' -- extensions/ &&
+  mv /memory/extensions "$backup/broken-extensions" &&
+  tar -xf "$backup/extensions.tar" -C /memory
+```
+
+記憶の拡張を全部外すだけなら、`/memory/extensions` を読み込み対象外へ移すだけでよい。ターンを処理できる場合は次のターンで反映される。止まったままなら、拡張を外すか戻してから runner を再起動する。
 
 ## アバター
 

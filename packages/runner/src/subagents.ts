@@ -348,7 +348,8 @@ export class SubAgents {
       connectors ? { connectors } : {},
     );
     const dir = join(this.config.subAgentDir, record.name);
-    return openSession(this.setup, prompt, SessionManager.open(record.session, dir, record.cwd), record.cwd);
+    const { session } = await openSession(this.setup, prompt, SessionManager.open(record.session, dir, record.cwd), record.cwd);
+    return session;
   }
 
   private begin(live: Live, input: string): void {

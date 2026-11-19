@@ -89,6 +89,123 @@ test("the system prompt is hers, with her memory after it", async () => {
   assert.ok(calls[0]!.systemPrompt.includes("毎朝 CI を見る。"));
 });
 
+const greetingExtension = (name: string) => `
+    export default function (pi) {
+      pi.registerTool({
+        name: ${JSON.stringify(name)},
+        label: "Greet",
+        description: "Say hello",
+        parameters: { type: "object", properties: {} },
+        async execute() {
+          return { content: [{ type: "text", text: "Hello" }], details: {} };
+        },
+      });
+    }
+  `;
+
+async function writeMemoryExtension(config: Config): Promise<void> {
+  const dir = join(config.memoryDir, "extensions");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "index.ts"), greetingExtension("memory_greet"));
+}
+
+test("the main session reloads extensions between turns without loading them in the curator", async () => {
+  const { fake, start, calls, config } = await world();
+  config.ownerExtensionsDir = join(config.home, "..", "owner-extensions");
+  const ownerEntries = join(config.ownerExtensionsDir, "extensions");
+  await mkdir(ownerEntries, { recursive: true });
+  await writeFile(join(ownerEntries, "greet.ts"), greetingExtension("owner_greet"));
+  await start((call) => call.userTexts.length === 1 ? { thinking: "first turn thinking", text: "hello" } : { text: "hello" });
+  fake.push(ui(1, "hello"));
+  await until(() => acked(fake).includes(1));
+  assert.ok(calls[0]!.tools.includes("owner_greet"));
+
+  await writeMemoryExtension(config);
+  await skills(join(config.memoryDir, "skills"), { example: "A new skill in memory." });
+  fake.push(ui(2, "hello again"));
+  await until(() => acked(fake).includes(2));
+  const afterReload = calls.at(-1)!;
+  assert.ok(afterReload.tools.includes("owner_greet") && afterReload.tools.includes("memory_greet"));
+  assert.match(afterReload.systemPrompt, /A new skill in memory/);
+  assert.ok(afterReload.userTexts.some((text) => text.includes('"text":"hello"')), "reload preserves the current session");
+  assert.ok(!JSON.stringify(afterReload.messages).includes("first turn thinking"), "folding still applies after reload");
+
+  fake.push(nightly(3));
+  await until(() => acked(fake).includes(3));
+  const curator = calls.find((call) => isCurator(config, call));
+  assert.ok(curator);
+  assert.ok(!curator.tools.includes("owner_greet") && !curator.tools.includes("memory_greet"));
+});
+
+test("an invalid owner extension is reported in the next turn without stopping the main session", async () => {
+  const { fake, start, calls, config, logs } = await world();
+  config.ownerExtensionsDir = join(config.home, "..", "owner-extensions");
+  const entries = join(config.ownerExtensionsDir, "extensions");
+  await mkdir(entries, { recursive: true });
+  await writeFile(join(entries, "broken.ts"), "export default function (");
+
+  await start(() => ({ text: "hello" }));
+  fake.push(ui(1, "hello"));
+  await until(() => acked(fake).includes(1));
+  assert.equal(calls.length, 1);
+  assert.match(calls[0]!.lastText, /broken\.ts/);
+  assert.match(logs.join("\n"), /broken\.ts: Failed to load extension/);
+});
+
+test("a memory extension handler that throws does not end the turn and is reported in the next input", async () => {
+  const { fake, start, calls, config } = await world();
+  const dir = join(config.memoryDir, "extensions");
+  await mkdir(dir);
+  await writeFile(join(dir, "index.ts"), `
+    export default function (pi) {
+      pi.on("before_agent_start", () => { throw new Error("broken handler"); });
+    }
+  `);
+  await start(() => ({ text: "hello" }));
+  fake.push(ui(1, "hello"));
+  await until(() => acked(fake).includes(1));
+  assert.equal((fake.sent("POST", "/v1/turns/end").at(-1) as TurnEndRequest).result, "done");
+
+  fake.push(ui(2, "hello again"));
+  await until(() => acked(fake).includes(2));
+  assert.match(calls.at(-1)!.lastText, /handler_error.*before_agent_start: broken handler/);
+});
+
+test("a failed first turn with changed memory extensions disables them for the next turn", async () => {
+  const { fake, start, calls, config } = await world({ turnFold: false });
+  config.ownerExtensionsDir = join(config.home, "..", "owner-extensions");
+  await mkdir(config.ownerExtensionsDir);
+  await writeFile(join(config.ownerExtensionsDir, "index.ts"), greetingExtension("owner_greet"));
+  await start((call) => call.tools.includes("memory_greet") ? { error: "trial failed" } : { text: "hello" });
+  fake.push(ui(1, "before change"));
+  await until(() => acked(fake).includes(1));
+  await writeMemoryExtension(config);
+  fake.push(ui(2, "trial"));
+  await until(() => acked(fake).includes(2));
+  assert.ok(calls.at(-1)!.tools.includes("memory_greet"));
+  assert.equal((fake.sent("POST", "/v1/turns/end").at(-1) as TurnEndRequest).result, "failed");
+
+  fake.push(ui(3, "after failure"));
+  await until(() => acked(fake).includes(3));
+  const recovered = calls.at(-1)!;
+  assert.ok(!recovered.tools.includes("memory_greet") && recovered.tools.includes("owner_greet"));
+  assert.match(recovered.lastText, /memory_extensions_disabled.*failed/);
+});
+
+test("a restart without a completed trial does not load the same memory extensions", async () => {
+  const { fake, start, calls, config } = await world();
+  await writeMemoryExtension(config);
+  const stop = await start(() => ({ text: "hello" }));
+  await until(() => fake.received.some((r) => r.path === "/v1/events"));
+  await stop();
+
+  await start(() => ({ text: "hello" }));
+  fake.push(ui(1, "after restart"));
+  await until(() => acked(fake).includes(1));
+  assert.ok(!calls[0]!.tools.includes("memory_greet"));
+  assert.match(calls[0]!.lastText, /memory_extensions_disabled.*before the first turn finished/);
+});
+
 /** Writes skills/<name>/SKILL.md under `dir`, one for each name. */
 async function skills(dir: string, described: Record<string, string>): Promise<void> {
   for (const [name, description] of Object.entries(described)) {
