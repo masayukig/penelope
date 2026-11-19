@@ -67,7 +67,7 @@ describe("the heartbeat", () => {
     assert.equal(event?.source, "heartbeat");
     assert.equal(event?.delivery, "now");
     assert.equal(event?.id, "heartbeat@2026-11-16T10:00:00.000Z");
-    assert.equal(event?.occurred_at, "2026-11-16T10:00:00.000Z");
+    assert.equal(Date.parse(event!.occurred_at), clock.ms);
     assert.equal(event?.summary, "no turn for 60 minutes");
     assert.equal(event?.inline, false);
   });

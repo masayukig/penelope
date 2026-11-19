@@ -43,6 +43,7 @@ export type Event = {
 export type SourcesLine = {
   seq: number;
   received_at: string;
+  /** The original occurrence time as stored, not the time as formatted for delivery. */
   occurred_at: string;
   source: Source;
   stream?: string;

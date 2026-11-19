@@ -13,18 +13,18 @@ import { FakeClock, tempDir, unwritable } from "./support.ts";
 
 const MINUTE = 60_000;
 
-function setup(t: { after: (fn: () => void) => void }, start = "2026-11-14T10:00:00Z") {
+function setup(t: { after: (fn: () => void) => void }, start = "2026-11-14T10:00:00Z", timeZone = "UTC") {
   const dir = tempDir(t);
   const clock = new FakeClock(start);
   const db = openDatabase(path.join(dir, "backend.sqlite"));
   t.after(() => db.close());
   const sourcesDir = path.join(dir, "sources");
-  const queue = new Queue(db, new Sources(sourcesDir, "UTC"), {
+  const queue = new Queue(db, new Sources(sourcesDir, timeZone), {
     now: clock.now,
     inline: new Set(["ui", "control"]),
     builtinDelivery: { ui: "now", cron: "now", a2a: "now", self: "now" },
     batch: { quietMs: 5 * MINUTE, maxMs: 30 * MINUTE },
-    awake: new AwakeHours("07:00-23:00", "UTC"),
+    awake: new AwakeHours("07:00-23:00", timeZone),
     redeliverMs: 5 * MINUTE,
   });
   return { dir, sourcesDir, clock, queue };
@@ -112,6 +112,27 @@ describe("the queue", () => {
   });
 
   describe("handing events over", () => {
+    it("hands over the next morning in Tokyo without changing the recorded event time", (t) => {
+      const { queue } = setup(t, "2026-11-18T23:01:00Z", "Asia/Tokyo");
+      const occurred_at = "2026-11-18T23:00:00.123Z";
+      queue.accept(event({ source: "heartbeat", occurred_at }), { builtin: true });
+
+      const [taken] = queue.take({ after: 0 });
+      assert.equal(taken?.occurred_at, "2026-11-19T08:00:00.123+09:00");
+      assert.equal(JSON.parse(readFileSync(taken!.appended.path, "utf8")).occurred_at, occurred_at);
+    });
+
+    it("uses the offset at each occurrence when daylight saving time ends", (t) => {
+      const { queue } = setup(t, "2026-11-01T07:00:00Z", "America/New_York");
+      queue.accept(event({ delivery: "now", occurred_at: "2026-11-01T07:30:00+02:00" }));
+      queue.accept(event({ delivery: "now", occurred_at: "2026-11-01T06:30:00Z" }));
+
+      assert.deepEqual(queue.take({ after: 0 }).map((event) => event.occurred_at), [
+        "2026-11-01T01:30:00-04:00",
+        "2026-11-01T01:30:00-05:00",
+      ]);
+    });
+
     it("hands a now event over at once, in seq order", (t) => {
       const { queue } = setup(t);
       queue.accept(event({ delivery: "now" }));
