@@ -15,6 +15,8 @@ import { join } from "node:path";
 import type { Appended, DeliveredEvent, SourcesLine, TurnBatch, TurnEvent, TurnLine } from "@penelope/contract";
 import { drawChanges, readContext, readPayload } from "@penelope/slack";
 
+import type { ExtensionNotice } from "./extensions.ts";
+
 /** How the events of Slack's sources are drawn. */
 export type SlackDrawing = {
   /** The sources drawn with Slack's drawing. */
@@ -187,6 +189,18 @@ export function turnLines(events: DeliveredEvent[], slack?: SlackDrawing): TurnL
     ...singles.map(({ events: [event], text }) => single(event!, text)),
     ...[...batches.values()].map(({ events: grouped, text }) => batched(grouped, text)),
   ];
+}
+
+/** What Pi could not load immediately before this turn; details are in the runner log. */
+export function withExtensionNotes(input: string, notices: readonly ExtensionNotice[]): string {
+  if (notices.length === 0) return input;
+  const note = {
+    extensions: notices.slice(-5).map(({ kind, path, reason }) => ({
+      kind, path: path.slice(0, 240), reason: reason.split("\n")[0]!.slice(0, 240),
+    })),
+    total: notices.length,
+  };
+  return `${input}\n\n<runner_notes>\n${JSON.stringify(note)}\n</runner_notes>`;
 }
 
 /** One input for the events handed over together. */

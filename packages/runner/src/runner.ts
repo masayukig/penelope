@@ -10,6 +10,7 @@
 // hands over one that is not acked yet, is dropped by its seq.
 
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
@@ -27,6 +28,7 @@ import { TurnRecorder } from "./activities.ts";
 import type { Backend } from "./backend.ts";
 import type { Config } from "./config.ts";
 import { type Connector, readConnectors } from "./connectors.ts";
+import { MemoryExtensionTrials } from "./extensions.ts";
 import { FOLD_ASK, foldExtension, TURN_END } from "./fold.ts";
 import { inlineImages } from "./images.ts";
 import { Jobs } from "./jobs.ts";
@@ -36,6 +38,7 @@ import {
   newSessionFile,
   openFile,
   openSession,
+  type OpenSession,
   type PiSetup,
   readState,
   type SessionState,
@@ -52,7 +55,7 @@ import {
 } from "./prompts.ts";
 import { SubAgents } from "./subagents.ts";
 import { backendTools, jobTools, subAgentTools } from "./tools.ts";
-import { formatEvents } from "./turn-input.ts";
+import { formatEvents, withExtensionNotes } from "./turn-input.ts";
 
 export interface RunnerOptions {
   config: Config;
@@ -113,8 +116,9 @@ export class Runner {
   private readonly places: Places;
   private readonly subAgents: SubAgents;
   private readonly jobs: Jobs;
+  private readonly extensionTrials: MemoryExtensionTrials;
 
-  private session: AgentSession | undefined;
+  private session: OpenSession | undefined;
   private state: SessionState | undefined;
   private turn: Turn | undefined;
   /** The id of the turn under way, for a reply to carry. */
@@ -134,6 +138,7 @@ export class Runner {
     this.config = options.config;
     this.backend = options.backend;
     this.log = options.log ?? ((line) => process.stderr.write(`${line}\n`));
+    this.extensionTrials = new MemoryExtensionTrials(join(this.config.home, ".penelope-extension-trials.json"), this.log);
     const pi = { config: options.config, modelRuntime: options.modelRuntime, settings: options.settings };
     // A sub-agent has Pi's tools alone, and its turns are not folded.
     this.subAgents = new SubAgents({
@@ -175,13 +180,14 @@ export class Runner {
 
   /** Runs until `signal` aborts. */
   async run(signal: AbortSignal): Promise<void> {
+    await this.extensionTrials.restore();
     await this.open();
     await this.subAgents.restore();
     await this.jobs.restore();
     signal.addEventListener("abort", () => {
       this.stopping = true;
       this.wake?.();
-      void this.session?.abort();
+      void this.session?.session.abort();
       void this.subAgents.stop();
       void this.jobs.stop();
     });
@@ -190,7 +196,7 @@ export class Runner {
     } finally {
       await this.subAgents.stop();
       await this.jobs.stop();
-      this.session?.dispose();
+      this.session?.session.dispose();
     }
   }
 
@@ -213,6 +219,14 @@ export class Runner {
     });
   }
 
+  private async openMainSession(file: string): Promise<OpenSession> {
+    return openSession(
+      { ...this.setup, diskExtensions: { trials: this.extensionTrials, log: this.log } },
+      await this.mainPrompt(),
+      openFile(this.config, file),
+    );
+  }
+
   /** Her session as the last run left it, or a new one. */
   private async open(): Promise<void> {
     this.state = await readState(this.config);
@@ -220,7 +234,7 @@ export class Runner {
       this.state = { file: await newSessionFile(this.config) };
       await writeState(this.config, this.state);
     }
-    this.session = await openSession(this.setup, await this.mainPrompt(), openFile(this.config, this.state.file));
+    this.session = await this.openMainSession(this.state.file);
   }
 
   // ── Taking events ──
@@ -297,7 +311,7 @@ export class Runner {
       const until = this.inbox.findIndex((event) => event.source === "control");
       const events = this.inbox.splice(0, until < 0 ? this.inbox.length : until);
       const [text, images] = await this.input(events);
-      await this.turnOf(this.session!, text, {
+      await this.turnOf(this.session!.session, text, {
         seqs: events.map((event) => event.seq),
         ...(images ? { images } : {}),
         heartbeat: events.every(isHeartbeat),
@@ -328,6 +342,13 @@ export class Runner {
   private async turnOf(session: AgentSession, input: string, options: TurnOptions = {}): Promise<Outcome> {
     const { night, images } = options;
     const ordinary = night === undefined;
+    const main = this.session?.session === session ? this.session : undefined;
+    let preparing: string | undefined;
+    try {
+      if (main) input = withExtensionNotes(input, await main.beforeTurn());
+    } catch (error) {
+      preparing = `Could not reload extensions: ${failure(error)}`;
+    }
     const recorder = new TurnRecorder(randomUUID(), () => new Date().toISOString(), (activity) => this.send(activity));
     let spoke = false;
     let called = false;
@@ -351,6 +372,8 @@ export class Runner {
     let thrown: string | undefined;
     let asked = false;
     try {
+      if (preparing !== undefined) throw new Error(preparing);
+      if (this.stopping) throw new Error("The runner was stopping.");
       let text = input;
       let withImages = images;
       for (;;) {
@@ -387,6 +410,7 @@ export class Runner {
       await session.sendCustomMessage({ customType: TURN_END, content: "", display: false });
     }
     unsubscribe();
+    await main?.finishTurn(outcome.result);
     this.log(`turn ${recorder.turnId}: folded ${this.folded}, asked ${asked ? "yes" : "no"}, compactions ${compactions}`);
     recorder.end();
     await this.sending;
@@ -472,21 +496,21 @@ export class Runner {
 
   /** Her reflection, the curator's turn, then a new session (ADR-0007); how each step went. */
   private async nightly(seq: number): Promise<NightStages> {
-    const reflection = stageOf(await this.turnOf(this.session!, reflectionInput(this.places), { night: { seq, stage: "reflection" } }));
+    const reflection = stageOf(await this.turnOf(this.session!.session, reflectionInput(this.places), { night: { seq, stage: "reflection" } }));
     // A curator that fails is recorded and passed over: the next night can
     // tidy again, and the day's session does not go on (docs/sandbox-api.md).
     const curator = await this.curator(seq);
     let session: NightStage;
     try {
       const state = { file: await newSessionFile(this.config), nightly: seq };
-      const next = await openSession(this.setup, await this.mainPrompt(), openFile(this.config, state.file));
+      const next = await this.openMainSession(state.file);
       try {
         await writeState(this.config, state);
       } catch (error) {
-        next.dispose();
+        next.session.dispose();
         throw error;
       }
-      this.session?.dispose();
+      this.session?.session.dispose();
       this.session = next;
       this.state = state;
       session = { result: "done" };
@@ -501,11 +525,11 @@ export class Runner {
   private async curator(seq: number): Promise<NightStage> {
     let curator: AgentSession;
     try {
-      curator = await openSession(
+      ({ session: curator } = await openSession(
         { ...this.setup, tools: [], extensions: [] },
         curatorSystemPrompt(this.config.identity, this.places),
         curatorManager(this.config),
-      );
+      ));
     } catch (error) {
       this.log(`the curator could not start: ${failure(error)}`);
       return { result: "failed", reason: `The curator could not start: ${failure(error)}` };

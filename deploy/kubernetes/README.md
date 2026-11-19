@@ -106,6 +106,7 @@ base が決めている場所:
 | `sandbox/env` | `PENELOPE_NAME` | システムプロンプトに入る名前。`PENELOPE_AGENT_NAME` と同じにする |
 | `sandbox/env` | `PENELOPE_ROLE`・`PENELOPE_OWNER` | 役目とオーナー（システムプロンプトに入る） |
 | `sandbox/env`・`sandbox/models.json` | `PENELOPE_MODEL=openai/gpt-5.5`、provider `openai` | Pi の provider とモデル |
+| `sandbox/env` | `PENELOPE_OWNER_EXTENSIONS_DIR`（任意、見本では未設定） | オーナーの Pi 拡張を読み取り専用で mount した絶対パス（下の「Pi 拡張」） |
 | `sandbox/surrogates.env`・`sandbox/models.json`・`sentinel/sentinel.yaml` | `surrogate-example-*` | 自分のサロゲート（下の「サロゲート」） |
 | `sentinel/sentinel.yaml` | `api.openai.com`・`sd-webui.example.com`・`helper.agents.example.com` | 鍵を差し替えるホスト |
 | `sandbox/surrogates.env` | `SDCTL_URL` | sd-webui の URL |
@@ -184,11 +185,17 @@ kubectl -n "$ns" create secret generic penelope-receivers \
 
 ## skill
 
-image に入っている skill（道具の使い方の `slack`・`sd-webui`・`a2a`・`github`・`avatar` と、`self-portrait`・`goals`）は、配置の設定なしで効く。init container `skills`（`base/init/skills.sh`）が置くのは、その配置だけの skill である。同じ名前があれば、配置の skill が image の skill より先に一覧に載る（[docs/pod.md](../../docs/pod.md) の「volume」）。
+image に入っている skill（道具の使い方の `slack`・`sd-webui`・`a2a`・`github`・`avatar` と、`self-portrait`・`goals`・`extensions`）は、配置の設定なしで効く。init container `skills`（`base/init/skills.sh`）が置くのは、その配置だけの skill である。同じ名前があれば、配置の skill が image の skill より先に一覧に載る（[docs/pod.md](../../docs/pod.md) の「volume」）。
 
 - ConfigMap `penelope-skills` の `<名前>.SKILL.md` は `/skills/<名前>/SKILL.md` になる。
 - `skills.list` の 1 行は `<git の URL> <枝> <skill>...` で、そのリポジトリの `skills/<skill>/` を写す。リポジトリは public であること（向け直しの前に、鍵なしで取る）。
 - 取れなかった skill は飛ばして Pod は起動する。ログに出る（`kubectl -n penelope logs penelope-0 -c skills`）。
+
+## Pi 拡張
+
+オーナーの拡張を使う配置は、overlay で sandbox に読み取り専用の volume を追加し、`PENELOPE_OWNER_EXTENSIONS_DIR` でその mount 先（例 `/etc/penelope/extensions`）を指定する。見本は volume も環境変数も追加しない。オーナーの拡張のほかに、本人のセッションは記憶の `/memory/extensions/` も読む。
+
+拡張は runner のプロセス内で動く。配置が渡す拡張とその依存先は、エージェントが書き換えられない場所に置く。反映の時期、ログ、戻し方は [Pod の形の仕様「Pi 拡張」](../../docs/pod.md#pi-拡張) を参照。
 
 ## コネクタの文書
 
