@@ -19,6 +19,7 @@ import type { Feed } from "./feed.ts";
 import { type Handler, HttpError, isMultipart, readForm, readJson, sendEmpty, sendError, sendJson } from "./http.ts";
 import { CALLBACK_PATH, type GitHubLogin } from "./login/github.ts";
 import type { LoginSessions, Session } from "./login/sessions.ts";
+import type { ModelSettings } from "./model-settings.ts";
 import type { PushSubscriptions } from "./push/notifier.ts";
 import { webPushSubscriptionOf } from "./push/web-push.ts";
 import type { Queue } from "./queue.ts";
@@ -54,6 +55,7 @@ export type UiOptions = {
   feed: Feed;
   login: GitHubLogin;
   sessions: LoginSessions;
+  modelSettings: ModelSettings;
   /** The owner's GitHub user ID. Without one, no one gets in. */
   ownerId: number | undefined;
   /** Where the owner reaches the backend. Cookies are Secure when it is https. */
@@ -224,6 +226,12 @@ export function uiHandler(options: UiOptions): Handler {
       // Only the main agent has schedules. The UI adds none.
       case "GET /api/schedules":
         sendJson(response, 200, { schedules: schedules.entries("main") } satisfies SchedulesResponse);
+        return;
+      case "GET /api/settings":
+        sendJson(response, 200, options.modelSettings.read(), { "cache-control": "no-store" });
+        return;
+      case "PUT /api/settings":
+        sendJson(response, 200, options.modelSettings.save(await readJson(request, 16 * 1024)), { "cache-control": "no-store" });
         return;
       case "GET /api/push":
         sendJson(response, 200, (options.push === undefined ? {} : { web_push: { public_key: options.push.publicKey } }) satisfies PushResponse);

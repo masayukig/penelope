@@ -18,6 +18,7 @@ import { AgentNow } from "./Panel.tsx";
 import { RecordPlace } from "./Record.tsx";
 import { type Route, useRoute } from "./route.ts";
 import { Schedules } from "./Schedules.tsx";
+import { Settings } from "./Settings.tsx";
 import { SubAgentCount } from "./SubAgents.tsx";
 import { PlaceItems, Placeholder } from "./places.tsx";
 import { Talk, type TalkProps } from "./Talk.tsx";
@@ -43,7 +44,10 @@ export type ScreenProps = TalkProps & {
 
 /** What the middle of the screen shows for the route: the same on a PC and a phone. */
 export function PlaceBody({ route, props, topInset = false }: { route: Route; props: ScreenProps; topInset?: boolean }) {
+  const agent = useAgent();
   switch (route.place) {
+    case "settings":
+      return <Settings api={props.api} onUnauthorized={props.onUnauthorized} agentName={agent.name} topInset={topInset} />;
     case "events":
       return <Schedules api={props.api} onUnauthorized={props.onUnauthorized} topInset={topInset} />;
     case "log":

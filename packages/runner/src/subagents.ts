@@ -381,11 +381,16 @@ export class SubAgents {
     let text = "";
     let cancelled = false;
     try {
-      await session.prompt(input);
-      const last = lastAssistant(session.messages);
-      if (last?.stopReason === "aborted") cancelled = true;
-      else if (last?.stopReason === "error") [reason, text] = ["failed", last.errorMessage ?? "The model's request failed."];
-      else text = textOf(last);
+      await this.setup.turnModels.prepare(session, this.stopped.signal);
+      if (this.stopped.signal.aborted || live.closing) {
+        cancelled = true;
+      } else {
+        await session.prompt(input);
+        const last = lastAssistant(session.messages);
+        if (last?.stopReason === "aborted") cancelled = true;
+        else if (last?.stopReason === "error") [reason, text] = ["failed", last.errorMessage ?? "The model's request failed."];
+        else text = textOf(last);
+      }
     } catch (error) {
       [reason, text] = ["failed", failure(error)];
     } finally {

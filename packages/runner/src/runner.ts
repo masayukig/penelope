@@ -32,6 +32,7 @@ import { MemoryExtensionTrials } from "./extensions.ts";
 import { FOLD_ASK, foldExtension, TURN_END } from "./fold.ts";
 import { inlineImages } from "./images.ts";
 import { Jobs } from "./jobs.ts";
+import { TurnModels } from "./model-settings.ts";
 import {
   curatorManager,
   lastAssistant,
@@ -139,7 +140,8 @@ export class Runner {
     this.backend = options.backend;
     this.log = options.log ?? ((line) => process.stderr.write(`${line}\n`));
     this.extensionTrials = new MemoryExtensionTrials(join(this.config.home, ".penelope-extension-trials.json"), this.log);
-    const pi = { config: options.config, modelRuntime: options.modelRuntime, settings: options.settings, log: this.log };
+    const turnModels = new TurnModels(options.modelRuntime, this.backend, this.log);
+    const pi = { config: options.config, modelRuntime: options.modelRuntime, turnModels, settings: options.settings, log: this.log };
     // A sub-agent has Pi's tools alone, and its turns are not folded.
     this.subAgents = new SubAgents({
       config: options.config,
@@ -245,6 +247,8 @@ export class Runner {
     while (!signal.aborted) {
       let events: DeliveredEvent[];
       try {
+        await this.setup.turnModels.report(signal);
+        if (signal.aborted) return;
         events = await this.backend.poll(after, this.config.pollWaitSeconds, signal);
         failures = 0;
       } catch (error) {
@@ -364,7 +368,6 @@ export class Runner {
       }
     });
     const turn: Turn = { session, seqs: [...(options.seqs ?? [])], heartbeat: options.heartbeat ?? false, queued: [] };
-    if (ordinary) this.turn = turn;
     this.turnId = recorder.turnId;
     this.folded = 0;
     recorder.start();
@@ -374,6 +377,9 @@ export class Runner {
     try {
       if (preparing !== undefined) throw new Error(preparing);
       if (this.stopping) throw new Error("The runner was stopping.");
+      await this.setup.turnModels.prepare(session);
+      if (this.stopping) throw new Error("The runner was stopping.");
+      if (ordinary) this.turn = turn;
       let text = input;
       let withImages = images;
       for (;;) {

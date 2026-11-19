@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --disable-warning=ExperimentalWarning --import ./test/setup.ts --test \"test/**/*.test.ts\" \"test/**/*.test.tsx\"",
+    "test": "node --disable-warning=ExperimentalWarning --conditions=penelope-source --import ./test/setup.ts --test \"test/**/*.test.ts\" \"test/**/*.test.tsx\"",
     "test-browser": "node --test \"browser/**/*.test.ts\"",
     "build": "node build.ts",
-    "dev": "node dev.ts"
+    "dev": "node --conditions=penelope-source dev.ts"
   },
   "dependencies": {
     "@astryxdesign/core": "0.7.16",

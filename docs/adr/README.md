@@ -44,3 +44,4 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0038 | [活動の記録は backend が 1 行の要約として持ち、ターンの結果と夜の段の結果を runner が知らせる](0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md) | Accepted |
 | 0039 | [Pi 拡張はオーナーの置き場と記憶から本人のセッションだけに読み込む](0039-load-owner-and-memory-extensions-in-the-main-session.md) | Accepted |
 | 0042 | [配置が一覧に載せる image の skill を選ぶ](0042-select-image-skills-per-deployment.md) | Accepted |
+| 0043 | [モデルと思考の深さはオーナーが設定画面で選ぶ](0043-the-owner-picks-the-model-and-thinking-level-in-the-web-ui.md) | Accepted |

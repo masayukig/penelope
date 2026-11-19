@@ -3,6 +3,7 @@
 import type {
   AgentResponse,
   HistoryResponse,
+  ModelSelection,
   PostMessageResponse,
   PushResponse,
   PushSubscriptionRequest,
@@ -16,6 +17,7 @@ import type {
   RecordTurnResponse,
   RecordUnseenResponse,
   SchedulesResponse,
+  SettingsResponse,
   SubAgentsResponse,
 } from "@penelope/contract";
 
@@ -52,6 +54,8 @@ export type Api = {
   unsubscribePush(endpoint: string): Promise<void>;
   /** Her schedules, with when each comes due next. */
   schedules(): Promise<SchedulesResponse>;
+  settings(): Promise<SettingsResponse>;
+  saveSettings(selection: ModelSelection): Promise<SettingsResponse>;
   /** Removes one of her schedules; Refused with 404 when it is already gone. */
   removeSchedule(id: string): Promise<void>;
   /** One day of the activity record, newest first, narrowed as asked; today when no day is given. */
@@ -115,6 +119,10 @@ export function createApi(fetch: Fetch): Api {
       await call("/api/push/subscriptions/delete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     },
     schedules: async () => (await call("/api/schedules")).json() as Promise<SchedulesResponse>,
+    settings: async () => (await call("/api/settings")).json() as Promise<SettingsResponse>,
+    saveSettings: async (selection) => (await call("/api/settings", {
+      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(selection),
+    })).json() as Promise<SettingsResponse>,
     removeSchedule: async (id) => {
       await call(`/api/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
     },

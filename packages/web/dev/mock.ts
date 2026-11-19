@@ -9,9 +9,12 @@ import { existsSync, readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join } from "node:path";
 
+import { modelRef } from "@penelope/contract";
 import type {
   HistoryEntry,
   HistoryResponse,
+  ModelSelection,
+  SettingsResponse,
   PostMessageResponse,
   RecordDayResponse,
   RecordFlowItem,
@@ -41,6 +44,7 @@ type World = Scene & {
   kept: Array<{ id: number; event: StreamEvent }>;
   started: boolean;
   messages: number;
+  settings: SettingsResponse;
   /** The images the owner sent, by id. */
   assets: Map<string, { type: string; body: Buffer }>;
 };
@@ -51,7 +55,17 @@ function world(name: string): World {
   let found = worlds.get(name);
   if (found === undefined) {
     const scene = scenes[name]!.make(Date.now());
-    found = { ...scene, name, lines: new Set(), timers: new Set(), kept: [], started: false, messages: 0, assets: new Map() };
+    found = {
+      ...scene, name, lines: new Set(), timers: new Set(), kept: [], started: false, messages: 0, assets: new Map(),
+      settings: {
+        selection: null,
+        default: { model: "example/iris-large", thinking: "medium" },
+        models: [
+          { provider: "example", id: "iris-large", name: "Iris Large", context_window: 256000, thinking_levels: ["off", "low", "medium", "high"] },
+          { provider: "example", id: "preview/iris-flash", name: "Iris Flash", context_window: 128000, thinking_levels: ["off", "high"] },
+        ],
+      },
+    };
     found.stream.forEach((event, i) => found!.kept.push({ id: i + 1, event }));
     worlds.set(name, found);
   }
@@ -130,6 +144,16 @@ export async function handle(request: IncomingMessage, response: ServerResponse,
   }
   if (method === "GET" && path === "/api/history") return (json(200, historyPage(w, url.searchParams.get("before") ?? undefined)), true);
   if (method === "GET" && path === "/api/agents") return (json(200, { agents: w.agents }), true);
+  if (method === "GET" && path === "/api/settings") return (json(200, w.settings), true);
+  if (method === "PUT" && path === "/api/settings") {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk as Buffer);
+    const selection = JSON.parse(Buffer.concat(chunks).toString("utf8")) as ModelSelection;
+    const model = w.settings.models.find((m) => modelRef(m) === selection.model);
+    if (!model?.thinking_levels.includes(selection.thinking)) return (json(400, { error: "unavailable model or thinking level" }), true);
+    w.settings.selection = selection;
+    return (json(200, w.settings), true);
+  }
   if (method === "GET" && path === "/api/schedules") return (json(200, { schedules: w.schedules }), true);
   const schedule = /^\/api\/schedules\/([^/]+)$/.exec(path)?.[1];
   if (method === "DELETE" && schedule !== undefined) {

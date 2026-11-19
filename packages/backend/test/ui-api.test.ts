@@ -15,6 +15,7 @@ import { Feed } from "../src/feed.ts";
 import { close, type Handler, listenTcp, sendJson } from "../src/http.ts";
 import { GitHubLogin, type GitHubSettings } from "../src/login/github.ts";
 import { LoginSessions } from "../src/login/sessions.ts";
+import { ModelSettings } from "../src/model-settings.ts";
 import { PushSubscriptions } from "../src/push/notifier.ts";
 import { Queue } from "../src/queue.ts";
 import { ActivityRecord } from "../src/record.ts";
@@ -96,6 +97,7 @@ async function setup(
   const record = new ActivityRecord(db, feed, { now, timeZone: "UTC", nightly: cronOf("0 4 * * *", "UTC") });
   const github = await fakeGitHub(t);
   const sessions = new LoginSessions(db, { now });
+  const modelSettings = new ModelSettings(db, now);
   const settings: GitHubSettings | undefined = configured
     ? { clientId: "client", clientSecret: "secret", ownerId: OWNER, callbackUrl: `${publicUrl}/auth/github/callback` }
     : undefined;
@@ -113,6 +115,7 @@ async function setup(
       feed,
       login,
       sessions,
+      modelSettings,
       ownerId: settings?.ownerId,
       publicUrl,
       agent: () => agent,
@@ -134,8 +137,34 @@ async function setup(
   const signIn = () => cookieOf(sessions.create(OWNER).token);
   const call = (pathname: string, cookie: string | undefined, options: Ask = {}) =>
     ask(target, pathname, { ...options, headers: { ...(cookie ? { cookie } : {}), ...options.headers } });
-  return { queue, conversation, assets, agents, schedules, record, feed, sessions, github, target, signIn, call, sourcesDir, clock, subscriptions };
+  return { queue, conversation, assets, agents, schedules, record, feed, sessions, modelSettings, github, target, signIn, call, sourcesDir, clock, subscriptions };
 }
+
+const modelChoice = { model: "example/org/chat", thinking: "low" } as const;
+
+it("keeps the owner's selection of a model the runner offers, including a slash in the model ID", async (t) => {
+  const { call, signIn, modelSettings } = await setup(t);
+  const cookie = signIn();
+  modelSettings.report({ models: [{ provider: "example", id: "org/chat", name: "Chat", context_window: 32000, thinking_levels: ["off", "low"] }], default: null });
+  assert.equal((await call("/api/settings", cookie, { method: "PUT", json: modelChoice })).status, 200);
+  assert.deepEqual((await call("/api/settings", cookie)).json().selection, modelChoice);
+});
+
+it("refuses a model that the runner has not offered", async (t) => {
+  const { call, signIn } = await setup(t);
+  assert.equal((await call("/api/settings", signIn(), { method: "PUT", json: modelChoice })).status, 400);
+});
+
+it("refuses a thinking level that the selected model does not support", async (t) => {
+  const { call, signIn, modelSettings } = await setup(t);
+  modelSettings.report({ models: [{ provider: "example", id: "org/chat", name: "Chat", context_window: 32000, thinking_levels: ["off"] }], default: null });
+  assert.equal((await call("/api/settings", signIn(), { method: "PUT", json: modelChoice })).status, 400);
+});
+
+it("does not accept model settings from a bearer token without the owner's session", async (t) => {
+  const { call } = await setup(t);
+  assert.equal((await call("/api/settings", undefined, { method: "PUT", json: modelChoice, headers: { authorization: "Bearer example" } })).status, 401);
+});
 
 /** A Set-Cookie line as its value and its attributes, in whatever order they came. */
 function parseCookie(line: string | undefined): { name: string; value: string; attributes: Map<string, string> } {
