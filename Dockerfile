@@ -192,7 +192,7 @@ ARG VERSION
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bash ca-certificates curl fd-find file git jq less make openssh-client procps \
-        python3 python3-venv ripgrep ruby unzip xz-utils \
+        python3 python3-venv ripgrep ruby unzip vim xz-utils \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
     && userdel --remove node \
