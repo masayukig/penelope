@@ -10,8 +10,8 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0004 | [本物の鍵は Sentinel が持ち、鍵の出どころは差し替えられる口にする](0004-the-sentinel-keeps-the-keys-through-a-replaceable-source.md) | Accepted（一部を ADR-0021 で置き換え） |
 | 0005 | [承認待ちは Sentinel が持ち、オーナーは Web UI で答える](0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md) | Accepted |
 | 0006 | [記憶は `/memory` の形を保ち、検査をやめ、コミットだけを sandbox の外で行う](0006-memory-kept-compatible-without-checks-committed-outside.md) | Accepted |
-| 0007 | [セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える](0007-one-session-switched-nightly-with-a-one-turn-curator.md) | Accepted |
-| 0008 | [プロンプトは事実と環境だけを伝え、やり方は任せる](0008-prompts-state-facts-and-leave-the-how.md) | Accepted |
+| 0007 | [セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える](0007-one-session-switched-nightly-with-a-one-turn-curator.md) | Accepted（一部を ADR-0044 で置き換え予定） |
+| 0008 | [プロンプトは事実と環境だけを伝え、やり方は任せる](0008-prompts-state-facts-and-leave-the-how.md) | Accepted（一部を ADR-0045 で置き換え） |
 | 0009 | [最初の UI は Web だけにし、新しい API と Astryx で作る](0009-web-ui-first-with-a-new-api-and-astryx.md) | Accepted（一部を ADR-0016 で置き換え） |
 | 0010 | [人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる](0010-github-oauth-for-people-tokenreview-for-a2a.md) | Accepted（一部を ADR-0018 で置き換え） |
 | 0011 | [sandbox の image は開発の一式を持ち、汎用のユーザーの HOME で作業する](0011-a-full-dev-image-and-a-generic-user-home.md) | Accepted |
@@ -41,7 +41,9 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0035 | [道具の使い方とどの配置にも同じ skill は sandbox の image に skill として入れ、オーナー・記憶の後に並べる](0035-tool-usage-and-shared-skills-as-image-skills.md) | Accepted（一部を ADR-0042 で置き換え） |
 | 0036 | [アバターは記憶の中で育て、最初の 1 回だけ backend が選んだアバターを写す](0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md) | Accepted |
 | 0037 | [main への push ごとに image を `main` の tag で出し、脆弱性対応の係の PR がマージされたらすぐにパッチ版を出す](0037-a-main-image-to-scan-and-a-vulnerability-fix-released-at-once.md) | Accepted |
-| 0038 | [活動の記録は backend が 1 行の要約として持ち、ターンの結果と夜の段の結果を runner が知らせる](0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md) | Accepted |
+| 0038 | [活動の記録は backend が 1 行の要約として持ち、ターンの結果と夜の段の結果を runner が知らせる](0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md) | Accepted（一部を ADR-0044 で置き換え予定） |
 | 0039 | [Pi 拡張はオーナーの置き場と記憶から本人のセッションだけに読み込む](0039-load-owner-and-memory-extensions-in-the-main-session.md) | Accepted |
 | 0042 | [配置が一覧に載せる image の skill を選ぶ](0042-select-image-skills-per-deployment.md) | Accepted |
 | 0043 | [モデルと思考の深さはオーナーが設定画面で選ぶ](0043-the-owner-picks-the-model-and-thinking-level-in-the-web-ui.md) | Accepted |
+| 0044 | [夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) | Proposed |
+| 0045 | [夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md) | Accepted |

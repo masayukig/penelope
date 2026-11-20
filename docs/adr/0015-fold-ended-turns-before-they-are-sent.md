@@ -91,7 +91,8 @@ Pi には、モデルに送る直前にメッセージの列を差し替える `
 ## Related ADRs
 
 - Related: ADR-0001 1 つの Pod に backend・Sentinel・sandbox・receivers を置き、Pi ごと sandbox の中で動かす
-- Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える
+- Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える（本体のセッションと日中の compaction）
+- Related: [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md)（照合には畳まれていない記録を用いる。畳み込みの適用範囲は変えない）
 - Related: ADR-0008 プロンプトは事実と環境だけを伝え、やり方は任せる
 - Related: ADR-0011 sandbox の image は開発の一式を持ち、汎用のユーザーの HOME で作業する
 - Superseded by（一部）: ADR-0031 起きている時間に何もない時間が続いたら、backend が heartbeat の出来事を入れる（Decision「地の文の無いターンにだけ、畳む前に一度だけ頼む」の、頼まないターンの一覧）

@@ -81,7 +81,8 @@ penelope は、1 人のオーナーのために 1 本の長いセッションで
 - Related: ADR-0003 sandbox の外向きはすべて Sentinel を通し、既定は素通しで記録する
 - Related: ADR-0004 本物の鍵は Sentinel が持ち、鍵の出どころは差し替えられる口にする
 - Related: ADR-0006 記憶は `/memory` の形を保ち、検査をやめ、コミットだけを sandbox の外で行う
-- Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える
+- Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える（セッションと夜の切り替えの分担。夜の段の構成は ADR-0044 で変更を提案）
+- Related: [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md)（段は増えるが、backend と runner の分担は維持）
 - Related: ADR-0009 最初の UI は Web だけにし、新しい API と Astryx で作る
 - Related: ADR-0011 sandbox の image は開発の一式を持ち、汎用のユーザーの HOME で作業する
 - Related: ADR-0026 なつみ・ミャオ・アキも 1 人 1 つの配置で penelope に移し、記憶は履歴ごと写して、戻し道は持たない（「本 ADR で決定しないこと」の 2 つに答える）

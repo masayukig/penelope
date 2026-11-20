@@ -87,7 +87,8 @@ penelope には、サブエージェントが止まったことを本体に知�
 
 - Related: ADR-0001 1 つの Pod に backend・Sentinel・sandbox・receivers を置き、Pi ごと sandbox の中で動かす（Pi の基本のツール）
 - Related: ADR-0003 sandbox の外向きはすべて Sentinel を通し、既定は素通しで記録する
-- Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える
+- Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える（本体のセッション。裏の仕事は夜をまたぐ）
+- Related: [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md)（段は増えるが、裏の仕事は夜をまたぐ）
 - Related: ADR-0008 プロンプトは事実と環境だけを伝え、やり方は任せる
 - Related: ADR-0013 出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す（inline、渡す時）
 - Related: ADR-0018 A2A の依頼は backend が Task として持って出来事にし、送り手は差し替えられる確かめ方で確かめる（流す呼び出しを断る）

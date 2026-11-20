@@ -64,7 +64,8 @@
 ## Related ADRs
 
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく（backend の中の受信元）
-- Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える
+- Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える（夜の時刻は backend が持つ）
+- Related: [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md)（段は増えるが、夜の時刻と切り替えの出来事は変えない）
 - Related: ADR-0008 プロンプトは事実と環境だけを伝え、やり方は任せる
 - Related: ADR-0013 出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す（起きている時間、`now`）
 - Supersedes（一部）: ADR-0015 終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない（Decision 項 3（地の文の無いターンにだけ、畳む前に一度だけ頼む）の頼まないターンに、ツールを使わずに終わった heartbeat のターンを足す）
