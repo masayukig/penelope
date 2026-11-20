@@ -21,6 +21,7 @@ import type {
   DeliveredEvent,
   NightStage,
   NightStages,
+  NightTurnReport,
   NightTurnStage,
   TurnEndRequest,
 } from "@penelope/contract";
@@ -110,8 +111,8 @@ const isHeartbeat = (event: DeliveredEvent) => event.source === "heartbeat";
 const failure = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** A turn of the night as its step: a turn the runner cut is a step that did not get done. */
-const stageOf = ({ result, reason }: Outcome): NightStage =>
-  result === "done" ? { result } : { result: "failed", reason: result === "stopped" ? `Stopped: ${reason}` : (reason ?? "") };
+const stageOf = ({ result, reason, turn_id }: Outcome & { turn_id: string }): NightTurnReport =>
+  result === "done" ? { result, turn_id } : { result: "failed", reason: result === "stopped" ? `Stopped: ${reason}` : (reason ?? ""), turn_id };
 
 export class Runner {
   private readonly config: Config;
@@ -346,7 +347,7 @@ export class Runner {
    * for what she wants to keep, unless it was a heartbeat's alone and called
    * no tool, so that nothing happened in it (ADR-0031). The nightly turns are not ordinary.
    */
-  private async turnOf(session: AgentSession, input: string, options: TurnOptions = {}): Promise<Outcome> {
+  private async turnOf(session: AgentSession, input: string, options: TurnOptions = {}): Promise<Outcome & { turn_id: string }> {
     const { night, images } = options;
     const ordinary = night === undefined;
     const main = this.session?.session === session ? this.session : undefined;
@@ -435,10 +436,10 @@ export class Runner {
     }
     if (failed) {
       for (const seq of turn.seqs) this.taken.delete(seq);
-      return outcome;
+    } else {
+      await this.ack(turn.seqs);
     }
-    await this.ack(turn.seqs);
-    return outcome;
+    return { ...outcome, turn_id: recorder.turnId };
   }
 
   /**
@@ -558,7 +559,7 @@ export class Runner {
     return { reflection, verifier, curator, session };
   }
 
-  private async nightStage(stage: NightTurnStage, run: () => Promise<NightStage>): Promise<NightStage> {
+  private async nightStage(stage: NightTurnStage, run: () => Promise<NightTurnReport>): Promise<NightTurnReport> {
     try {
       return await run();
     } catch (error) {
@@ -570,7 +571,7 @@ export class Runner {
 
   private async nightWorker(
     seq: number, stage: Exclude<NightTurnStage, "reflection">, system: string, input: string, tools: PiSetup["tools"],
-  ): Promise<NightStage> {
+  ): Promise<NightTurnReport> {
     const { session } = await openSession(
       { ...this.setup, tools, extensions: [], fileOnly: true }, system,
       nightManager(this.config, stage), this.config.memoryDir,

@@ -316,6 +316,10 @@ export const MIGRATIONS: readonly string[] = [
   CREATE INDEX turns_night ON turns (night_seq, stage) WHERE night_seq IS NOT NULL;
   CREATE INDEX turns_failed ON turns (recorded_at) WHERE result = 'failed';
   `,
+  `
+  -- Counts from the memory commit of a night turn (ADR-0044). NULL when not measured.
+  ALTER TABLE turns ADD COLUMN memory_change TEXT;
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

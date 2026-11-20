@@ -4,7 +4,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type http from "node:http";
 
-import { type Activity, type AgentId, type DeliveredEvent, isSubAgentName, type NightStage, type NightStages, type ScheduleWhen } from "@penelope/contract";
+import { type Activity, type AgentId, type DeliveredEvent, isSubAgentName, type NightStages, type NightTurnReport, type ScheduleWhen } from "@penelope/contract";
 
 import { type Inbox, InboxRefusal } from "./a2a/inbox.ts";
 import type { SubAgents } from "./agents.ts";
@@ -189,7 +189,15 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         keep(() => record.turnEnded(agent, end));
         conversation.turnEnded(agent);
         try {
-          await memory.commit({ agent, turnId: turn_id });
+          await memory.commit({
+            agent, turnId: turn_id,
+            ...(agent !== "main" || end.night === undefined ? {} : {
+              onChange: (change) => {
+                if (change === undefined) log("memory: nightly change counts not measured");
+                else keep(() => record.nightMemoryChanged(end, change));
+              },
+            }),
+          });
         } catch (error) {
           log(`memory: turn ${turn_id} not committed: ${error instanceof Error ? error.message : String(error)}`);
           throw new HttpError(500, "/memory could not be committed");
@@ -383,11 +391,14 @@ function turnEnd(body: Record<string, unknown>): TurnEnd {
 /** The steps of a night; older runners do not have a verifier. */
 function nightStages(value: unknown): NightStages {
   const stages = object(value);
-  const stage = (name: keyof NightStages): NightStage => {
-    const { result, reason } = object(stages[name] ?? null);
+  const stage = (name: keyof NightStages): NightTurnReport => {
+    const { result, reason, turn_id } = object(stages[name] ?? null);
     if (result !== "done" && result !== "failed" && result !== "skipped") throw new HttpError(400, `stages.${name}.result must be done, failed or skipped`);
     if (reason !== undefined && typeof reason !== "string") throw new HttpError(400, `stages.${name}.reason must be a string`);
-    return { result, ...(reason === undefined ? {} : { reason }) };
+    if (name !== "session" && turn_id !== undefined && (typeof turn_id !== "string" || turn_id === "")) {
+      throw new HttpError(400, `stages.${name}.turn_id must be a non-empty string`);
+    }
+    return { result, ...(reason === undefined ? {} : { reason }), ...(name !== "session" && typeof turn_id === "string" ? { turn_id } : {}) };
   };
   return {
     reflection: stage("reflection"),

@@ -463,8 +463,9 @@ test("the nightly event runs reflection, verifier and curator in separate contex
   assert.equal(curator.userTexts.length, 1, "the curator starts from an empty context");
 
   // Each turn, including the day's original turn, is reported separately.
+  const turnEnds = fake.sent("POST", "/v1/turns/end") as TurnEndRequest[];
   assert.deepEqual(
-    (fake.sent("POST", "/v1/turns/end") as TurnEndRequest[]).map(({ result, seqs, night }) => ({ result, seqs, night })),
+    turnEnds.map(({ result, seqs, night }) => ({ result, seqs, night })),
     [
       { result: "done", seqs: [1], night: undefined },
       { result: "done", seqs: undefined, night: { seq: 2, stage: "reflection" } },
@@ -475,7 +476,12 @@ test("the nightly event runs reflection, verifier and curator in separate contex
   const order = fake.order().filter((r) => r === "POST /v1/sessions/rotated" || r === "POST /v1/events/ack");
   assert.deepEqual(order, ["POST /v1/events/ack", "POST /v1/sessions/rotated", "POST /v1/events/ack"]);
   assert.deepEqual(fake.sent("POST", "/v1/sessions/rotated"), [
-    { agent: "main", seq: 2, stages: { reflection: { result: "done" }, verifier: { result: "done" }, curator: { result: "done" }, session: { result: "done" } } },
+    { agent: "main", seq: 2, stages: {
+      reflection: { result: "done", turn_id: turnEnds[1]!.turn_id },
+      verifier: { result: "done", turn_id: turnEnds[2]!.turn_id },
+      curator: { result: "done", turn_id: turnEnds[3]!.turn_id },
+      session: { result: "done" },
+    } },
   ]);
 
   // The new session starts empty, with the handoff in its system prompt.
@@ -578,7 +584,7 @@ test("a verifier's turn that fails is recorded without skipping the curator or n
   await until(() => acked(fake).includes(1));
   const stages = (fake.sent("POST", "/v1/sessions/rotated") as SessionRotatedRequest[])[0]?.stages;
   assert.equal(stages?.verifier.result, "failed");
-  assert.deepEqual([stages?.curator, stages?.session], [{ result: "done" }, { result: "done" }]);
+  assert.deepEqual([stages?.curator.result, stages?.session.result], ["done", "done"]);
 });
 
 test("a curator's turn that fails is told as its step, and the night goes on to a new session", async () => {
@@ -589,7 +595,7 @@ test("a curator's turn that fails is told as its step, and the night goes on to 
   const stages = (fake.sent("POST", "/v1/sessions/rotated") as SessionRotatedRequest[])[0]?.stages;
   assert.equal(stages?.curator.result, "failed");
   assert.match(stages?.curator.reason ?? "", /the model is away/);
-  assert.deepEqual([stages?.reflection, stages?.session], [{ result: "done" }, { result: "done" }]);
+  assert.deepEqual([stages?.reflection.result, stages?.session.result], ["done", "done"]);
 });
 
 test("a new session that cannot be opened is told as the night's last step, and the night is run again", async () => {

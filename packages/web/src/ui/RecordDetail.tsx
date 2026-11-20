@@ -19,7 +19,7 @@ import { ChevronLeftIcon } from "./icons.tsx";
 import { markdownLinks } from "./links.tsx";
 import { FlowLine } from "./Now.tsx";
 import { dateTimeOf, failedStageOf, headlineText, isFresh, spanOf, stagesOf } from "./record.ts";
-import { RecordMark, RecordRowView, StageMark } from "./RecordRow.tsx";
+import { RecordMark, RecordRowView, StageMark, StageMemory } from "./RecordRow.tsx";
 import { hashOf, type RecordPage } from "./route.ts";
 import { sizeOf, words } from "./words.ts";
 
@@ -215,6 +215,7 @@ function NightPage({ data }: { data: RecordNightResponse }) {
                   {index + 1}. {stage.name}
                   {tail}
                 </span>
+                <StageMemory stage={stage} />
               </span>
               {turn === undefined ? null : (
                 <ul className="record-rows">

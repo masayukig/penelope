@@ -56,6 +56,17 @@ describe("the memory", () => {
     ].join("\n"));
   });
 
+  it("counts binary files in the first night commit without counting them as text lines", async (t) => {
+    const dir = tempDir(t);
+    const memory = new Memory(dir, author);
+    writeFileSync(path.join(dir, "notes.bin"), Buffer.from([0, 1, 2]));
+    writeFileSync(path.join(dir, "handoff.md"), "one\ntwo\n");
+    writeFileSync(path.join(dir, "notes\n\t.md"), "three\n");
+    let measured: unknown;
+    await memory.commit({ agent: "main", turnId: "r-1", onChange: (change) => { measured = change; } });
+    assert.deepEqual(measured, { files: 3, added: 3, removed: 0, handoff_changed: true });
+  });
+
   it("makes no commit when nothing changed", async (t) => {
     const dir = tempDir(t);
     const memory = new Memory(dir, author);

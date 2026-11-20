@@ -221,7 +221,7 @@ runner は、本体のセッションにだけ、裏の仕事を扱う 3 つの�
 ## ターンの終わり
 
 - body は `{agent, turn_id, result?, reason?, seqs?, night?}`（型は `TurnEndRequest`）。`turn_id` のほかは活動の記録のための欄である（下の「ターンの結果ときっかけ」）。backend が `/memory` の作業ツリーの変わったものをコミットする合図である（[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)）。コミットの形は [backend.md](backend.md) の「`/memory` のコミット」にある。
-- backend はコミットを終えてから `204` で答える。コミットに失敗したら `500` で答える。
+- backend はコミットを終えてから `204` で答える。コミットに失敗したら `500` で答える。本体の夜のターン（`night` あり）では backend がコミットの変更量も数える。数を取れなくても応答は変えず、runner に数は返さない。
 - UI の流れでは、エージェントを `waiting` にする。
 - runner は、ターンの `turn_end` の途中経過を送り終えてから、この口を呼ぶ。`turn_end` を送れなかったとき（途中経過は送り直さない）は、流れでは `waiting` になるが、記録から引く `state`（`GET /api/agents`）は次のターンの `turn_start` か `turn_end` まで `thinking` のままである。
 - サブエージェントのターンの終わりにも、runner は `agent` をサブエージェントの名前にして送り、backend は同じくコミットする。サブエージェントが `/memory` に書いたものを、本体の次のターンを待たずに残すためである。本体のターンの途中の変更も一緒にコミットされる（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md) の「サブエージェントの途中経過とターンの終わり」）。
@@ -258,9 +258,10 @@ runner は、本体のセッションにだけ、裏の仕事を扱う 3 つの�
 
 - 夜の切り替え（制御の出来事、[events.md](events.md) の「制御の出来事」）の手順を 1 回回し終えたら、runner が送る。body は `{agent, seq?, stages?}`（型は `SessionRotatedRequest`）。`agent` は `main` だけで、ほかは `400`。
 - 新しいセッションが動き出したら、そのあと runner は、制御の出来事を ack する。
-- `seq` はその夜の制御の出来事の `seq`、`stages` は段ごとの結果 `{reflection, verifier, curator, session}` で、1 つの段は `{result, reason?}`（型は `NightStage`）である（[ADR-0038](adr/0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md)）。
+- `seq` はその夜の制御の出来事の `seq`、`stages` は段ごとの結果 `{reflection, verifier, curator, session}` で、1 つの段は `{result, reason?, turn_id?}`（型は `NightTurnReport`。`session` は `turn_id` の無い `NightStage`）である（[ADR-0038](adr/0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md)）。
   - `result` は `done`（済んだ）・`failed`（失敗した）・`skipped`（行われなかった）。`reason` は `failed` のときの理由の 1 行。
   - `reflection`、`verifier`、`curator` は対応するターンの結果を渡す。ターンを始められなかった場合や、runner の停止でターンを中断した場合も、その段は `failed` にする。`verifier` の無い旧 runner からの通知は、`verifier` を `skipped` として受ける。
+  - `reflection`、`verifier`、`curator` はターンの終わりを知らせたときの `turn_id` を付ける。ターンに至らなければ省く。古い runner が省いても受け付ける。付けるときは空でない文字列とする。backend は同じ `seq` と段のターンに一致した場合だけ、そこで計測した記憶の変更量を段の記録に加える。
   - `session` は、新しいセッションを開いて動かし始めたら `done`。開けなかったら `failed`。
   - 新しいセッションに切り替えられなかったときも、各段を試みた結果の `stages` を送る。そのときは ack しないので、制御の出来事がもう一度渡り、手順を振り返りから回し直して、また送る。backend は同じ `seq` の後の知らせで記録を置き換える。
   - 同じ `seq` がもう一度渡って手順を回さずに知らせだけを送り直すときは、`stages` を省いて `{agent, seq}` を送ってよい。backend は前に受けた段の結果を残す。

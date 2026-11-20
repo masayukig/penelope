@@ -9,7 +9,6 @@ import {
   type Activity,
   type AgentId,
   type JobEnd,
-  type NightStage,
   type NightStages,
   type NightTurnStage,
   RECORD_COMMAND_MAX,
@@ -21,6 +20,7 @@ import {
   type RecordFlowItem,
   type RecordJob,
   type RecordKind,
+  type RecordMemoryChange,
   type RecordMissedNight,
   type RecordNight,
   type RecordNightResponse,
@@ -198,6 +198,15 @@ export class ActivityRecord {
     if (end.result === "failed") this.publishUnseen();
   }
 
+  /** The numbers measured after committing a night turn; no paths or contents. */
+  nightMemoryChanged({ turn_id, night }: TurnEnd, { files, added, removed, handoff_changed }: RecordMemoryChange): void {
+    if (night === undefined) return;
+    const change = { files, added, removed, ...(night.stage === "reflection" ? { handoff_changed } : {}) };
+    this.db.prepare(
+      "UPDATE turns SET memory_change = ? WHERE turn_id = ? AND agent = 'main' AND night_seq = ? AND stage = ? AND memory_change IS NULL",
+    ).run(JSON.stringify(change), turn_id, night.seq, night.stage);
+  }
+
   /**
    * A night the runner went through. A report of the same night again takes
    * the place of the one before; one without its steps keeps the steps it had.
@@ -206,11 +215,11 @@ export class ActivityRecord {
   nightReported({ seq, stages }: { seq?: number; stages?: NightStages }): void {
     const now = iso(this.now());
     const failed = stages !== undefined && Object.values(stages).some((stage) => stage.result === "failed") ? 1 : 0;
-    const kept = stages === undefined ? null : JSON.stringify(stagesKept(stages));
     if (seq === undefined) {
       this.db.prepare("INSERT INTO session_rotations (agent, at, started_at) VALUES ('main', ?, ?)").run(now, now);
       return;
     }
+    const kept = stages === undefined ? null : JSON.stringify(this.stagesKept(seq, stages));
     const started = (this.db.prepare("SELECT min(started_at) AS at FROM turns WHERE night_seq = ?").get(seq) as { at: string | null }).at ?? now;
     const scheduled = (this.db.prepare("SELECT occurred_at FROM events WHERE seq = ? AND source = 'control'").get(seq) as { occurred_at: string } | undefined)
       ?.occurred_at;
@@ -223,6 +232,23 @@ export class ActivityRecord {
       this.db.prepare("UPDATE session_rotations SET at = ?, stages = ?, started_at = ?, failed = ? WHERE row = ?").run(now, kept, started, failed, before.row);
     }
     if (failed) this.publishUnseen();
+  }
+
+  /** Copy counts for this attempt only: an earlier attempt may have reached a stage this one did not. */
+  private stagesKept(seq: number, stages: NightStages): RecordNight["stages"] {
+    const stage = (key: keyof NightStages): RecordNightStage => {
+      const { result, reason } = stages[key];
+      const turnId = key === "session" ? undefined : stages[key].turn_id;
+      const row = turnId === undefined || result === "skipped" ? undefined : this.db.prepare(
+        "SELECT memory_change FROM turns WHERE turn_id = ? AND agent = 'main' AND night_seq = ? AND stage = ?",
+      ).get(turnId, seq, key) as { memory_change: string | null } | undefined;
+      return {
+        result,
+        ...(reason === undefined ? {} : { reason: oneLine(reason) }),
+        ...(row?.memory_change == null ? {} : { memory_change: JSON.parse(row.memory_change) as RecordMemoryChange }),
+      };
+    };
+    return { reflection: stage("reflection"), verifier: stage("verifier"), curator: stage("curator"), session: stage("session") };
   }
 
   /** The end of a background job, as its event carries it; one not of that shape is left out of the record. */
@@ -602,7 +628,7 @@ const UNKNOWN: RecordNightStage = { result: "unknown" };
 
 function nightOf(row: NightRow): RecordNight {
   // A report with no steps still says the switch was made.
-  const stored = row.stages === null ? undefined : JSON.parse(row.stages) as Omit<NightStages, "verifier"> & { verifier?: NightStage };
+  const stored = row.stages === null ? undefined : JSON.parse(row.stages) as Omit<RecordNight["stages"], "verifier"> & { verifier?: RecordNightStage };
   const stages: RecordNight["stages"] = stored === undefined
     ? { reflection: UNKNOWN, verifier: UNKNOWN, curator: UNKNOWN, session: { result: "done" } }
     : { ...stored, verifier: stored.verifier ?? { result: "skipped" } };
@@ -649,12 +675,6 @@ function subAgentOf(row: SubAgentRow): RecordSubAgent {
     turns: row.turns,
     failed_turns: row.failed_turns,
   };
-}
-
-/** The steps as kept: each reason as one line. */
-function stagesKept(stages: NightStages): NightStages {
-  const stage = ({ result, reason }: NightStages[keyof NightStages]) => ({ result, ...(reason === undefined ? {} : { reason: oneLine(reason) }) });
-  return { reflection: stage(stages.reflection), verifier: stage(stages.verifier), curator: stage(stages.curator), session: stage(stages.session) };
 }
 
 /** The first line, cut to the limit. */

@@ -68,12 +68,11 @@ export function turnNote(turn: RecordTurn): string | undefined {
   return turn.result === "failed" ? join([w.failed, turn.reason]) : undefined;
 }
 
-export type Stage = { key: keyof RecordNight["stages"]; name: string; result: RecordNightStage["result"]; reason?: string };
+export type Stage = RecordNightStage & { key: keyof RecordNight["stages"]; name: string };
 
 export function stagesOf(night: RecordNight): Stage[] {
   return (["reflection", "verifier", "curator", "session"] as const).map((key) => {
-    const stage = night.stages[key];
-    return { key, name: w.stages[key], result: stage.result, ...(stage.reason === undefined ? {} : { reason: stage.reason }) };
+    return { key, name: w.stages[key], ...night.stages[key] };
   });
 }
 

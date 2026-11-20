@@ -469,11 +469,57 @@ describe("the sandbox's API", () => {
       assert.deepEqual(night?.kind === "night" && [night.result, night.stages], ["failed", stages]);
     });
 
+    it("reports the committed memory changes separately from each night's stage result", async (t) => {
+      const { call, record, memoryDir } = await setup(t);
+      const done = { result: "done" };
+      const failed = { result: "failed" };
+      // Reflection made no edits, but the verifier finished the handoff even though its turn failed.
+      writeFileSync(path.join(memoryDir, "notes\tfor tomorrow.md"), "old\nkeep\n");
+      await call("/v1/turns/end", { json: { agent: "main", turn_id: "day" } });
+      const end = async (stage: string, outcome: { result: string }) => {
+        assert.equal((await call("/v1/turns/end", { json: { agent: "main", turn_id: stage, ...outcome, night: { seq: 7, stage } } })).status, 204);
+        return { ...outcome, turn_id: stage };
+      };
+      const reflection = await end("reflection", done);
+      writeFileSync(path.join(memoryDir, "handoff.md"), "read this\n");
+      const verifier = await end("verifier", failed);
+      writeFileSync(path.join(memoryDir, "notes\tfor tomorrow.md"), "keep\nnew\nnewer\n");
+      const curator = await end("curator", done);
+      assert.equal((await call("/v1/sessions/rotated", { json: { agent: "main", seq: 7, stages: { reflection, verifier, curator, session: done } } })).status, 204);
+
+      const [night] = record.day({ day: "2026-11-14", kind: "night" }).rows;
+      assert.ok(night?.kind === "night");
+      assert.deepEqual(night.stages, {
+        reflection: { ...done, memory_change: { files: 0, added: 0, removed: 0, handoff_changed: false } },
+        verifier: { ...failed, memory_change: { files: 1, added: 1, removed: 0 } },
+        curator: { ...done, memory_change: { files: 1, added: 2, removed: 1 } },
+        session: done,
+      });
+    });
+
+    it("does not borrow the memory changes of a prior attempt when a stage did not reach a turn", async (t) => {
+      const { call, record, memoryDir } = await setup(t);
+      writeFileSync(path.join(memoryDir, "handoff.md"), "read this\n");
+      const done = { result: "done" };
+      const failed = { result: "failed" };
+      await call("/v1/turns/end", { json: { agent: "main", turn_id: "first", ...done, night: { seq: 7, stage: "reflection" } } });
+      const rotate = (reflection: { result: string; turn_id?: string }) =>
+        call("/v1/sessions/rotated", { json: { agent: "main", seq: 7, stages: { reflection, verifier: done, curator: done, session: failed } } });
+      assert.equal((await rotate({ ...done, turn_id: "first" })).status, 204);
+      const [first] = record.day({ day: "2026-11-14", kind: "night" }).rows;
+      assert.ok(first?.kind === "night");
+      assert.deepEqual(first.stages.reflection.memory_change, { files: 1, added: 1, removed: 0, handoff_changed: true });
+
+      assert.equal((await rotate(failed)).status, 204);
+      assert.deepEqual(record.night(first.id).night.stages.reflection, failed);
+    });
+
     it("is refused with steps not of their shape, or with no seq of their night", async (t) => {
       const { call } = await setup(t);
       const ok = { result: "done" };
       for (const body of [
         { seq: 7, stages: { reflection: ok, verifier: { result: "maybe" }, curator: ok, session: ok } },
+        { seq: 7, stages: { reflection: { ...ok, turn_id: "" }, verifier: ok, curator: ok, session: ok } },
         { seq: 7, stages: { reflection: ok, curator: ok } },
         { stages: { reflection: ok, curator: ok, session: ok } },
         { seq: "7" },

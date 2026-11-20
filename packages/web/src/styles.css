@@ -1003,9 +1003,20 @@ button.record-row-body:hover {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  max-width: 100%;
 }
 .record-stage-sep {
   color: var(--color-text-secondary);
+}
+.record-stage-memory {
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  white-space: normal;
+}
+.record-stage > :not(.record-stage-memory) {
+  flex-shrink: 0;
 }
 .record-stage[data-result="done"] .record-mark-img,
 .record-step[data-result="done"] .record-mark-img {
@@ -1130,6 +1141,7 @@ button.record-row-body:hover {
 }
 .record-step-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   font-weight: 600;
