@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
-import type { RecordDayResponse, RecordRow, RecordTurn } from "@penelope/contract";
+import type { RecordDayResponse, RecordNight, RecordRow, RecordTurn } from "@penelope/contract";
 
 import { App } from "../src/ui/App.tsx";
 import { timeOf, words } from "../src/ui/words.ts";
@@ -312,6 +312,32 @@ describe("the other pages of the activity record", () => {
     assert.ok(screen.getByText("2. 照合係 ・ 失敗"));
     assert.ok(screen.getByText("4. 新しいセッション ・ 済み"));
     assert.ok(screen.getByRole("link", { name: /照合係/ }));
+  });
+
+  it("distinguish unchanged memory and handoff from unavailable counts on the night row and its detail", async () => {
+    const backend = new FakeBackend();
+    const night: RecordNight = {
+      id: "n-1", kind: "night", at: at(3, 0), started_at: at(3, 0), ended_at: at(3, 10), seconds: 600, result: "done",
+      stages: {
+        reflection: { result: "done", memory_change: { files: 0, added: 0, removed: 0, handoff_changed: false } },
+        verifier: { result: "done" },
+        curator: { result: "done", memory_change: { files: 2, added: 18, removed: 5 } },
+        session: { result: "done" },
+      },
+    };
+    backend.recordDays.set(backend.today, dayOf(backend.today, [night]));
+    backend.recordNights.set(night.id, { night, turns: {} });
+    start(backend, "#/record");
+    const link = await screen.findByRole("link", { name: /夜の切り替え/ });
+    assert.ok(within(link).getByText("記憶の変更なし ・ 引き継ぎ未更新"));
+    assert.ok(within(link).getByText("記憶の変更は不明"));
+    assert.ok(within(link).getByText("記憶 2 ファイル +18/−5 行"));
+    await follow(link);
+    const detail = within(await screen.findByRole("article"));
+    assert.ok(await detail.findByText("1. 振り返り ・ 済み"));
+    assert.ok(detail.getByText("記憶の変更なし ・ 引き継ぎ未更新"));
+    assert.ok(detail.getByText("記憶の変更は不明"));
+    assert.ok(detail.getByText("記憶 2 ファイル +18/−5 行"));
   });
 
   it("show a closed sub-agent's turns, a page more at a time", async () => {

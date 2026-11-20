@@ -230,7 +230,8 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 
 - ターンの `result` は `done`・`failed`・`stopped`（runner の言ったもの）、`running`（まだ終わっていない）、`unknown`（終わったが runner が結果を言わなかった。結果を送らない runner のターンと、記録より前のターン）。`reason` は runner が言ったときだけある。
 - ターンの `triggers` は、渡した出来事を渡した順に、`RECORD_TRIGGERS_MAX`（20）件まで並べたもの。1 件は `{seq, source, stream?, summary}`（型は `RecordTrigger`）。`trigger_count` は全部の数。サブエージェントのターン（頼みは本体から来る）、夜の切り替えのターン、出来事の分からないターンでは空で、`trigger_count` は 0 である。
-- 夜の `result` は、段のどれかが失敗なら `failed`、そうでなければ `done`、段の結果が知らされていなければ `unknown`。`stages` は `{reflection, verifier, curator, session}`（振り返り、照合係、整理係、新しいセッション） で、1 つの段は `{result, reason?}`。`result` は `done`・`failed`・`skipped`（行われなかった）・`unknown`。段の結果が知らされていない夜は、`session` が `done` で、ほかは `unknown` である。照合係を持たない旧 runner から段の結果が知らされた夜は、`verifier` が `skipped` になる。
+- 夜の `result` は、段のどれかが失敗なら `failed`、そうでなければ `done`、段の結果が知らされていなければ `unknown`。`stages` は `{reflection, verifier, curator, session}`（振り返り、照合係、整理係、新しいセッション） で、1 つの段は `{result, reason?, memory_change?}`。`result` は `done`・`failed`・`skipped`（行われなかった）・`unknown`。段の結果が知らされていない夜は、`session` が `done` で、ほかは `unknown` である。照合係を持たない旧 runner から段の結果が知らされた夜は、`verifier` が `skipped` になる。
+- 夜の `memory_change` は `{files, added, removed, handoff_changed?}`（型は `RecordMemoryChange`）。振り返り・照合係・整理係で計測できたときだけ、その段でコミットした変更ファイル数と増減行数を返す。振り返りでは `handoff_changed` が引き継ぎファイル `handoff.md` を変えたかを示す。変更なしは 3 つの数が 0。旧記録、計測できなかった段、新しいセッションでは欄が無い。段の成否とは別で、失敗した段にも変更量はありうる。
 - **逃した夜** は、記録が始まった後の予定の夜の時刻（backend の `PENELOPE_NIGHTLY_CRON`、今の設定で数える）のうち、次のどちらかのものである。夜の出来事が、その時刻から 1 分たっても列に無い（backend が止まっていた）。夜の出来事はあるが、次の夜の時刻までに切り替えの知らせが来なかった。`failed_at` はそれが決まった時刻（1 分後か、次の夜の時刻）。後から知らせが来れば、逃した夜ではなくなる。
 - 閉じたサブエージェントの `turns` と `failed_turns` は、記録に残っているそのサブエージェントのターンと、うち失敗の数。
 
@@ -262,6 +263,7 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 - まだ見ていない失敗の数は、最初につなぐときとつなぎ直すときに `GET /api/record/unseen` を読み、その後は流れの `record` で直す。左のレールの「活動の記録」とスマートフォンのメニューのボタン（とメニューの中の「活動の記録」）に出す。活動の記録の場所にいるあいだは出さない。
 - 活動の記録の場所を開くと `POST /api/record/seen` を 1 回送る。そこにいるあいだに数が 1 以上になったら（新しい失敗が来たら）、もう 1 回送り、返った `unseen` を知らせの件数に足す。「新しい」の札は、最初に送ったときの `previous_seen_at` より後の `failed_at` を持つ行に付ける。
 - 一覧は、ブラウザの時間帯を `tz` に渡して今日を読み、下までスクロールしたら `before` の日を読む。行の無い日は出さない。流れがターンの始まりか終わり、サブエージェントを閉じたこと、`record` を送るたびに、今日をもう 1 回読んで置き換える。
+- 夜の一覧行と 1 件の画面では、段の結果の横に記憶の変更量を出す。変更が 0 なら「記憶の変更なし」、計測されていなければ「記憶の変更は不明」、振り返りで `handoff_changed` が `false` なら「引き継ぎ未更新」と出す。行われなかった段と新しいセッションには変更量を出さない。
 - 畳みは 1 時間ごと（ブラウザの時間帯）で、失敗していないターンが 2 つ以上ある時間帯だけを畳む。畳んだ行はその時間の始まりの位置に置く。きっかけの種類ごとの数は、多い順に 3 つまでと「ほか n」。
 - 1 件の画面のツールの結果は、開いたときに `GET /api/record/turns/<id>/results/<call_id>` を読む。`404` なら「この結果は残っていません。」を出す。閉じたサブエージェントのターンは、「残りの n 件を見る」で次のページを読む。
 

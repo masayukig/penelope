@@ -6,6 +6,8 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import type { RecordMemoryChange } from "@penelope/contract";
+
 const run = promisify(execFile);
 
 export type Author = { name: string; email: string };
@@ -24,8 +26,20 @@ export class Memory {
   }
 
   /** Commits everything that changed in the work tree. `clean` when nothing did. */
-  commit({ agent, turnId }: { agent: string; turnId: string }): Promise<"committed" | "clean"> {
-    return this.queue(() => this.commitNow([`Turn ${turnId}`, `Agent: ${agent}`]));
+  commit({ agent, turnId, onChange }: {
+    agent: string; turnId: string; onChange?: (change: RecordMemoryChange | undefined) => void;
+  }): Promise<"committed" | "clean"> {
+    return this.queue(async () => {
+      const result = await this.commitNow([`Turn ${turnId}`, `Agent: ${agent}`]);
+      if (onChange !== undefined) {
+        // Measure before another queued commit can move HEAD. A failed
+        // measurement is not a failed commit, and its git output is private.
+        onChange(result === "clean"
+          ? { files: 0, added: 0, removed: 0, handoff_changed: false }
+          : await this.committedChange().catch(() => undefined));
+      }
+      return result;
+    });
   }
 
   /** Commits what changed under `paths` only, with the paragraphs of `message`. */
@@ -56,6 +70,26 @@ export class Memory {
     if (stdout === "") return "clean";
     await this.git("commit", "--quiet", "--no-verify", ...message.flatMap((paragraph) => ["--message", paragraph]), ...only);
     return "committed";
+  }
+
+  private async committedChange(): Promise<RecordMemoryChange> {
+    const { stdout } = await this.git("diff-tree", "--root", "--no-commit-id", "-r", "--numstat", "-z",
+      "--no-renames", "--no-ext-diff", "--no-textconv", "HEAD");
+    const change = { files: 0, added: 0, removed: 0, handoff_changed: false };
+    // numstat uses NUL between files, with tabs only separating the two
+    // counts from the name. A binary file uses "-" for both counts.
+    for (const entry of stdout.split("\0")) {
+      if (entry === "") continue;
+      const first = entry.indexOf("\t");
+      const second = entry.indexOf("\t", first + 1);
+      const added = entry.slice(0, first);
+      const removed = entry.slice(first + 1, second);
+      change.files++;
+      change.added += added === "-" ? 0 : Number(added);
+      change.removed += removed === "-" ? 0 : Number(removed);
+      change.handoff_changed ||= entry.slice(second + 1) === "handoff.md";
+    }
+    return change;
   }
 
   /**

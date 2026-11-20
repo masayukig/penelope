@@ -955,7 +955,8 @@ describe("the Pod end to end", () => {
     const night = await eventually("the night in the activity record", () =>
       browser.json<RecordDayResponse>("/api/record?kind=night").body.rows.find((row): row is RecordNight => row.kind === "night"),
     );
-    assert.deepEqual(night.stages, { reflection: { result: "done" }, verifier: { result: "done" }, curator: { result: "done" }, session: { result: "done" } });
+    const { reflection, verifier, curator, session } = night.stages;
+    assert.deepEqual([reflection.result, verifier.result, curator.result, session.result], ["done", "done", "done", "done"]);
 
     stream = new Stream();
     await stream.open(browser.cookie!);

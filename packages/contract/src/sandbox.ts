@@ -203,8 +203,11 @@ export type NightStage = {
   reason?: string;
 };
 
-/** The three steps of a night, in order (ADR-0007). */
-export type NightStages = { reflection: NightStage; verifier: NightStage; curator: NightStage; session: NightStage };
+/** For a stage with a turn, its ID ties the result to the backend's memory commit. */
+export type NightTurnReport = NightStage & { turn_id?: string };
+
+/** The four steps of a night (ADR-0044). */
+export type NightStages = Record<NightTurnStage, NightTurnReport> & { session: NightStage };
 
 /**
  * `POST /v1/sessions/rotated`: the runner went through the nightly switch of

@@ -209,8 +209,22 @@ export type RecordTurn = RecordRowBase & {
   night?: { id: string; stage: NightTurnStage };
 };
 
+/** Counts from the backend's memory commit, not from the runner's stage result. */
+export type RecordMemoryChange = {
+  files: number;
+  added: number;
+  removed: number;
+  /** Only on reflection: whether the root handoff.md changed. */
+  handoff_changed?: boolean;
+};
+
 /** One step of a night: `unknown` when the runner did not say. */
-export type RecordNightStage = { result: NightStageResult | "unknown"; reason?: string };
+export type RecordNightStage = {
+  result: NightStageResult | "unknown";
+  reason?: string;
+  /** Missing when not measured, which is distinct from zero changes. */
+  memory_change?: RecordMemoryChange;
+};
 
 /**
  * One nightly switch the runner reported. `failed` when a step failed, even

@@ -122,7 +122,7 @@ function shapeOf(row: RecordRow, showWho: boolean): Shape {
   }
 }
 
-/** The three steps of a night, side by side: done, stopped (bold), or not made (faint). */
+/** The steps of a night, with the recorded memory change beside each result. */
 export function Stages({ stages }: { stages: Stage[] }) {
   return (
     <span className="record-stages">
@@ -131,10 +131,18 @@ export function Stages({ stages }: { stages: Stage[] }) {
           {index > 0 ? <ArrowRightIcon width={12} height={12} className="record-stage-sep" /> : null}
           <StageMark result={stage.result} />
           <span>{stage.name}</span>
+          <StageMemory stage={stage} />
         </span>
       ))}
     </span>
   );
+}
+
+export function StageMemory({ stage }: { stage: Stage }) {
+  if (stage.key === "session" || stage.result === "skipped") return null;
+  const change = stage.memory_change;
+  const label = change === undefined ? w.memoryUnknown : change.files === 0 ? w.memoryUnchanged : w.memoryChanged(change.files, change.added, change.removed);
+  return <span className="record-stage-memory">{label}{change?.handoff_changed === false ? ` ・ ${w.handoffUnchanged}` : ""}</span>;
 }
 
 export function StageMark({ result, size = 14 }: { result: Stage["result"]; size?: number }) {
