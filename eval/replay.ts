@@ -7,11 +7,12 @@ import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { readConfig } from "../packages/runner/src/config.ts";
 import { Runner } from "../packages/runner/src/runner.ts";
 import { fakeRuntime, MODEL, PROVIDER, type Script } from "../packages/runner/test/fake-model.ts";
-import { answer, score } from "./answer.ts";
+import { answer } from "./answer.ts";
 import { ReplayBackend } from "./replay-backend.ts";
 import { days } from "./scenario.ts";
+import { score } from "./scoring.ts";
 
-const [, , mode, label, revision] = process.argv;
+const [, , mode, label, revision, run] = process.argv;
 const started = performance.now();
 const root = resolve("replay");
 const home = join(root, "home");
@@ -47,33 +48,36 @@ const script: Script = (call) => {
     return { text: "Pickup notes updated." };
   }
   if (answering) {
-    if (call.lastRole === "user") return { calls: [{ tool: "read_memory", args: { path: "pickup-manifest.md" } }] };
-    smokeAnswerRead = call.lastText.includes("MANIFEST-63");
-    return { text: '{"routing":{"lark":null,"sedge":null,"cutoff":null,"evidence":[]},"seal":{"crate":null,"seal":null,"evidence":[]}}' };
+    if (call.lastRole === "user") return { calls: [{ tool: "read_memory", args: { path: "signoff-current.md" } }] };
+    smokeAnswerRead = call.lastText.includes("SIGNOFF-36");
+    return { text: "{}" };
   }
   return { text: "Scripted night response; no memory changes." };
 };
 
 for (const dir of [home, memoryDir, sourcesDir]) await mkdir(dir, { recursive: true });
 await writeFile(join(memoryDir, "personality.md"), "You keep the records of a fictional sample-crate depot.\n");
+const ref = live?.ref ?? fake;
+const config = readConfig({
+  HOME: home, PENELOPE_MEMORY: memoryDir, PENELOPE_SOURCES: sourcesDir,
+  PENELOPE_BACKEND_URL: "http://unused.invalid", PENELOPE_BACKEND_TOKEN: "unused",
+  PENELOPE_NAME: "Marlo", PENELOPE_ROLE: "a sample-crate depot clerk", PENELOPE_OWNER: "the depot lead",
+  PENELOPE_IMAGE_SKILLS: "", PENELOPE_MODEL: `${ref.provider}/${ref.id}`, PENELOPE_THINKING: process.env.EVAL_THINKING ?? "off",
+});
+const thinking = config.thinkingLevel ?? "off";
 const runtime = await fakeRuntime(root, script);
 if (live) {
   runtime.registerProvider(live.ref.provider, {
     name: live.ref.provider,
     api: "openai-completions",
     baseUrl: live.baseUrl,
-    models: [{ id: live.ref.id, name: live.ref.id, reasoning: false, input: ["text"],
+    models: [{ id: live.ref.id, name: live.ref.id, reasoning: thinking !== "off", input: ["text"],
+      compat: { thinkingFormat: "openai", supportsReasoningEffort: true },
+      thinkingLevelMap: { xhigh: "xhigh" },
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32_768, maxTokens: 4096 }],
   });
   await runtime.setRuntimeApiKey(live.ref.provider, live.apiKey);
 }
-const ref = live?.ref ?? fake;
-const config = readConfig({
-  HOME: home, PENELOPE_MEMORY: memoryDir, PENELOPE_SOURCES: sourcesDir,
-  PENELOPE_BACKEND_URL: "http://unused.invalid", PENELOPE_BACKEND_TOKEN: "unused",
-  PENELOPE_NAME: "Marlo", PENELOPE_ROLE: "a sample-crate depot clerk", PENELOPE_OWNER: "the depot lead",
-  PENELOPE_IMAGE_SKILLS: "", PENELOPE_MODEL: `${ref.provider}/${ref.id}`, PENELOPE_THINKING: "off",
-});
 const backend = new ReplayBackend(memoryDir, sourcesDir);
 await backend.seed();
 const runner = new Runner({
@@ -82,9 +86,9 @@ const runner = new Runner({
 });
 const controller = new AbortController();
 const timeout = setTimeout(() => {
-  console.error(`${label}: replay exceeded 20 minutes`);
+  console.error(`${label} run ${run}: replay exceeded 30 minutes`);
   process.exit(1);
-}, 20 * 60_000);
+}, 30 * 60_000);
 const nights: { date: string; elapsedSeconds: number; stages: unknown }[] = [];
 const running = runner.run(controller.signal);
 // An early runner exit must fail the replay, not leave it waiting for an ack.
@@ -94,27 +98,28 @@ async function ack(delivery: Promise<void>) {
 try {
   mock.timers.enable({ apis: ["Date"], now: Date.parse(`${days[0].date}T09:00:00Z`) });
   for (const day of days) {
-    mock.timers.setTime(Date.parse(`${day.date}T09:00:00Z`));
-    const receipt = "receipt" in day ? day.receipt : undefined;
-    if (receipt) await writeFile(receiptFile, receipt);
-    daytime = {
-      inputs: [join(sourcesDir, "bulletin", `${day.date}.jsonl`), ...(receipt ? [receiptFile] : [])],
-      output: receipt ?? day.text,
-      file: day.file,
-      note: day.note,
-      step: 0,
-    };
     backend.selection = { model: `${fake.provider}/${fake.id}`, thinking: "off" };
-    backend.toolResults = [];
-    await ack(backend.deliver("bulletin", day.id, day.summary, { text: day.text }));
-    assert.equal(backend.ends.at(-1)?.result, "done", `Daytime turn on ${day.date}`);
-    assert.ok(backend.toolResults.some((r) => !r.is_error && r.output.includes(daytime!.output)), `Original tool result on ${day.date}`);
-    assert.equal(await readFile(join(memoryDir, day.file), "utf8"), day.note);
-    if (receipt) await unlink(receiptFile);
+    const dawn = Date.parse(`${day.date}T09:00:00Z`);
+    for (const [index, { receipt, source, id, summary, text, file, note }] of day.records.entries()) {
+      mock.timers.setTime(dawn + index * 60_000);
+      if (receipt) await writeFile(receiptFile, receipt);
+      daytime = {
+        inputs: [join(sourcesDir, source, `${day.date}.jsonl`), ...(receipt ? [receiptFile] : [])],
+        output: receipt ?? text, file, note, step: 0,
+      };
+      backend.toolResults = [];
+      await ack(backend.deliver(source, id, summary, { text }));
+      assert.equal(backend.ends.at(-1)?.result, "done", `Daytime turn ${id}`);
+      for (const original of receipt ? [text, receipt] : [text]) {
+        assert.ok(backend.toolResults.some((r) => !r.is_error && r.output.includes(original)), `Original tool result for ${id}`);
+      }
+      assert.equal(await readFile(join(memoryDir, file), "utf8"), note);
+      if (receipt) await unlink(receiptFile);
+    }
     daytime = undefined;
 
     mock.timers.setTime(Date.parse(`${day.date}T23:00:00Z`));
-    backend.selection = { model: `${ref.provider}/${ref.id}`, thinking: "off" };
+    backend.selection = { model: `${ref.provider}/${ref.id}`, thinking };
     const nightStart = performance.now();
     const previous = backend.rotations.length;
     await ack(backend.deliver("control", `nightly@${Date.now()}`, "the nightly switch", { kind: "nightly" }));
@@ -139,9 +144,9 @@ try {
 }
 try {
   answering = true;
-  const raw = await answer(runtime, ref, memoryDir, home, config.agentDir);
+  const raw = await answer(runtime, ref, thinking, memoryDir, home, config.agentDir);
   if (!live) assert.ok(smokeAnswerRead, "The fresh answer session must be able to read the last daytime note from memory");
-  console.log(JSON.stringify({ label, revision, mode, model: `${ref.provider}/${ref.id}`, elapsedSeconds: (performance.now() - started) / 1000,
+  console.log(JSON.stringify({ kind: "run", label, revision, run: Number(run), mode, model: `${ref.provider}/${ref.id}`, thinking, elapsedSeconds: (performance.now() - started) / 1000,
     nights, answer: raw, score: score(raw) }));
 } finally {
   clearTimeout(timeout);

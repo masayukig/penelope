@@ -3,8 +3,9 @@ import { join } from "node:path";
 import { createAgentSession, DefaultResourceLoader, type ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
+import type { ThinkingLevel } from "../packages/runner/src/config.ts";
 import { lastAssistant } from "../packages/runner/src/pi.ts";
-import { questions, rubric } from "./scenario.ts";
+import { questions } from "./scenario.ts";
 
 // Snapshot only Markdown, never follow symlinks or expose Git history. The model
 // sees names from this map, and its reads are lookups, not filesystem access.
@@ -23,7 +24,7 @@ async function snapshot(dir: string, prefix = ""): Promise<Map<string, string>> 
   return files;
 }
 
-export async function answer(runtime: ModelRuntime, ref: { provider: string; id: string }, memory: string, cwd: string, agentDir: string) {
+export async function answer(runtime: ModelRuntime, ref: { provider: string; id: string }, thinking: ThinkingLevel, memory: string, cwd: string, agentDir: string) {
   const files = await snapshot(memory);
   const model = runtime.getModel(ref.provider, ref.id);
   if (!model) throw new Error("Answer model not registered");
@@ -36,7 +37,7 @@ export async function answer(runtime: ModelRuntime, ref: { provider: string; id:
   await resourceLoader.reload();
   const reply = (text: string) => ({ content: [{ type: "text" as const, text }], details: {} });
   const { session } = await createAgentSession({
-    cwd, agentDir, modelRuntime: runtime, model, thinkingLevel: "off", settingsManager, resourceLoader,
+    cwd, agentDir, modelRuntime: runtime, model, thinkingLevel: thinking, settingsManager, resourceLoader,
     sessionManager: SessionManager.inMemory(cwd),
     tools: ["list_memory", "read_memory"],
     customTools: [
@@ -51,33 +52,15 @@ export async function answer(runtime: ModelRuntime, ref: { provider: string; id:
     ],
   });
   try {
-    const format = { routing: { lark: null, sedge: null, cutoff: null, evidence: [] }, seal: { crate: null, seal: null, evidence: [] } };
+    const format = Object.fromEntries(questions.map(({ id, fields }) => [id, {
+      ...Object.fromEntries(Object.keys(fields).map((field) => [field, null])), evidence: [],
+    }]));
     const input = questions.map(({ id, ask }) => `${id}: ${ask}`).join("\n");
-    await session.prompt(`${input}\n\nReturn only a JSON object shaped like this: ${JSON.stringify(format)}. Use uppercase for codes and names, HH:MM for the cutoff, and exact document IDs in evidence arrays.`);
+    await session.prompt(`${input}\n\nReturn only a JSON object shaped like this: ${JSON.stringify(format)}. Use uppercase for codes, names and materials, HH:MM for times, and exact document IDs in evidence arrays.`);
     const last = lastAssistant(session.messages);
     if (last?.stopReason !== "stop") throw new Error(`Answer did not finish: ${last?.stopReason ?? "no response"}`);
     return last.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("");
   } finally {
     session.dispose();
   }
-}
-
-export function score(raw: string) {
-  let parsed: Record<string, Record<string, unknown> | undefined> = {};
-  let validJSON = true;
-  try {
-    parsed = JSON.parse(raw) ?? {};
-  } catch {
-    validJSON = false;
-  }
-  const checks = Object.entries(rubric).flatMap(([id, rule]) => {
-    const response = parsed[id];
-    const evidence = response?.evidence;
-    return [
-      ...Object.entries(rule.fields).map(([field, value]) => ({ check: `${id}.${field}`, pass: response?.[field] === value })),
-      // No extra citations: citing a superseded rule as current does not count.
-      { check: `${id}.evidence`, pass: Array.isArray(evidence) && evidence.length === rule.evidence.length && rule.evidence.every((ref) => evidence.includes(ref)) },
-    ];
-  });
-  return { validJSON, passed: checks.filter(({ pass }) => pass).length, total: checks.length, checks };
 }
