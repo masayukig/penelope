@@ -1,7 +1,7 @@
 # 0043. モデルと思考の深さはオーナーが設定画面で選ぶ
 
 - Date: 2026-11-19
-- Status: Accepted
+- Status: Accepted（一部を [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) で置き換え）
 
 ## Context
 
@@ -10,6 +10,8 @@
 Pi はセッションの履歴を残したままモデルを替えられる。思考の深さはモデルごとに使える値が異なる。通常のモデルではコンテキストがしきい値を超えると Pi は自動で圧縮を試す。切り替え直後も、前のモデルの応答をもとに新しいモデルの上限で判定できる。ただし圧縮の要約も切り替え先のモデルに履歴を送って作るため、長すぎる履歴が必ず収まるわけではない。Pi が認識した上限超過には、圧縮が成功すれば 1 回の再試行がある。
 
 ## Decision
+
+照合係と整理係で使うモデルには [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) の例外がある。振り返りと日中のモデル選択は本 ADR のままとする。
 
 - モデルと思考の深さの組は backend が SQLite に配置ごとに 1 組保存する。オーナーとしてログインした人だけが読み書きでき、A2A や sandbox の認証では書けない。設定が無いときは環境変数の既定を残し、未指定なら Pi の振る舞いに従う。
 - モデルは Pi と同じ `<provider>/<model>` で識別する。最初の `/` だけが区切りである。候補の正は、Pi が認証を確認できるモデルを runner が報告した一覧とする。候補の名前・コンテキストの大きさ・対応する思考の深さを画面に出す。一覧が無いか期限切れの場合も含め、一覧にないモデルや非対応の深さは保存しない。
@@ -38,7 +40,7 @@ Pi はセッションの履歴を残したままモデルを替えられる。�
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく
 - Related: ADR-0004 本物の鍵は Sentinel が持ち、鍵の出どころは差し替えられる口にする
 - Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える（従来の夜の段）
-- Related: [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md)（照合係を追加。夜のモデルを別に設定するかは未決定）
+- Superseded by（一部）: [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md)（Decision 項 3（各ターンでの設定の適用）のうち、照合係と整理係にだけ別のモデルを手で選べるようにする。自動では替えない）
 - Related: ADR-0010 人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる
 - Related: ADR-0017 ターンの入力は 1 行 1 件の JSON を `<events>` で囲み、1 件の型を契約にする
 - Related: ADR-0022 サブエージェントは runner が非同期に回し、本体とだけツールと自分宛ての出来事でやりとりする

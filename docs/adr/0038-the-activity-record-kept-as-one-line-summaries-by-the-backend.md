@@ -1,7 +1,7 @@
 # 0038. 活動の記録は backend が 1 行の要約として持ち、ターンの結果と夜の段の結果を runner が知らせる
 
 - Date: 2026-11-18
-- Status: Accepted（一部を [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) で置き換え予定）
+- Status: Accepted（一部を [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) で置き換え）
 
 ## Context
 
@@ -26,6 +26,8 @@ Web UI に「活動の記録」の場所を作る。オーナーが後から、P
 ここで「失敗」は、失敗したターン、止まった夜の切り替え、失敗した裏の仕事を指す。「止められた」ターン（Pod の停止などで runner が中断したもの）は失敗ではない。「逃した夜」は、夜の時刻を過ぎたのに切り替えが行われなかった夜である。
 
 ## Decision
+
+夜の段の構成と記録する結果の範囲は [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) で拡張した。照合係の結果、各段の記憶の変更量、振り返りで引き継ぎが未更新だったことを加える。
 
 適用範囲は、backend が持つ活動の記録と、それを満たすために runner が backend に知らせるものである。出来事の列・ack・やり直しの決まり（ADR-0002、ADR-0007）と、夜の 3 段そのものは変えない。
 
@@ -111,7 +113,7 @@ Web UI に「活動の記録」の場所を作る。オーナーが後から、P
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく（ack とやり直し）
 - Related: ADR-0006 記憶は `/memory` の形を保ち、検査をやめ、コミットだけを sandbox の外で行う（ターンの終わりのコミット）
 - Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える（従来の 3 段）
-- Superseded by（一部、採択時）: [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md)（Decision 項 1 と項 2 の対象に照合係を加える。記録の仕組みは維持）
+- Superseded by（一部）: [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md)（Decision 項 1（ターンの結果ときっかけは、runner がターンの終わりの口で知らせる）と項 2（夜の切り替えは、runner が段ごとの結果をまとめて知らせる）に照合係と記憶の変更の記録を加える）
 - Related: ADR-0009 最初の UI は Web だけにし、新しい API と Astryx で作る
 - Related: ADR-0010 人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる
 - Related: ADR-0013 出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す（きっかけの要約）

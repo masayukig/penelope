@@ -67,7 +67,7 @@ natsumi では、Slack・外のエージェントの返事・監視の警報を 
 - sandbox 向けの口の形（委譲先: [sandbox 向けの口の仕様書](../sandbox-api.md)）
 - `/sources` の保存期間（委譲先: backend の設定）
 - Slack のプラグインが書く行の形と、読むための CLI（委譲先: Slack のプラグインの文書）
-- 夜の切り替えの途中で失敗したときの扱い（委譲先: [backend の仕様書「夜の切り替え」](../backend.md#夜の切り替え)。段ごとの扱いは [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) の Decision 項 1「夜の切り替えを 4 段にする」で明示する提案）
+- 夜の切り替えの途中で失敗したときの扱い（委譲先: [backend の仕様書「夜の切り替え」](../backend.md#夜の切り替え)。段ごとの扱いは [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) の Decision 項 1「夜の切り替えを 4 段にする」に従う）
 
 ## Consequences
 
