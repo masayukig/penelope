@@ -1,7 +1,7 @@
 # 0008. プロンプトは事実と環境だけを伝え、やり方は任せる
 
 - Date: 2026-11-14
-- Status: Accepted
+- Status: Accepted（一部を [ADR-0045 夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md) で置き換え）
 
 ## Context
 
@@ -50,7 +50,9 @@ penelope では、エージェントは Pi の基本のツールで何でもで�
 - Related: ADR-0003 sandbox の外向きはすべて Sentinel を通し、既定は素通しで記録する
 - Related: ADR-0004 本物の鍵は Sentinel が持ち、鍵の出どころは差し替えられる口にする
 - Related: ADR-0006 記憶は `/memory` の形を保ち、検査をやめ、コミットだけを sandbox の外で行う
-- Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える
+- Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える（本体のセッションの切り替え）
+- Related: [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md)（夜の各段に渡す目的と資料）
+- Superseded by（一部）: [ADR-0045 夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md)（Decision のプロンプトに書く内容と手順を置かない方針に、夜に限った例外を設ける）
 
 ## References
 

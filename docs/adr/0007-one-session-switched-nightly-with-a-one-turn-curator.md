@@ -1,7 +1,7 @@
 # 0007. セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える
 
 - Date: 2026-11-14
-- Status: Accepted
+- Status: Accepted（一部を [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) で置き換え）
 
 ## Context
 
@@ -18,6 +18,8 @@ natsumi では、夜に次の順で切り替える。
 penelope では、記憶の検査をやめる（ADR-0006）。Pi は sandbox の中で runner が回す（ADR-0001）。
 
 ## Decision
+
+夜の段の構成と照合・整理の分担は [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) で置き換えた。本体のセッションを 1 本にすること、backend と runner の分担、日中の compaction は変えない。
 
 ### 3 段は残す
 
@@ -56,6 +58,7 @@ penelope では、記憶の検査をやめる（ADR-0006）。Pi は sandbox の
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md)（Decision 項 1「3 段は残す」、項 2「整理係は 1 つのセッションの 1 ターン」、項 3「文脈があふれたら compaction、足りなければ分け直す」のうち、夜の段取りと照合・整理を 1 ターンにまとめる判断。本体 1 セッション、backend と runner の分担、日中の compaction は維持）
 - Related: ADR-0001 1 つの Pod に backend・Sentinel・sandbox・receivers を置き、Pi ごと sandbox の中で動かす
 - Related: ADR-0006 記憶は `/memory` の形を保ち、検査をやめ、コミットだけを sandbox の外で行う
 - Related: ADR-0008 プロンプトは事実と環境だけを伝え、やり方は任せる
