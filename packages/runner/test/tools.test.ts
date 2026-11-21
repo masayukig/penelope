@@ -100,6 +100,15 @@ test("reply_to_agent answers in the task of the a2a event it names", async () =>
   await assert.rejects(call("reply_to_agent", { in_reply_to: 404, state: "completed" }), /404/);
 });
 
+test("reply_to_agent uploads the bytes of a sandbox image as the completed answer", async () => {
+  const image = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
+  writeFileSync(join(home, "diagram.gif"), image);
+  assert.match(await call("reply_to_agent", { in_reply_to: 7, state: "completed", images: ["diagram.gif"] }), /completed/);
+  assert.deepEqual(fake.sent("POST", "/v1/a2a/replies"), [{
+    agent: "main", in_reply_to: 7, state: "completed", images: [{ name: "diagram.gif", data: image.toString("base64") }],
+  }]);
+});
+
 test("schedules are added, listed and removed", async () => {
   const added = JSON.parse(await call("schedule_add", { reason: "look at CI", at: "2026-11-15T09:00:00Z" }));
   assert.deepEqual(added, { id: "s-1", agent: "main", reason: "look at CI", at: "2026-11-15T09:00:00Z" });

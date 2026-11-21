@@ -320,6 +320,12 @@ export const MIGRATIONS: readonly string[] = [
   -- Counts from the memory commit of a night turn (ADR-0044). NULL when not measured.
   ALTER TABLE turns ADD COLUMN memory_change TEXT;
   `,
+  `
+  -- Inbound images live in /sources; history keeps only their presence.
+  ALTER TABLE a2a_messages ADD COLUMN has_images INTEGER NOT NULL DEFAULT 0;
+  -- Outbound images belong to the task, as JSON file parts with base64 bytes.
+  ALTER TABLE a2a_tasks ADD COLUMN response_images TEXT;
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

@@ -3,7 +3,7 @@
 
 import { join } from "node:path";
 
-import type { AgentId } from "@penelope/contract";
+import { A2A_IMAGE_MAX_BYTES, type AgentId } from "@penelope/contract";
 import { DEFAULT_MAX_CHARS, SEGMENT } from "@penelope/slack";
 
 /** Where the sandbox's image carries the skills of the repository (Dockerfile, docs/pod.md). */
@@ -127,7 +127,7 @@ export function readConfig(env: Env): Config {
     }
   }
   const promptFileMaxBytes = positiveInteger(env, "PENELOPE_PROMPT_FILE_MAX_BYTES", 65536, problems);
-  const imageMaxBytes = positiveInteger(env, "PENELOPE_IMAGE_MAX_BYTES", 5 * 1024 * 1024, problems);
+  const imageMaxBytes = positiveInteger(env, "PENELOPE_IMAGE_MAX_BYTES", A2A_IMAGE_MAX_BYTES, problems);
   const pollWaitSeconds = positiveInteger(env, "PENELOPE_POLL_WAIT_SECONDS", 30, problems);
   const jobs: JobLimits = {
     max: positiveInteger(env, "PENELOPE_JOBS_MAX", 5, problems),

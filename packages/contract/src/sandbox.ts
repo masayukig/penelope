@@ -223,12 +223,14 @@ export type A2ATaskState = "working" | "input-required" | "completed" | "failed"
 
 /**
  * `POST /v1/a2a/replies`: her answer in the task of the `a2a` event `in_reply_to`.
- * `completed` closes the task, `text` optional; `input-required` asks the sender
- * `text` and keeps the task open for its answer.
+ * `completed` closes the task with optional text and images. `input-required`
+ * asks a text question and keeps the task open for its answer.
  */
 export type A2AReplyRequest = FromAgent & {
   in_reply_to: number;
   state: "completed" | "input-required";
   text?: string;
+  /** File copies read by the runner, for completed replies only (ADR-0047). */
+  images?: ReplyImageUpload[];
 };
 export type A2AReplyResponse = { task_id: string; state: A2ATaskState };

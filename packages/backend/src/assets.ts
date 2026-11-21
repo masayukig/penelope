@@ -28,7 +28,7 @@ export class AssetStoreError extends Error {}
 
 const NAME_MAX = 255;
 /** Base64 with its padding; the length is checked apart, a multiple of four. */
-const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}(?![\s\S])/;
 const EXTENSIONS: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
 
 /**
@@ -37,10 +37,10 @@ const EXTENSIONS: Record<string, string> = { "image/png": "png", "image/jpeg": "
  * GIF or WebP bytes of at most REPLY_IMAGE_MAX_BYTES. Throws ImageRefusal,
  * naming what is wrong, at the first one that is not.
  */
-export function checkImages(value: unknown): CheckedImage[] {
+export function checkImages(value: unknown, maxImages = REPLY_IMAGES_MAX, maxBytes = REPLY_IMAGE_MAX_BYTES): CheckedImage[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new ImageRefusal("images must be a list of {name, data}");
-  if (value.length > REPLY_IMAGES_MAX) throw new ImageRefusal(`a reply carries at most ${REPLY_IMAGES_MAX} images, not ${value.length}`);
+  if (value.length > maxImages) throw new ImageRefusal(`a reply carries at most ${maxImages} images, not ${value.length}`);
   return value.map((item: unknown, index) => {
     const which = `image ${index + 1}`;
     if (typeof item !== "object" || item === null) throw new ImageRefusal(`${which} must be {name, data}`);
@@ -51,8 +51,8 @@ export function checkImages(value: unknown): CheckedImage[] {
     const called = `${which} (${name})`;
     if (typeof data !== "string" || data.length % 4 !== 0) throw new ImageRefusal(`${called}: data must be the file's bytes in base64`);
     // Checked before it is decoded: base64 is four characters for three bytes.
-    if ((data.length / 4) * 3 - padding(data) > REPLY_IMAGE_MAX_BYTES) {
-      throw new ImageRefusal(`${called} is over the ${REPLY_IMAGE_MAX_BYTES} bytes an image may have`);
+    if ((data.length / 4) * 3 - padding(data) > maxBytes) {
+      throw new ImageRefusal(`${called} is over the ${maxBytes} bytes an image may have`);
     }
     if (!BASE64.test(data)) throw new ImageRefusal(`${called}: data must be the file's bytes in base64`);
     const bytes = new Uint8Array(Buffer.from(data, "base64"));

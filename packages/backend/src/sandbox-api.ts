@@ -4,7 +4,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type http from "node:http";
 
-import { type Activity, type AgentId, type DeliveredEvent, isSubAgentName, type NightStages, type NightTurnReport, type ScheduleWhen } from "@penelope/contract";
+import { A2A_BODY_MAX_BYTES, A2A_IMAGE_MAX_BYTES, A2A_IMAGES_MAX, type Activity, type AgentId, type DeliveredEvent, isSubAgentName, type NightStages, type NightTurnReport, type ScheduleWhen } from "@penelope/contract";
 
 import { type Inbox, InboxRefusal } from "./a2a/inbox.ts";
 import type { SubAgents } from "./agents.ts";
@@ -159,16 +159,20 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         return;
       }
       case "POST /v1/a2a/replies": {
-        const { agent, in_reply_to, state, text } = withAgent(await body());
+        const { agent, in_reply_to, state, text, images } = withAgent(object(await readJson(request, A2A_BODY_MAX_BYTES)));
         mainOnly(agent, "answers A2A tasks");
         if (!Number.isSafeInteger(in_reply_to)) throw new HttpError(400, "in_reply_to must be the seq of an a2a event");
         if (state !== "completed" && state !== "input-required") throw new HttpError(400, "state must be completed or input-required");
         if (text !== undefined && typeof text !== "string") throw new HttpError(400, "text must be a string");
         try {
-          sendJson(response, 200, inbox.reply({ in_reply_to: in_reply_to as number, state, ...(text === undefined ? {} : { text }) }));
+          const checked = checkImages(images, A2A_IMAGES_MAX, A2A_IMAGE_MAX_BYTES);
+          sendJson(response, 200, inbox.reply({ in_reply_to: in_reply_to as number, state, ...(text === undefined ? {} : { text }) }, checked));
         } catch (error) {
-          if (!(error instanceof InboxRefusal)) throw error;
-          throw new HttpError(error.kind === "no-such-event" ? 404 : error.kind === "closed" ? 409 : 400, error.message);
+          if (error instanceof ImageRefusal) throw new HttpError(400, `not sent: ${error.message}`);
+          if (error instanceof InboxRefusal) {
+            throw new HttpError(error.kind === "no-such-event" ? 404 : error.kind === "closed" ? 409 : 400, error.message);
+          }
+          throw error;
         }
         return;
       }

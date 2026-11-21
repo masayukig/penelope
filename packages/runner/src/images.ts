@@ -7,12 +7,12 @@
 import { readFile } from "node:fs/promises";
 
 import type { ImageContent } from "@earendil-works/pi-ai";
-import type { DeliveredEvent } from "@penelope/contract";
+import { A2A_IMAGES_MAX, type DeliveredEvent, REPLY_IMAGE_TYPES } from "@penelope/contract";
 
-export const IMAGES_PER_INPUT = 4;
+export const IMAGES_PER_INPUT = A2A_IMAGES_MAX;
 
 /** The types that go in as images. */
-const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const IMAGE_TYPES = new Set<string>(REPLY_IMAGE_TYPES);
 
 export async function inlineImages(events: DeliveredEvent[], maxBytes: number): Promise<ImageContent[]> {
   const images: ImageContent[] = [];

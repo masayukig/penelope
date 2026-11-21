@@ -54,7 +54,7 @@ export class Sources {
     mkdirSync(folder, { recursive: true });
     const taken = new Set<string>();
     return files.map((file) => {
-      const name = unique(safeName(file.name), taken);
+      const name = uniqueFileName(file.name, taken);
       const where = path.join(folder, `${seq}-${name}`);
       writeFileSync(where, file.data);
       return { path: where, mime_type: mediaType(file), size: file.data.byteLength };
@@ -91,7 +91,9 @@ function safeName(name: string): string {
   return safe === "" ? "file" : safe;
 }
 
-function unique(name: string, taken: Set<string>): string {
+/** A safe basename that is not already in this batch. */
+export function uniqueFileName(original: string, taken: Set<string>): string {
+  const name = safeName(original);
   let candidate = name;
   for (let n = 2; taken.has(candidate); n++) {
     const dot = name.lastIndexOf(".");

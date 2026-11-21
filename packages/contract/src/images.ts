@@ -8,5 +8,10 @@ export const REPLY_IMAGES_MAX = 4;
 /** At most this many bytes in one image (10 MiB). */
 export const REPLY_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
+/** A2A exchanges and the default inline input budget (ADR-0047). */
+export const A2A_IMAGES_MAX = 4;
+export const A2A_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+export const A2A_BODY_MAX_BYTES = 32 * 1024 * 1024;
+
 /** The kinds of image a reply carries, told from their first bytes: those the Web UI shows as they are. */
 export const REPLY_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;

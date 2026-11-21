@@ -716,7 +716,7 @@ describe("the Pod end to end", () => {
     assert.match(exec("sandbox", "slackctl faces").stdout, new RegExp(`^happy\\t${icon.href.replaceAll(".", "\\.")}$`, "m"));
   }));
 
-  it("takes another agent's request over A2A, asks it back, and hands it her answer", track(async () => {
+  it("takes an A2A request, asks back, and returns the image the sender provides in its answer", track(async () => {
     // Guards against: a request of an allowed ServiceAccount, checked by TokenReview or by gated's assertion, not reaching
     // a turn; her question or answer not reaching the sender's task; or a ServiceAccount not on the allow-list getting in.
     const token = (name: string) => readFileSync(join(RUN_DIR, name), "utf8").trim();
@@ -758,7 +758,10 @@ describe("the Pod end to end", () => {
     assert.equal(asking.status.message.parts[0].text, "E2E-A2A-QUESTION");
 
     // The sender answers through gated, which took its token off and put its assertion in place.
-    const answered = a2aCall("SendMessage", message("e2e-a2a-2", "E2E-A2A-ANSWER the backend", { taskId: task.id, contextId: task.contextId }), await gated());
+    const reply = message("e2e-a2a-2", "E2E-A2A-ANSWER the backend", { taskId: task.id, contextId: task.contextId });
+    const answered = a2aCall("SendMessage", {
+      message: { ...reply.message, parts: [...reply.message.parts, { raw: E2E_PNG, mediaType: "image/png", filename: "diagram.png" }] },
+    }, await gated());
     assert.equal(answered.status, 200, JSON.stringify(answered.body));
     assert.equal(answered.body.result?.task?.id, task.id, JSON.stringify(answered.body));
 
@@ -766,7 +769,11 @@ describe("the Pod end to end", () => {
       const now = await getTask(await gated());
       return now.status.state === "TASK_STATE_COMPLETED" ? now : undefined;
     }, 180_000);
-    assert.equal(done.artifacts[0].parts[0].text, "E2E-A2A-DONE");
+    const [words, image] = done.artifacts[0].parts;
+    assert.equal(words.text, "E2E-A2A-DONE");
+    assert.equal(image.raw, E2E_PNG);
+    assert.equal(image.mediaType, "image/png");
+    assert.match(image.filename, /^\d+-diagram\.png$/);
 
     // Both messages are a2a events of the sender's stream, appended to /sources, each naming the task.
     const day = new Date().toISOString().slice(0, 10);

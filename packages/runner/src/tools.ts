@@ -9,7 +9,7 @@ import { readFile, stat } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX, type ReplyImageUpload } from "@penelope/contract";
+import { A2A_IMAGE_MAX_BYTES, A2A_IMAGES_MAX, REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX, type ReplyImageUpload } from "@penelope/contract";
 import { Type } from "typebox";
 
 import type { Backend } from "./backend.ts";
@@ -25,15 +25,15 @@ function text(value: string) {
  * limit, relative paths from HOME. The backend tells their kind from their
  * bytes; the runner only spares reading and sending what cannot pass.
  */
-async function readImages(paths: readonly string[], home: string): Promise<ReplyImageUpload[]> {
-  if (paths.length > REPLY_IMAGES_MAX) throw new Error(`Not sent: a reply carries at most ${REPLY_IMAGES_MAX} images, not ${paths.length}.`);
+async function readImages(paths: readonly string[], home: string, maxImages = REPLY_IMAGES_MAX, maxBytes = REPLY_IMAGE_MAX_BYTES): Promise<ReplyImageUpload[]> {
+  if (paths.length > maxImages) throw new Error(`Not sent: a reply carries at most ${maxImages} images, not ${paths.length}.`);
   const images: ReplyImageUpload[] = [];
   for (const path of paths) {
     const file = resolve(home, path);
     try {
       const info = await stat(file);
       if (!info.isFile()) throw new Error("not a file");
-      if (info.size > REPLY_IMAGE_MAX_BYTES) throw new Error(`${info.size} bytes, over the ${REPLY_IMAGE_MAX_BYTES} an image may have`);
+      if (info.size > maxBytes) throw new Error(`${info.size} bytes, over the ${maxBytes} an image may have`);
       images.push({ name: basename(file), data: (await readFile(file)).toString("base64") });
     } catch (error) {
       const why = error instanceof Error ? error.message : String(error);
@@ -82,16 +82,21 @@ export function backendTools(backend: Backend, { home, turn }: { home: string; t
     name: "reply_to_agent",
     label: "Reply to an agent",
     description:
-      "Answer another agent in the A2A task of an `a2a` event. The event's stream is the agent's name, and its payload has the agent's text and the task. `completed` closes the task, with the text as its answer when you give one. `input-required` asks the agent the text and keeps the task open; the agent's answer comes as another `a2a` event of the same task. The agent fetches what you send from its task; your owner does not see it. A task the agent has not written to within the backend's deadline fails, and can no longer be answered.",
+      "Answer another agent in the A2A task of an `a2a` event. The event's stream is the agent's name, and its payload has the agent's text and the task. `completed` closes the task with optional text and images as its answer. `input-required` asks the agent the text and keeps the task open; the agent's answer comes as another `a2a` event of the same task. The agent fetches what you send from its task; your owner does not see it. A task the agent has not written to within the backend's deadline fails, and can no longer be answered.",
     parameters: Type.Object({
       in_reply_to: Type.Integer({ description: "The seq of an `a2a` event of the task." }),
       state: Type.Union([Type.Literal("completed"), Type.Literal("input-required")], {
         description: "completed: close the task. input-required: ask the agent, and wait for its answer.",
       }),
       text: Type.Optional(Type.String({ description: "The answer, or the question. Needed for input-required." })),
+      images: Type.Optional(Type.Array(Type.String(), {
+        description: `For completed only: paths to PNG, JPEG, GIF or WebP files, absolute or relative to HOME. Up to ${A2A_IMAGES_MAX} files, each up to 5 MiB. The sender gets copies in the Task artifact. If an image cannot be sent, the Task is not completed.`,
+      })),
     }),
-    async execute(_id, params) {
-      const task = await backend.a2aReply(params);
+    async execute(_id, { images: paths, ...reply }) {
+      if (paths?.length && reply.state !== "completed") throw new Error("Not sent: only a completed answer can carry images.");
+      const images = paths?.length ? await readImages(paths, home, A2A_IMAGES_MAX, A2A_IMAGE_MAX_BYTES) : undefined;
+      const task = await backend.a2aReply({ ...reply, ...(images === undefined ? {} : { images }) });
       return text(`Sent: the task is ${task.state}.`);
     },
   });

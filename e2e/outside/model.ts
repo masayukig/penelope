@@ -119,7 +119,15 @@ export function script(messages: readonly ChatMessage[]): Answer {
       ];
     }
     if (input.includes("E2E-A2A-ASK")) return [{ calls: [replyToAgent(input, "input-required", "E2E-A2A-QUESTION")] }, { text: "Asked." }];
-    if (input.includes("E2E-A2A-ANSWER")) return [{ calls: [replyToAgent(input, "completed", "E2E-A2A-DONE")] }, { text: "Answered." }];
+    if (input.includes("E2E-A2A-ANSWER")) {
+      const user = messages.findLast((message) => message.role === "user");
+      const hasImage = Array.isArray(user?.content) && user.content.some((part) =>
+        part.type === "image_url" && part.image_url?.url === `data:image/png;base64,${E2E_PNG}`);
+      const path = /"path":"([^"]+\/a2a\/files\/[^"]+)"/.exec(input)?.[1];
+      if (!hasImage || !path) return [{ text: "Missing A2A image or attachment path." }];
+      const answer = replyToAgent(input, "completed", "E2E-A2A-DONE");
+      return [{ calls: [{ ...answer, args: { ...answer.args, images: [path] } }] }, { text: "Answered." }];
+    }
     if (input.includes("E2E-NOW")) return [{ calls: [reply("E2E-REPLY-EVENTS")] }, { text: "Seen." }];
     if (input.includes("E2E-ALERT")) return [{ calls: [reply("E2E-REPLY-ALERT")] }, { text: "Looked." }];
     if (input.includes("E2E-SLACK-MENTION")) return [{ calls: [reply("E2E-REPLY-SLACK")] }, { text: "Read." }];

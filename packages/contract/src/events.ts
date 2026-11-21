@@ -76,6 +76,7 @@ export type ErrorBody = { error: string };
  * (docs/a2a.md). `request` opens a task; `answer` is the agent's answer to her
  * question in a task that was `input-required`. The stream is the sender's name.
  */
+/** Images, if present, live in the event's attachments, not this payload. */
 export type A2APayload = {
   kind: "request" | "answer";
   task_id: string;
