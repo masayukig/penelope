@@ -180,12 +180,15 @@ services:
       PENELOPE_MODEL: e2e/scripted
       PENELOPE_POLL_WAIT_SECONDS: "10"
       PENELOPE_SLACK_SOURCES: slack
+      PENELOPE_CONNECTORS_DIR: /etc/penelope/connectors
+      E2E_HELPER_TOKEN: e2e-surrogate-helper-0001
       # slackctl post: the bot token's surrogate, and where Slack fetches the faces from.
       SLACK_BOT_TOKEN: e2e-surrogate-slack-0001
       PENELOPE_PUBLIC_URL: ${PENELOPE_E2E_PUBLIC_URL:-}
     volumes:
       - *resolv
       - ./.run/sentinel-ca.crt:/etc/penelope/ca/sentinel.crt:ro
+      - ./config/connectors:/etc/penelope/connectors:ro
       - memory:/memory
       - memory-git:/memory/.git:ro
       - home:/home/agent

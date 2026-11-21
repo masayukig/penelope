@@ -59,6 +59,22 @@
 - backend の sandbox 向けの口の socket は、backend と Sentinel だけが mount する。Sentinel は backend の登録の `upstream` でこの socket につなぐ（[sentinel-config.md](sentinel-config.md) の「上流」）。
 - コンテナの UID が違うので、配置は共有する volume を 1 つのグループに置く。そのグループを Pod の `supplementalGroups` で全コンテナに与え、共有するディレクトリを set-group-ID にする。`fsGroup` は使わない。kubelet が volume の中身を丸ごとそのグループに開け、backend の SQLite と sandbox の HOME を持ち主だけのものに保てないためである。持ち主と権限は init container が付ける（見本は [deploy/kubernetes/](../deploy/kubernetes/README.md) の「volume と持ち主」）。backend は sandbox が書いた `/memory` の作業ツリーを読み、`/memory/.git`・SQLite・`/sources` を書く。sandbox は `/sources` を読む。socket は backend が誰でも書ける mode で作るので、見えるかどうかは mount だけで決まる。
 
+### A2A の宛先
+
+[ADR-0048](adr/0048-ask-agents-by-name-and-wait-in-a-background-job.md) の `ask-agent` は、`PENELOPE_CONNECTORS_DIR`（未設定なら `/etc/penelope/connectors`）の `.md` 文書の YAML frontmatter にある `a2a` の一覧を読む。通常の frontmatter と Markdown 本文はそのまま残す。
+
+```yaml
+a2a:
+  - name: helper
+    label: ヘルパー
+    url: https://helper.agents.example.com/
+    token: HELPER_AGENT_TOKEN
+```
+
+- `name` は英数字から始まる 64 文字以内の英数字・`_`・`-`、`label` は 100 文字以内の空でない表示名。大小文字を区別して、どちらかに完全一致する項目を 1 件だけ選ぶ。文書をまたいでも、別々の項目が同じ名前・表示名に一致してはならない。
+- `url` は Agent Card を見つけるための HTTP(S) のルート URL。`token` は Bearer サロゲートを渡す環境変数の**名前**であり、値は文書に書かない。URL のホストとサロゲートの組を Sentinel に登録する。
+- 一意に選べない、選んだ項目に欠けがある、または設定が読めないときは送らない。認証が通らなくても別の宛先や認証は試さない。使い方は [sandbox 向けの口の仕様](sandbox-api.md#ask-agent) を参照。
+
 ## Pi 拡張
 
 runner は本人のセッションを開くときと、置き場が変わってターンの前に読み直すとき、次の順に置き場を Pi に渡す（[ADR-0039](adr/0039-load-owner-and-memory-extensions-in-the-main-session.md)）。

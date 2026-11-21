@@ -96,7 +96,7 @@ natsumi の config（JSON）の項目と、それを書く penelope の配置の
 
 ### A2A
 
-- **頼む側**: natsumi の `a2a.agents` の相手ごとに、ホストを `sentinel.yaml` に登録し、サロゲートを `sandbox/surrogates.env` に、ホストのルート URL（例: `https://helper.agents.example.com/`）とサロゲートの環境変数を `connectors/agents.md` に書く。a2a-cli の `-a` にはそのルート URL をそのまま渡す。`a2a send` は Agent Card に書かれた呼び出し口へ送る。token は natsumi と同じく ServiceAccount の projected token にし、audience は相手が求めるもの（natsumi の配置が付けていたもの）にする（見本の README の「A2A」）。
+- **頼む側**: natsumi の `a2a.agents` の相手ごとに、ホストを `sentinel.yaml` に登録し、サロゲートを `sandbox/surrogates.env` に、`connectors/agents.md` の frontmatter の `a2a` に `name`・`label`・`url`（ホストのルート、例: `https://helper.agents.example.com/`）・`token`（サロゲートの環境変数名）を書く（[Pod の形](pod.md#a2a-の宛先)）。`job_start` で `ask-agent <name> '<依頼>'` を起こすと、送信と待機が同じ仕事で行われる。token は natsumi と同じく ServiceAccount の projected token にし、audience は相手が求めるもの（natsumi の配置が付けていたもの）にする（見本の README の「A2A」）。
 - **身元が変わる。** 新しい配置の ServiceAccount は `penelope` で、相手に見えるのは `system:serviceaccount:<名前空間>:penelope` になる。相手の allow-list にこれを足す。natsumi の ServiceAccount の名前のまま続けたいなら、overlay の patch で StatefulSet の `serviceAccountName` をその名前にする。
 - **受ける側**: natsumi の `inbox` は `PENELOPE_A2A_SENDERS`（送り手の ServiceAccount を `<名前空間>/<名前>` で）と `PENELOPE_A2A_AUTH` に替わる（[a2a.md](a2a.md)、[backend.md](backend.md)）。確かめ方は gated の assertion（`gatedSubject` の送り手、`inbox.gated` の `issuer`・`jwksUrl`）か TokenReview である。**natsumi の `tokenFile`（送り手と分け合う決まった token）の送り手は、penelope では受けられない。** その送り手は、自分の ServiceAccount の token で呼ぶか、gated を通して呼ぶ形に変える。
 - JSON-RPC の呼び出し口は natsumi と同じ `/a2a/`。Agent Card はホストのルートの `/.well-known/agent-card.json` で読める。名前は `PENELOPE_AGENT_NAME`、説明は `PENELOPE_A2A_DESCRIPTION` である。

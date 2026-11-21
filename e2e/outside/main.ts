@@ -21,7 +21,7 @@ import process from "node:process";
 
 import { cluster, GATED, KUBERNETES } from "./cluster.ts";
 import { serveDns, type Lookup } from "./dns.ts";
-import { chunks, completion, type ChatMessage, script } from "./model.ts";
+import { chunks, completion, E2E_PNG, type ChatMessage, script } from "./model.ts";
 import { SLACK, SLACK_FILES, SLACK_SOCKET, slack } from "./slack.ts";
 
 const env = (name: string) => {
@@ -43,6 +43,7 @@ const CLIENT_SECRET = secret("OUTSIDE_GITHUB_CLIENT_SECRET_FILE");
 const OWNER_ID = Number(env("OUTSIDE_OWNER_GITHUB_ID"));
 
 const MODEL = "model.example.com";
+const HELPER = "helper.example.com";
 const GITHUB = "github.com";
 const GITHUB_API = "api.github.com";
 const PLAIN = "plain.example.net";
@@ -50,7 +51,7 @@ const PLAIN = "plain.example.net";
 const APP = "a.apps.example.com";
 /** A browser's push service, which the backend posts the notices of the replies to itself. */
 const PUSH = "push.example.com";
-const NAMES = new Set([MODEL, GITHUB, GITHUB_API, PLAIN, KUBERNETES, GATED, APP, PUSH, "backend.example.com", SLACK, SLACK_SOCKET, SLACK_FILES]);
+const NAMES = new Set([MODEL, HELPER, GITHUB, GITHUB_API, PLAIN, KUBERNETES, GATED, APP, PUSH, "backend.example.com", SLACK, SLACK_SOCKET, SLACK_FILES]);
 const fakeSlack = slack({ app: secret("OUTSIDE_SLACK_APP_TOKEN_FILE"), bot: secret("OUTSIDE_SLACK_BOT_TOKEN_FILE") });
 const fakeCluster = cluster({
   backend: secret("OUTSIDE_KUBE_TOKEN_FILE"),
@@ -132,6 +133,35 @@ async function model(request: http.IncomingMessage, response: http.ServerRespons
   response.end();
 }
 
+let askedHelper = false;
+
+async function helper(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  if (request.method === "GET" && request.url === "/.well-known/agent-card.json") {
+    return json(response, 200, {
+      name: "E2E Helper", description: "Returns a diagram.", version: "1", skills: [], capabilities: {},
+      defaultInputModes: ["text/plain", "image/png"], defaultOutputModes: ["text/plain", "image/png"],
+      supportedInterfaces: [{ url: `https://${HELPER}/a2a/`, protocolBinding: "JSONRPC", protocolVersion: "1.0" }],
+    });
+  }
+  if (credentialOf(request, MODEL_KEY) !== "real") return json(response, 401, { error: "wrong credential" });
+  if (request.method !== "POST" || request.url !== "/a2a/") return json(response, 404, { error: "not found" });
+  const call = JSON.parse(await body(request));
+  const ok = (result: unknown) => json(response, 200, { jsonrpc: "2.0", id: call.id, result });
+  const task = { id: "e2e-helper-task", contextId: "e2e-helper-context" };
+  if (call.method === "SendMessage" && call.params.configuration?.returnImmediately === true &&
+      call.params.message?.parts?.some((part: { text?: string }) => part.text === "Describe this diagram") &&
+      call.params.message?.parts?.some((part: { raw?: string }) => part.raw === E2E_PNG)) {
+    askedHelper = true;
+    return ok({ task: { ...task, status: { state: "TASK_STATE_WORKING" } } });
+  }
+  if (call.method === "GetTask" && call.params.id === task.id && askedHelper) {
+    return ok({ ...task, status: { state: "TASK_STATE_COMPLETED" }, artifacts: [{
+      artifactId: "e2e-helper-artifact", parts: [{ text: "E2E-ASK-AGENT-DONE" }, { raw: E2E_PNG, mediaType: "image/png", filename: "../diagram.png" }],
+    }] });
+  }
+  return json(response, 400, { error: "unexpected helper request" });
+}
+
 const s256 = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
 
 async function github(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
@@ -175,6 +205,7 @@ function outside(scheme: "https" | "http") {
     });
     const handle = async () => {
       if (scheme === "https" && host === MODEL) return model(request, response);
+      if (scheme === "https" && host === HELPER) return helper(request, response);
       if (scheme === "https" && host === GITHUB) return github(request, response);
       if (scheme === "https" && host === GITHUB_API) return githubApi(request, response);
       if (scheme === "https" && host === KUBERNETES) return fakeCluster.tokenReview(request, await body(request), response);
