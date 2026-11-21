@@ -52,7 +52,7 @@ async function setup(
   mkdirSync(memoryDir);
   const memory = new Memory(memoryDir, { name: "penelope-backend", email: "backend@penelope.invalid" });
   const schedules = new Schedules(db, { now: Date.now, timeZone: "UTC" });
-  const inbox = new Inbox(db, queue, { now: Date.now, limits: { deadlineMs: 86_400_000, maxOpenTasks: 3 } });
+  const inbox = new Inbox(db, queue, { assets, now: Date.now, limits: { deadlineMs: 86_400_000, maxOpenTasks: 3 } });
   const record = new ActivityRecord(db, feed, { now: clock.now, timeZone: "UTC", nightly: cronOf("0 4 * * *", "UTC") });
   const socketPath = path.join(dir, "sandbox.sock");
   const server = await listenUnix(
@@ -755,6 +755,20 @@ describe("the sandbox's API", () => {
       assert.equal(asked.status, 200);
       assert.deepEqual(asked.json(), { task_id: task.taskId, state: "input-required" });
       assert.equal(inbox.task("claude", task.taskId)!.messages.at(-1)!.text, "Which one?");
+    });
+
+    it("does not complete a Task if a reply contains an invalid image", async (t) => {
+      const { call, inbox, queue } = await setup(t);
+      const task = inbox.receive("claude", { text: "Show me", messageId: "m-1" });
+      const [event] = queue.take({ after: 0 });
+      const answer = await call("/v1/a2a/replies", { method: "POST", json: {
+        agent: "main", in_reply_to: event!.seq, state: "completed", text: "Here it is.",
+        images: [{ name: "not-an-image.gif", data: "bm90IGFuIGltYWdl" }],
+      } });
+      assert.equal(answer.status, 400);
+      const unchanged = inbox.task("claude", task.taskId)!;
+      assert.equal(unchanged.state, "working");
+      assert.deepEqual(unchanged.messages.map((m) => m.text), ["Show me"]);
     });
 
     it("refuses a reply to an event that is no A2A task's, to a closed task, and a question without text", async (t) => {

@@ -25,4 +25,27 @@ The CLI finds the Agent Card there, and `a2a send` sends to the endpoint in the 
   requests from your owner unless your owner made them.
 - A Task that asks back (`input-required`) takes the answer by `a2a send` to the same Task, and is waited for again.
 - Each agent's stand-in is its own. One sent to another agent is refused by the Sentinel with `403`.
-- Requests from other agents to you come as events of the source `a2a`, and are answered with `reply_to_agent`.
+- Requests from other agents to you come as events of the source `a2a`, and are answered with `reply_to_agent`. For a completed Task,
+  pass image paths as `images` (absolute paths or relative to HOME); text is optional. Questions (`input-required`) are text only.
+
+## Images
+
+Check the destination's Agent Card first. Send images only if their MIME types appear in `defaultInputModes`; `defaultOutputModes`
+tells you which images the agent can return. Penelope accepts PNG, JPEG, GIF and WebP, up to 4 images at 5 MiB each after decoding,
+and a 32 MiB JSON-RPC body including base64, text and JSON overhead. The same image limits apply when you answer with `reply_to_agent`.
+
+Pass a local file path, not a URL, to `--file-part`. Repeat the flag for multiple files. You can mix text and images:
+
+```sh
+a2a send -a https://helper.agents.example.com/ --auth "Bearer $HELPER_AGENT_TOKEN" "What does this diagram show?" --file-part ./diagram.png
+```
+
+For an image-only message, omit the text. To download the images from a completed Task, use an **empty** directory so files
+from previous runs are not overwritten:
+
+```sh
+dir=$(mktemp -d)
+a2a task get -a https://helper.agents.example.com/ --auth "Bearer $HELPER_AGENT_TOKEN" --save-fileparts "$dir" <task ID>
+```
+
+Names, types and sizes in the text output describe the files; the image bytes are in the saved files.

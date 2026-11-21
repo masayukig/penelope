@@ -6,8 +6,10 @@ import type { DatabaseSync } from "node:sqlite";
 
 import type { A2APayload, A2AReplyRequest, A2AReplyResponse, A2ATaskState } from "@penelope/contract";
 
+import type { Assets, CheckedImage, StoredImage } from "../assets.ts";
 import { transaction } from "../db.ts";
 import type { Queue } from "../queue.ts";
+import { type Attachment, uniqueFileName } from "../sources.ts";
 import { iso } from "../time.ts";
 
 /** One message's text at most, in UTF-8. */
@@ -22,7 +24,11 @@ export type InboxLimits = {
   maxOpenTasks: number;
 };
 
-export type TaskMessage = { role: "sender" | "agent"; messageId: string; text: string; atMs: number };
+type IncomingMessage = { text: string; messageId: string; contextId?: string; taskId?: string; attachments?: readonly Attachment[] };
+type ImageRef = { filename: string; mediaType: string; file: string };
+type ResponseImage = Omit<ImageRef, "file"> & { bytes: Buffer };
+
+export type TaskMessage = { role: "sender" | "agent"; messageId: string; text: string; atMs: number; hasImages: boolean };
 
 /** A task as the sender is shown it. */
 export type TaskView = {
@@ -33,18 +39,19 @@ export type TaskView = {
   /** Why it failed or was rejected. */
   reason?: string;
   messages: TaskMessage[];
+  responseImages: ResponseImage[];
   updatedMs: number;
 };
 
 /**
  * Why a message or a reply was not taken:
- * - `empty`, `too-large`: the sender's text is empty, or over 1 MiB.
+ * - `empty`, `too-large`: no text or images, or the text is over 1 MiB.
  * - `unknown-context`: a context not given to this sender, or not the task's.
  * - `not-found`: the task is not the sender's, or not there.
  * - `not-waiting`: the task is open and not asking; anything more is a new task.
  * - `closed`: the task is closed.
  * - `no-such-event`: her reply names no event of a task.
- * - `needs-text`: her question has no text.
+ * - `needs-text`: her question has no text or carries images.
  */
 export class InboxRefusal extends Error {
   readonly kind: "empty" | "too-large" | "unknown-context" | "not-found" | "not-waiting" | "closed" | "no-such-event" | "needs-text";
@@ -63,17 +70,19 @@ type TaskRow = {
   reason: string | null;
   updated_ms: number;
 };
-type MessageRow = { role: "sender" | "agent"; message_id: string; text: string; at_ms: number };
+type MessageRow = { role: "sender" | "agent"; message_id: string; text: string; at_ms: number; has_images: number };
 
 export class Inbox {
   private readonly db: DatabaseSync;
   private readonly queue: Queue;
+  private readonly assets: Assets;
   private readonly now: () => number;
   private readonly limits: InboxLimits;
 
-  constructor(db: DatabaseSync, queue: Queue, options: { now: () => number; limits: InboxLimits }) {
+  constructor(db: DatabaseSync, queue: Queue, options: { assets: Assets; now: () => number; limits: InboxLimits }) {
     this.db = db;
     this.queue = queue;
+    this.assets = options.assets;
     this.now = options.now;
     this.limits = options.limits;
   }
@@ -84,8 +93,8 @@ export class Inbox {
    * all: when the event cannot be written to /sources, this throws and the
    * sender sends again.
    */
-  receive(sender: string, message: { text: string; messageId: string; contextId?: string; taskId?: string }): TaskView {
-    if (message.text.trim() === "") throw new InboxRefusal("empty", "the message has no text");
+  receive(sender: string, message: IncomingMessage): TaskView {
+    if (message.text.trim() === "" && !message.attachments?.length) throw new InboxRefusal("empty", "the message has no text or images");
     if (Buffer.byteLength(message.text) > MAX_TEXT_BYTES) throw new InboxRefusal("too-large", `the text is over ${MAX_TEXT_BYTES} bytes`);
     return transaction(this.db, () => {
       const now = this.now();
@@ -111,26 +120,47 @@ export class Inbox {
    * Her reply in the task of the event `in_reply_to`: `completed` closes it,
    * the text optional; `input-required` asks the sender the text.
    */
-  reply(reply: Omit<A2AReplyRequest, "agent">): A2AReplyResponse {
+  reply(reply: Omit<A2AReplyRequest, "agent" | "images">, images: readonly CheckedImage[] = []): A2AReplyResponse {
     const text = reply.text?.trim() ? reply.text : undefined;
-    if (reply.state === "input-required" && text === undefined) throw new InboxRefusal("needs-text", "a question needs its text");
-    return transaction(this.db, () => {
-      const now = this.now();
-      this.expire(now);
-      const found = this.db
-        .prepare("SELECT t.task_id, t.sender, t.context_id, t.state, t.reason, t.updated_ms FROM a2a_messages m JOIN a2a_tasks t USING (task_id) WHERE m.seq = ?")
-        .get(reply.in_reply_to) as TaskRow | undefined;
-      if (!found) throw new InboxRefusal("no-such-event", `the event ${reply.in_reply_to} is not a message of an A2A task`);
-      if (found.state !== "working" && found.state !== "input-required") {
-        throw new InboxRefusal("closed", `the task is ${found.state}${found.reason ? `: ${found.reason}` : ""}`);
-      }
-      if (text !== undefined) this.insertMessage(found.task_id, { role: "agent", message_id: randomUUID(), text, at_ms: now }, null);
-      this.db.prepare("UPDATE a2a_tasks SET state = ?, updated_ms = ? WHERE task_id = ?").run(reply.state, now, found.task_id);
-      return { task_id: found.task_id, state: reply.state };
-    });
+    if (reply.state === "input-required" && (text === undefined || images.length > 0)) {
+      throw new InboxRefusal("needs-text", "a question needs its text and cannot carry images");
+    }
+    let stored: StoredImage[] = [];
+    try {
+      return transaction(this.db, () => {
+        const now = this.now();
+        this.expire(now);
+        const found = this.db
+          .prepare("SELECT t.task_id, t.sender, t.context_id, t.state, t.reason, t.updated_ms FROM a2a_messages m JOIN a2a_tasks t USING (task_id) WHERE m.seq = ?")
+          .get(reply.in_reply_to) as TaskRow | undefined;
+        if (!found) throw new InboxRefusal("no-such-event", `the event ${reply.in_reply_to} is not a message of an A2A task`);
+        if (found.state !== "working" && found.state !== "input-required") {
+          throw new InboxRefusal("closed", `the task is ${found.state}${found.reason ? `: ${found.reason}` : ""}`);
+        }
+
+        // Write the copies before recording any reference to them. They do
+        // not have UI asset rows: only the sender's Task can reach them.
+        if (images.length > 0) stored = this.assets.write(images);
+        const names = new Set<string>();
+        const refs: ImageRef[] = stored.map((image) => ({
+          file: image.file,
+          filename: uniqueFileName(image.name, names),
+          mediaType: image.mime_type,
+        }));
+        if (text !== undefined || refs.length > 0) {
+          this.insertMessage(found.task_id, { role: "agent", message_id: randomUUID(), text: text ?? "", at_ms: now, has_images: Number(refs.length > 0) }, null);
+        }
+        this.db.prepare("UPDATE a2a_tasks SET state = ?, updated_ms = ?, response_images = ? WHERE task_id = ?")
+          .run(reply.state, now, refs.length ? JSON.stringify(refs) : null, found.task_id);
+        return { task_id: found.task_id, state: reply.state };
+      });
+    } catch (error) {
+      this.assets.discard(stored);
+      throw error;
+    }
   }
 
-  private open(sender: string, message: { text: string; messageId: string; contextId?: string }, now: number): TaskView {
+  private open(sender: string, message: IncomingMessage, now: number): TaskView {
     let contextId: string = randomUUID();
     if (message.contextId) {
       const known = this.db.prepare("SELECT 1 FROM a2a_tasks WHERE sender = ? AND context_id = ? LIMIT 1").get(sender, message.contextId);
@@ -144,29 +174,28 @@ export class Inbox {
     this.db
       .prepare("INSERT INTO a2a_tasks (task_id, sender, context_id, state, reason, created_ms, received_ms, updated_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
       .run(taskId, sender, contextId, rejected ? "rejected" : "working", reason, now, now, now);
-    const row = { role: "sender" as const, message_id: message.messageId, text: message.text, at_ms: now };
     // A rejected request is kept for the sender to read, and never reaches her.
-    if (rejected) this.insertMessage(taskId, row, null);
-    else this.insertMessage(taskId, row, this.event(sender, { kind: "request", task_id: taskId, context_id: contextId, message_id: message.messageId, text: message.text }, now));
+    const seq = rejected ? null : this.event(sender, { kind: "request", task_id: taskId, context_id: contextId, message_id: message.messageId, text: message.text }, now, message.attachments);
+    this.insertMessage(taskId, senderMessage(message, now), seq);
     return this.view(this.row(taskId)!);
   }
 
-  private answer(sender: string, taskId: string, message: { text: string; messageId: string; contextId?: string }, now: number): TaskView {
+  private answer(sender: string, taskId: string, message: IncomingMessage, now: number): TaskView {
     const row = this.row(taskId);
     if (!row || row.sender !== sender) throw new InboxRefusal("not-found", "no such task");
     if (message.contextId && message.contextId !== row.context_id) throw new InboxRefusal("unknown-context", "the context is not the task's");
     if (row.state === "working") throw new InboxRefusal("not-waiting", "the task is not waiting for an answer; send anything more as a new task");
     if (row.state !== "input-required") throw new InboxRefusal("closed", `the task is ${row.state}`);
     this.db.prepare("UPDATE a2a_tasks SET state = 'working', received_ms = ?, updated_ms = ? WHERE task_id = ?").run(now, now, taskId);
-    const seq = this.event(sender, { kind: "answer", task_id: taskId, context_id: row.context_id, message_id: message.messageId, text: message.text }, now);
-    this.insertMessage(taskId, { role: "sender", message_id: message.messageId, text: message.text, at_ms: now }, seq);
+    const seq = this.event(sender, { kind: "answer", task_id: taskId, context_id: row.context_id, message_id: message.messageId, text: message.text }, now, message.attachments);
+    this.insertMessage(taskId, senderMessage(message, now), seq);
     return this.view(this.row(taskId)!);
   }
 
   /** The `a2a` event of a sender's message, written to /sources; its seq. Throws when it cannot be written. */
-  private event(sender: string, payload: A2APayload, now: number): number {
+  private event(sender: string, payload: A2APayload, now: number, attachments: readonly Attachment[] = []): number {
     const messages = (this.db.prepare("SELECT COUNT(*) AS n FROM a2a_messages WHERE task_id = ?").get(payload.task_id) as { n: number }).n;
-    const first = payload.text.split("\n", 1)[0]!.trim();
+    const first = payload.text.trim().split("\n", 1)[0]!.trim() || "Images attached";
     const { seq } = this.queue.accept(
       {
         source: "a2a",
@@ -176,7 +205,7 @@ export class Inbox {
         summary: first.length > SUMMARY_LENGTH ? `${first.slice(0, SUMMARY_LENGTH)}…` : first,
         payload,
       },
-      { builtin: true },
+      { builtin: true, attachments },
     );
     return seq;
   }
@@ -191,8 +220,8 @@ export class Inbox {
 
   private insertMessage(taskId: string, message: MessageRow, seq: number | null): void {
     this.db
-      .prepare("INSERT INTO a2a_messages (task_id, role, message_id, text, at_ms, seq) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(taskId, message.role, message.message_id, message.text, message.at_ms, seq);
+      .prepare("INSERT INTO a2a_messages (task_id, role, message_id, text, at_ms, seq, has_images) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(taskId, message.role, message.message_id, message.text, message.at_ms, seq, message.has_images);
   }
 
   private row(taskId: string): TaskRow | undefined {
@@ -200,15 +229,33 @@ export class Inbox {
   }
 
   private view(row: TaskRow): TaskView {
-    const messages = this.db.prepare("SELECT role, message_id, text, at_ms FROM a2a_messages WHERE task_id = ? ORDER BY row").all(row.task_id) as MessageRow[];
+    const messages = this.db.prepare("SELECT role, message_id, text, at_ms, has_images FROM a2a_messages WHERE task_id = ? ORDER BY row").all(row.task_id) as MessageRow[];
+    const stored = row.state === "completed"
+      ? this.db.prepare("SELECT response_images FROM a2a_tasks WHERE task_id = ?").get(row.task_id) as { response_images: string | null }
+      : undefined;
     return {
       taskId: row.task_id,
       sender: row.sender,
       contextId: row.context_id,
       state: row.state,
       ...(row.reason === null ? {} : { reason: row.reason }),
-      messages: messages.map((m) => ({ role: m.role, messageId: m.message_id, text: m.text, atMs: m.at_ms })),
+      messages: messages.map((m) => ({ role: m.role, messageId: m.message_id, text: m.text, atMs: m.at_ms, hasImages: m.has_images === 1 })),
+      responseImages: this.readImages(stored?.response_images),
       updatedMs: row.updated_ms,
     };
   }
+
+  private readImages(value: string | null | undefined): ResponseImage[] {
+    if (!value) return [];
+    try {
+      const refs = JSON.parse(value) as ImageRef[];
+      return refs.map(({ file, filename, mediaType }) => ({ filename, mediaType, bytes: this.assets.read(file) }));
+    } catch (cause) {
+      throw new Error("the task's artifact images could not be read", { cause });
+    }
+  }
+}
+
+function senderMessage(message: IncomingMessage, now: number): MessageRow {
+  return { role: "sender", message_id: message.messageId, text: message.text, at_ms: now, has_images: Number(Boolean(message.attachments?.length)) };
 }

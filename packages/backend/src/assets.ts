@@ -1,11 +1,8 @@
-// What the agents made, copied by the backend (ADR-0032), and the images the
-// owner sent (ADR-0034): for now only images, each tied to its line of the
-// history. A copy is a file under its own directory, apart from /sources and
-// /memory, and a row of `assets` with its kind, type, size, time, who made it
-// and the line it came with, so that a list of all of them can be made later.
-// A copy never changes and is never removed.
+// Backend copies of images for the conversation (ADR-0032, ADR-0034) and
+// A2A Task artifacts (ADR-0047). Files are immutable and live apart from
+// /sources and /memory. Only conversation copies have UI asset rows.
 import { randomUUID } from "node:crypto";
-import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
@@ -28,7 +25,7 @@ export class AssetStoreError extends Error {}
 
 const NAME_MAX = 255;
 /** Base64 with its padding; the length is checked apart, a multiple of four. */
-const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}(?![\s\S])/;
 const EXTENSIONS: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
 
 /**
@@ -37,10 +34,10 @@ const EXTENSIONS: Record<string, string> = { "image/png": "png", "image/jpeg": "
  * GIF or WebP bytes of at most REPLY_IMAGE_MAX_BYTES. Throws ImageRefusal,
  * naming what is wrong, at the first one that is not.
  */
-export function checkImages(value: unknown): CheckedImage[] {
+export function checkImages(value: unknown, maxImages = REPLY_IMAGES_MAX, maxBytes = REPLY_IMAGE_MAX_BYTES): CheckedImage[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new ImageRefusal("images must be a list of {name, data}");
-  if (value.length > REPLY_IMAGES_MAX) throw new ImageRefusal(`a reply carries at most ${REPLY_IMAGES_MAX} images, not ${value.length}`);
+  if (value.length > maxImages) throw new ImageRefusal(`a reply carries at most ${maxImages} images, not ${value.length}`);
   return value.map((item: unknown, index) => {
     const which = `image ${index + 1}`;
     if (typeof item !== "object" || item === null) throw new ImageRefusal(`${which} must be {name, data}`);
@@ -51,8 +48,8 @@ export function checkImages(value: unknown): CheckedImage[] {
     const called = `${which} (${name})`;
     if (typeof data !== "string" || data.length % 4 !== 0) throw new ImageRefusal(`${called}: data must be the file's bytes in base64`);
     // Checked before it is decoded: base64 is four characters for three bytes.
-    if ((data.length / 4) * 3 - padding(data) > REPLY_IMAGE_MAX_BYTES) {
-      throw new ImageRefusal(`${called} is over the ${REPLY_IMAGE_MAX_BYTES} bytes an image may have`);
+    if ((data.length / 4) * 3 - padding(data) > maxBytes) {
+      throw new ImageRefusal(`${called} is over the ${maxBytes} bytes an image may have`);
     }
     if (!BASE64.test(data)) throw new ImageRefusal(`${called}: data must be the file's bytes in base64`);
     const bytes = new Uint8Array(Buffer.from(data, "base64"));
@@ -143,6 +140,11 @@ export class Assets {
     );
     const at = iso(this.now());
     stored.forEach((image, position) => insert.run(image.id, image.mime_type, image.size, image.name, image.file, agent ?? null, at, messageId, position));
+  }
+
+  /** Reads a stored file by its backend-generated basename, not by a sandbox path or a UI ID. */
+  read(file: string): Buffer {
+    return readFileSync(path.join(this.dir, file));
   }
 
   /** Removes the files of copies that were not recorded. */

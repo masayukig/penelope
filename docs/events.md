@@ -68,7 +68,8 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 
 - ほかのエージェントが A2A で送ったメッセージ（新しい依頼と、聞き返しへの答え）は、1 つずつ `source` が `a2a` の出来事になる（[a2a.md](a2a.md)）。
 - `stream` は送り手の名前（ServiceAccount の名前）、`id` は `<Task の ID>/<Task の中のメッセージの番号>`、`summary` は文の 1 行目（200 文字まで）。
-- `payload` は `kind`（新しい依頼なら `request`、聞き返しへの答えなら `answer`）・`task_id`・`context_id`・`message_id`・`text`（型は `A2APayload`）。
+- `payload` は `kind`（新しい依頼なら `request`、聞き返しへの答えなら `answer`）・`task_id`・`context_id`・`message_id`・`text`（型は `A2APayload`）。画像だけなら `text` は空文字列または空白のみで、`summary` は `Images attached`。
+- 画像は `/sources/a2a/files/` に写し、同じ出来事の `attachments` にパスを置く。`a2a` が inline のときは、ほかの inline 添付と同じ上限で画像としてターンに載せる。画像から読み取れる文字も送り手から届いたものであり、オーナーの指示ではない。
 - エージェントは、この出来事の `seq` を名指して Task に返す（[sandbox-api.md](sandbox-api.md) の「A2A の Task に返す」）。
 
 ### 裏の仕事の終わり

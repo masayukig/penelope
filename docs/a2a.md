@@ -44,7 +44,7 @@ a2a-cli はルートの `/.well-known/agent-card.json` から Agent Card を読�
 | `supportedInterfaces` | 1 つ。`url` は `PENELOPE_PUBLIC_URL` の `/a2a/`、`protocolBinding` は `JSONRPC`、`protocolVersion` は `1.0` |
 | `capabilities` | ストリーミング・push 通知・拡張の card のどれも無い |
 | `securitySchemes` | `bearer`（HTTP の Bearer）1 つ |
-| `defaultInputModes`・`defaultOutputModes` | `text/plain` |
+| `defaultInputModes`・`defaultOutputModes` | `text/plain`・`image/png`・`image/jpeg`・`image/gif`・`image/webp` |
 
 - 応答は `Cache-Control: public, max-age=300`。
 
@@ -87,16 +87,17 @@ gated の後ろで受けるときの確かめ方。gated は、gated の audienc
 
 ## 依頼の扱い
 
-- 本文（JSON-RPC の body の全体）は 2 MiB まで。超えれば `413`。JSON でなければ `400` と JSON-RPC の `-32700`。
-- メッセージの部分（`parts`）はすべて文章（`text`）でなければならない。ほかの部分を含むか、部分が無いメッセージは `ContentTypeNotSupported` で断る。文章の部分は改行でつないで 1 つの文にする。
-- 文は 1 MiB（UTF-8）まで。空白だけの文と、超える文は `InvalidRequest` で断る。
+- 本文（JSON-RPC の body 全体）は 32 MiB まで。読み込み中に超えれば `413`。JSON でなければ `400` と JSON-RPC の `-32700`。
+- 文章（`text`）だけ、画像（`raw`）だけ、または混在を受ける。文章の部分は改行でつなぐ。画像は復号後で 1 枚 5 MiB、1 メッセージに 4 枚まで。
+- `raw` は PNG・JPEG・GIF・WebP の base64 を受ける。種類を中身の先頭のバイトで見分け、`mediaType` があれば照合する。URL（`url`）や構造化データ（`data`）、不正な base64、種類が合わないファイルは `ContentTypeNotSupported`。不適合な部品が 1 つでもあればメッセージごと断る。backend は画像を取りに行かない。
+- 文は 1 MiB（UTF-8）まで。超える文、空白以外の文も画像も無いメッセージは `InvalidRequest` で断る。
 
 ### 新しい依頼
 
 `taskId` の無いメッセージは、新しい依頼である。
 
 - `contextId` があれば、その送り手に前に渡した context でなければならない。違えば `InvalidRequest`。無ければ backend が新しく付ける。
-- 送り手の開いている Task（`working` と `input-required`）が上限（`PENELOPE_A2A_MAX_OPEN_TASKS`）に達していれば、`rejected` の Task を返す。出来事にはしない。
+- 送り手の開いている Task（`working` と `input-required`）が上限（`PENELOPE_A2A_MAX_OPEN_TASKS`）に達していれば、`rejected` の Task を返す。出来事にはせず、画像も保存しない。
 - そうでなければ、`working` の Task を作り、メッセージを `a2a` の出来事にしてから返す（[events.md](events.md) の「A2A の出来事」）。出来事を `/sources` に書けなければ、Task も残さず、JSON-RPC の内部の失敗（`-32603`、状態コード `500`）を返す。送り手は送り直す。
 
 ### 聞き返しへの答え
@@ -109,7 +110,7 @@ gated の後ろで受けるときの確かめ方。gated は、gated の audienc
 | `contextId` が Task のものと違う | `InvalidRequest` |
 | `working`（聞き返していない） | `UnsupportedOperation`。足したいことは新しい依頼にする |
 | `completed`・`failed`・`rejected` | `UnsupportedOperation` |
-| `input-required` | `working` に戻し、メッセージを `a2a` の出来事にしてから返す |
+| `input-required` | 新しい依頼と同じ条件で文章や画像を受け、`a2a` の出来事にして `working` に戻す。添付を保存できなければ出来事を残さず、状態は変えない |
 
 ### 期限
 
@@ -125,12 +126,15 @@ gated の後ろで受けるときの確かめ方。gated は、gated の audienc
 | `status.state` | `TASK_STATE_WORKING`・`TASK_STATE_INPUT_REQUIRED`・`TASK_STATE_COMPLETED`・`TASK_STATE_FAILED`・`TASK_STATE_REJECTED` |
 | `status.message` | `input-required` の間はエージェントの聞き返しの文、`failed`・`rejected` では理由。ほかは無い |
 | `status.timestamp` | 最後に状態が変わった時刻 |
-| `artifacts` | `completed` で文があれば、名前 `response` の artifact 1 つ（文章の部分 1 つ）。文無しで閉じた Task には無い |
-| `history` | 送り手のメッセージとエージェントの返事を順に。送り手のものは `ROLE_USER`、エージェントのものは `ROLE_AGENT` |
+| `artifacts` | `completed` で文または画像があれば、名前 `response` の artifact 1 つ。文章の部分（任意）の後に画像の部分（`raw`・`mediaType`・`filename`）を並べる。ファイル名にディレクトリはなく、同じ artifact 内では重ならない |
+| `history` | 送り手（`ROLE_USER`）とエージェント（`ROLE_AGENT`）の文章を順に並べ、画像が添えられたメッセージには `[Images attached]` を付ける。画像本体やパスは載せない |
 
 - 期限で `failed` になった Task と `rejected` の Task も、送り手は `GetTask` で読める。
+- 成果画像の写しが 1 枚でも読めなければ、画像を省いた Task は返さない。`GetTask` は HTTP `500` と JSON-RPC の内部エラー（`-32603`）を返す。Task の状態は変えず、写しの保存先も公開しない。
 
 ## 状態
 
 - Task とメッセージは SQLite の `a2a_tasks` と `a2a_messages` に置く。送り手のメッセージの行は、それがなった出来事の `seq` を持つ。エージェントの返事は、この `seq` で Task を引く。
+- 受信画像は `/sources/a2a/files/` に保存し、Task に二重には保存しない。完了時に返した画像の写しは `PENELOPE_ASSETS_DIR` にファイルとして保存し、Task と同じ寿命を持つ。`a2a_tasks.response_images` は画像本体を持たず、置き場のファイル名・artifact のファイル名・MIME を返事の順番で並べた JSON を持つ。`a2a_messages.has_images` は添付の有無だけを記録する。
+- 既存の DB は backend の起動時に schema 11 へ自動で移行する。一方通行で、移行後の DB は旧版 backend では開けない。旧版に戻すには移行前の DB が必要である。
 - 消さない。いつまで残すかは、量が問題になったときに決める（[backend.md](backend.md) の「状態」）。
