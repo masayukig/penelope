@@ -1,5 +1,5 @@
-// The A2A way in (ADR-0018, docs/a2a.md), under /a2a/ of the TCP listener:
-// the Agent Card without a token, and SendMessage and GetTask over JSON-RPC,
+// The A2A way in (ADR-0018, docs/a2a.md): the Agent Card without a token,
+// and SendMessage and GetTask over JSON-RPC under /a2a/ of the TCP listener,
 // in the version and the SDK the senders speak (A2A 1.0). Who calls is the
 // sender checks' to say; what is asked is the inbox's to keep. This only
 // writes the tasks in A2A's shape.
@@ -16,7 +16,7 @@ import { InboxRefusal, type Inbox, type TaskMessage, type TaskView } from "./inb
 import { whoIs, type SenderCheck, type Senders } from "./senders.ts";
 
 export const A2A_PATH = "/a2a";
-export const CARD_PATH = `${A2A_PATH}/.well-known/agent-card.json`;
+const CARD_PATH = "/.well-known/agent-card.json";
 /** A call's body at most: room for 1 MiB of text however JSON writes it. The inbox holds the text to 1 MiB. */
 export const MAX_A2A_BODY_BYTES = 2 * 1024 * 1024;
 const VERSION_HEADER = "a2a-version";
@@ -34,7 +34,7 @@ export type A2AOptions = {
 };
 
 /** Whether a path is the way in's. */
-export const isA2APath = (pathname: string) => pathname === A2A_PATH || pathname.startsWith(`${A2A_PATH}/`);
+export const isA2APath = (pathname: string) => pathname === CARD_PATH || pathname === A2A_PATH || pathname.startsWith(`${A2A_PATH}/`);
 
 export function a2aHandler(options: A2AOptions): Handler {
   const { inbox, checks, senders } = options;

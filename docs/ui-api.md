@@ -23,8 +23,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 - 戻る先は `/` に決めてあり、要求の中身では変わらない。
 - `GET /healthz` は認証なしで `200` を返す（配置の確かめのため）。
 - `GET /api/agent` と `GET /api/agent/icons/<表情>` は認証なしで読める（「エージェント」）。ログインの画面とホーム画面のアイコンが、ログインの前にエージェントの名前とアイコンを出すためである。この 2 つにはそれ以外のものを載せない。
-- `/a2a` と `/a2a/` の下は A2A の受け口で、ログインを使わず、受け口が自分で送り手を確かめる（[a2a.md](a2a.md)）。受け口が閉じていれば `404` で、Web UI のページにはならない。
-- `/api/`・`/auth/`・`/a2a/` のほかの道は、Web UI の静的ファイルを配る場所である（「Web UI の配り方」）。
+- `/.well-known/agent-card.json`、`/a2a`、`/a2a/` の下は A2A の道で、オーナーのログインは使わない。JSON-RPC の呼び出しは受け口が送り手を確かめる（[a2a.md](a2a.md)）。受け口が閉じていれば `404` で、Web UI のページにはならない。
 
 ## 口の一覧
 
@@ -154,7 +153,7 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 
 ## Web UI の配り方
 
-- `/api/`・`/auth/`・`/a2a/` のほかの道では、backend が `PENELOPE_WEB_DIR` にある Web UI の build（`packages/web` の `dist/`）を配る。`/` は `index.html` である。無いファイルは `404`。
+- API・ログイン・ヘルスチェック・A2A の道以外では、backend が `PENELOPE_WEB_DIR` にある Web UI の build（`packages/web` の `dist/`）を配る。`/` は `index.html` である。無いファイルは `404`。
 - `/manifest.webmanifest` は backend がその場で作る。名前はエージェントの名前、アイコンはアバターの `neutral` の画像（無ければ build の `icon.svg`）である。ホーム画面に置いて開くため（PWA）。
 - `assets/` の下のファイルは中身で名前が決まるので、長く cache させる。ほかは毎回確かめさせる。
 

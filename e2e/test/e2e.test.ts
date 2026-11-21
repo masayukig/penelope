@@ -726,7 +726,7 @@ describe("the Pod end to end", () => {
     const message = (id: string, text: string, more: Record<string, string> = {}) => ({ message: { messageId: id, role: "ROLE_USER", parts: [{ text }], ...more } });
 
     // The card, without a token: who she is and where to call.
-    const card = JSON.parse(fromOutside("GET", new URL("/a2a/.well-known/agent-card.json", pod.url).href).text) as {
+    const card = JSON.parse(fromOutside("GET", new URL("/.well-known/agent-card.json", pod.url).href).text) as {
       name: string;
       description: string;
       supportedInterfaces: { url: string }[];

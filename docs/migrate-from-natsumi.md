@@ -96,10 +96,10 @@ natsumi の config（JSON）の項目と、それを書く penelope の配置の
 
 ### A2A
 
-- **頼む側**: natsumi の `a2a.agents` の相手ごとに、ホストを `sentinel.yaml` に登録し、サロゲートを `sandbox/surrogates.env` に、URL とサロゲートの環境変数を `connectors/agents.md` に書く。token は natsumi と同じく ServiceAccount の projected token にし、audience は相手が求めるもの（natsumi の配置が付けていたもの）にする（見本の README の「A2A」）。
+- **頼む側**: natsumi の `a2a.agents` の相手ごとに、ホストを `sentinel.yaml` に登録し、サロゲートを `sandbox/surrogates.env` に、ホストのルート URL（例: `https://helper.agents.example.com/`）とサロゲートの環境変数を `connectors/agents.md` に書く。a2a-cli の `-a` にはそのルート URL をそのまま渡す。`a2a send` は Agent Card に書かれた呼び出し口へ送る。token は natsumi と同じく ServiceAccount の projected token にし、audience は相手が求めるもの（natsumi の配置が付けていたもの）にする（見本の README の「A2A」）。
 - **身元が変わる。** 新しい配置の ServiceAccount は `penelope` で、相手に見えるのは `system:serviceaccount:<名前空間>:penelope` になる。相手の allow-list にこれを足す。natsumi の ServiceAccount の名前のまま続けたいなら、overlay の patch で StatefulSet の `serviceAccountName` をその名前にする。
 - **受ける側**: natsumi の `inbox` は `PENELOPE_A2A_SENDERS`（送り手の ServiceAccount を `<名前空間>/<名前>` で）と `PENELOPE_A2A_AUTH` に替わる（[a2a.md](a2a.md)、[backend.md](backend.md)）。確かめ方は gated の assertion（`gatedSubject` の送り手、`inbox.gated` の `issuer`・`jwksUrl`）か TokenReview である。**natsumi の `tokenFile`（送り手と分け合う決まった token）の送り手は、penelope では受けられない。** その送り手は、自分の ServiceAccount の token で呼ぶか、gated を通して呼ぶ形に変える。
-- 受け口の道は natsumi と同じ `/a2a/` で、Agent Card の名前は `PENELOPE_AGENT_NAME`、説明は `PENELOPE_A2A_DESCRIPTION` である。
+- JSON-RPC の呼び出し口は natsumi と同じ `/a2a/`。Agent Card はホストのルートの `/.well-known/agent-card.json` で読める。名前は `PENELOPE_AGENT_NAME`、説明は `PENELOPE_A2A_DESCRIPTION` である。
 - natsumi の返事の push の受け口（`a2a.pushUrl`）は無い。エージェントは Task を裏の仕事で待つ（image の skill `a2a`）。
 
 ### sd-webui
@@ -292,7 +292,7 @@ kubectl -n $ns exec -i penelope-0 -c sandbox -- \
 2. アバター: `kubectl -n $ns exec penelope-0 -c sandbox -- avatar check` が誤りを出さない。Web UI に名前と表情のアイコンが出る。
 3. 予約: sandbox で `curl -s -H "Authorization: Bearer $PENELOPE_BACKEND_TOKEN" "$PENELOPE_BACKEND_URL/v1/schedules?agent=main" | jq '.schedules | length'` が 8 の `after` と同じ。Web UI の予約の一覧でも数を見る。
 4. Slack: bot を招いたチャンネルで bot にメンションすると出来事として届き、エージェントが `slackctl post` で返せる。
-5. A2A: `curl -s https://<公開のホスト>/a2a/.well-known/agent-card.json | jq -r .name` が名前である（受け口を開いたとき）。エージェントから相手に頼め、Sentinel の記録に相手のホストが出る。
+5. A2A: `curl -s https://<公開のホスト>/.well-known/agent-card.json | jq -r .name` が名前である（受け口を開いたとき）。エージェントから相手に頼め、Sentinel の記録に相手のホストが出る。
 6. 絵: 自分の絵を頼むと、返事に画像が添えられる。Sentinel の記録に sd-webui のホストが出る。
 7. Web Push: Web UI で知らせを許し、返事が届く（iPhone はホーム画面に置いた Web UI）。
 8. backup: `components/backup/` を使うなら、手で 1 回動かして成功する（見本の README の「backup」）。

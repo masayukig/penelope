@@ -66,7 +66,7 @@ export type UiOptions = {
   maxBytes?: number;
   /** The Web UI's files, served for everything else. Until it is built, nothing is. */
   web?: Handler;
-  /** The A2A way in, under /a2a/, which checks its senders itself. Without it, /a2a/ is not found. */
+  /** The A2A routes, including root discovery. Without this handler, those routes return 404. */
   a2a?: Handler;
   /** Web Push: the VAPID public key the browsers subscribe with, and where their subscriptions are kept. Without it, there is none. */
   push?: { publicKey: string; subscriptions: PushSubscriptions };

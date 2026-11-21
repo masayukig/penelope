@@ -37,7 +37,7 @@ ADR-0010 は、A2A の送り手を ServiceAccount の token で確かめ、backe
 
 ### 受け口は backend の外向きの待ち受けに置き、A2A 1.0 で受ける
 
-- 受け口は、UI 向けの API と同じ待ち受けの `/a2a/` の下に置く。Agent Card も、その下に token なしで置く。
+- JSON-RPC の受け口と Agent Card は、UI 向けの API と同じ待ち受けに置く。Agent Card は token なしで読める。
 - 送り手が使う A2A の版と transport（A2A 1.0 の JSON-RPC）で受ける。受けるのは、依頼を送る呼び出しと Task を読む呼び出しだけである。ストリーミング・push 通知・Task の取り消しは受けない。送り手は Task を読みに来て返事を取る。
 - 受けるのは文章だけである。ファイルや構造のあるデータを含むメッセージは断る。sandbox に置く前に判断が要るものを、判断せずに置かないためである。
 

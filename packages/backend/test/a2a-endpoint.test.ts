@@ -73,7 +73,7 @@ async function sender(base: string, token = "sa-agents-claude"): Promise<Client>
     headers.set("authorization", `Bearer ${token}`);
     return fetch(input, { ...init, headers });
   };
-  const card = await new DefaultAgentCardResolver({ fetchImpl: fetch }).resolve(`${base}/a2a/.well-known/agent-card.json`, "");
+  const card = await new DefaultAgentCardResolver({ fetchImpl: fetch }).resolve(`${base}/.well-known/agent-card.json`, "");
   const url = card.supportedInterfaces[0]!.url;
   return new Client(await new JsonRpcTransportFactory({ fetchImpl: authorized }).create(url, card), card);
 }
@@ -107,8 +107,9 @@ describe("the A2A way in", () => {
   it("serves the Agent Card without a token, naming her and where to call", async (t) => {
     // Guards against: a sender unable to find her, or the card asking for a login it cannot have.
     const { base, port } = await setup(t);
-    const answer = await ask({ port }, "/a2a/.well-known/agent-card.json");
+    const answer = await ask({ port }, "/.well-known/agent-card.json");
     assert.equal(answer.status, 200);
+    assert.equal(answer.headers["cache-control"], "public, max-age=300");
     const card = answer.json();
     assert.equal(card.name, "Penelope");
     assert.equal(card.description, "The cluster's operator.");
@@ -116,6 +117,12 @@ describe("the A2A way in", () => {
     assert.equal(card.supportedInterfaces[0].protocolBinding, "JSONRPC");
     assert.equal(card.capabilities.streaming ?? false, false);
     assert.equal(card.capabilities.pushNotifications ?? false, false);
+  });
+
+  it("returns 404 for an Agent Card lookup under the JSON-RPC path", async (t) => {
+    const { port } = await setup(t);
+    const answer = await ask({ port }, "/a2a/.well-known/agent-card.json");
+    assert.equal(answer.status, 404);
   });
 
   it("takes a request as a working task, and hands back her answer when it is done", async (t) => {

@@ -8,12 +8,15 @@ description: Asking other agents over A2A with the a2a CLI, and waiting for thei
 `a2a` sends requests to other agents over A2A. Which agents there are, where they are, and which environment variable holds the
 stand-in for each, is in the deployment's connectors; the Sentinel replaces the stand-in with the real token on the way to that agent.
 
-- Asking: `a2a send -a <URL> --auth "Bearer $<TOKEN>" "<what to ask>"`.
-- What an agent can do is in its Agent Card: `a2a card get -a <URL>`, which needs no token.
+Pass the destination from the connectors to `-a` as written: the agent's host root, for example `https://helper.agents.example.com/`.
+The CLI finds the Agent Card there, and `a2a send` sends to the endpoint in the card.
+
+- Asking: `a2a send -a https://helper.agents.example.com/ --auth "Bearer $HELPER_AGENT_TOKEN" "<what to ask>"`.
+- What an agent can do is in its Agent Card: `a2a card get -a https://helper.agents.example.com/`, which needs no token.
 - Work that takes time returns a Task. To go on with your turns while it runs, wait for it as a background job:
 
   ```
-  a2a task get -a <URL> --auth "Bearer $<TOKEN>" --wait --poll-interval 30s --timeout 2h <task ID>
+  a2a task get -a https://helper.agents.example.com/ --auth "Bearer $HELPER_AGENT_TOKEN" --wait --poll-interval 30s --timeout 2h <task ID>
   ```
 
   Started with `job_start`, it ends when the Task ends or asks back, and its end comes as an event of the source `job`. Past
