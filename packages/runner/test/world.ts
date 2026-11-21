@@ -12,6 +12,7 @@ import type { Activity, ActivityRequest, DeliveredEvent } from "@penelope/contra
 
 import { Backend } from "../src/backend.ts";
 import type { Config } from "../src/config.ts";
+import { readImageLimits } from "../src/image-limit.ts";
 import { Runner } from "../src/runner.ts";
 import { FakeBackend, TOKEN } from "./fake-backend.ts";
 import { type Call, fakeRuntime, MODEL, PROVIDER, type Script } from "./fake-model.ts";
@@ -78,6 +79,7 @@ export async function world(options: { turnFold?: boolean; ownerSkills?: boolean
         config,
         backend: new Backend({ url: config.backend.url, token: TOKEN, agent: "main" }),
         modelRuntime,
+        imageLimits: await readImageLimits(join(config.agentDir, "models.json")),
         settings: () => SettingsManager.inMemory({ retry: { enabled: false } }),
         log: (line) => logs.push(line),
         retryMs: 50,

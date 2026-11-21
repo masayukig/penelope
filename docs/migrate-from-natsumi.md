@@ -82,6 +82,7 @@ natsumi の config（JSON）の項目と、それを書く penelope の配置の
 ### モデル
 
 - Pi の provider とモデルを `PENELOPE_MODEL` と `sandbox/models.json` に書く。OpenAI 互換の API なら、`models.json` の `providers` に `baseUrl` と `api` を持つ provider を足せる（Pi の `models.json` の形）。
+- 1 回の要求で受け付ける画像の枚数が決まっている接続先には、その provider に `maxImagesPerRequest` を足す（例: `providers.sakura.maxImagesPerRequest` を `3` にする）。runner は送る文脈だけを古い画像から減らす。書かなければ枚数を制限しない。値の例は [Kubernetes 配置の手引き](../deploy/kubernetes/README.md#モデルの設定) を参照。
 - 鍵は `models.json` の `apiKey` にサロゲートを書き、`sentinel.yaml` でその API のホストを登録して本物に差し替える。sandbox に本物の鍵は置かない（ADR-0004）。natsumi の `openai` の経路で使っていた ChatGPT のサインイン（`pi.authPath` の `auth.json`）は、本物の資格を sandbox に置くことになるので写さない。鍵を付ける中継を自分で立てているなら、その中継のホストを登録する。
 - natsumi の `compactionThreshold` などの上限は写さない。
 

@@ -168,6 +168,20 @@ kubectl -n "$ns" create secret generic penelope-receivers \
 
 `PENELOPE_MODEL` と `PENELOPE_THINKING` は、オーナーが Web UI の「設定」で選ぶまでの既定である。保存した組は backend の SQLite に残り、本体・サブエージェント・夜の整理係の次のターンから使う。候補を増やすには sandbox の `models.json` にモデルを追加し、必要な鍵の差し替えは従来どおり Sentinel に設定する。候補には Pi が認証を確認できたモデルだけが出る。候補から保存済みのモデルが外れたら、runner は既定で動き、そのことをログに残す。
 
+接続先が 1 回に受け付ける画像の上限は、`sandbox/models.json` の provider の定義に `maxImagesPerRequest` を足して指定する。たとえば 3 枚までの `sakura` では、既存の定義に次の項目を足す（既存の `baseUrl`・`api`・`apiKey`・`models` はそのまま）。
+
+```json
+{
+  "providers": {
+    "sakura": {
+      "maxImagesPerRequest": 3
+    }
+  }
+}
+```
+
+この項目は Pi ではなく runner が起動時に読む。未指定なら制限せず、0 なら画像を送らない。[同梱の OpenAI の見本](example/sandbox/models.json)では上限を指定していない。設定の反映には Pod を作り直す。詳しくは [sandbox の仕様](../../docs/sandbox-api.md#モデル要求の画像の上限) を参照。
+
 設定用の schema 8 への migration は一方通行である。更新前に SQLite を backup し、版 7 までの backend に戻すときは更新前の backup も戻す。
 
 ## アバター
