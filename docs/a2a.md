@@ -11,7 +11,7 @@ backend の UI 向けの API と同じ TCP の待ち受け（`PENELOPE_LISTEN`�
 
 | 道 | 中身 |
 | --- | --- |
-| `GET /.well-known/agent-card.json`（従来の `GET /a2a/.well-known/agent-card.json` も同じ） | Agent Card。token なしで読める |
+| `GET /.well-known/agent-card.json` | Agent Card。token なしで読める |
 | `POST /a2a/`（`POST /a2a` も同じ） | JSON-RPC の呼び出し |
 
 - 受け口が閉じているとき（送り手の allow-list が空のとき）は、ルートの Agent Card、`/a2a`、`/a2a/` の下のすべての道が `404`（`{error}`）になる。Web UI のページは返さない。
@@ -46,7 +46,7 @@ a2a-cli はルートの `/.well-known/agent-card.json` から Agent Card を読�
 | `securitySchemes` | `bearer`（HTTP の Bearer）1 つ |
 | `defaultInputModes`・`defaultOutputModes` | `text/plain` |
 
-- どちらの道も同じ Agent Card を返す。応答は `Cache-Control: public, max-age=300`。
+- 応答は `Cache-Control: public, max-age=300`。
 
 ## 送り手の確かめ
 

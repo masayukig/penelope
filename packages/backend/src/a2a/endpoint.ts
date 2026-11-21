@@ -17,7 +17,6 @@ import { whoIs, type SenderCheck, type Senders } from "./senders.ts";
 
 export const A2A_PATH = "/a2a";
 const CARD_PATH = "/.well-known/agent-card.json";
-const LEGACY_CARD_PATH = `${A2A_PATH}${CARD_PATH}`;
 /** A call's body at most: room for 1 MiB of text however JSON writes it. The inbox holds the text to 1 MiB. */
 export const MAX_A2A_BODY_BYTES = 2 * 1024 * 1024;
 const VERSION_HEADER = "a2a-version";
@@ -46,7 +45,7 @@ export function a2aHandler(options: A2AOptions): Handler {
 
   return async (request, response) => {
     const url = new URL(request.url ?? "/", "http://a2a");
-    if (request.method === "GET" && (url.pathname === CARD_PATH || url.pathname === LEGACY_CARD_PATH)) {
+    if (request.method === "GET" && url.pathname === CARD_PATH) {
       sendJson(response, 200, cardBody, { "cache-control": "public, max-age=300" });
       return;
     }

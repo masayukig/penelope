@@ -231,7 +231,7 @@ init container `skills`（`base/init/skills.sh`）が置くオーナーの skill
 ## A2A
 
 - **送る**（`example/` の形）: 相手のホストを `sentinel.yaml` に登録し、ServiceAccount `penelope` の token に差し替える。token は `patches/statefulset.yaml` が Sentinel にだけ projected で渡す（audience `a2a`）。audience は相手が求めるものにする。相手の側で、この ServiceAccount（`system:serviceaccount:<名前空間>:penelope`）を許す。
-- **受ける**（見本には無い）: backend の `PENELOPE_A2A_*` を `penelope-backend-env` に書く（[docs/a2a.md](../../docs/a2a.md)・[docs/backend.md](../../docs/backend.md)）。`tokenreview` で確かめるなら、backend に API server の audience の token を projected で mount し、ServiceAccount `penelope` に `system:auth-delegator` を付ける。外から呼ぶ場合は、Ingress で `/.well-known/agent-card.json`（token なしの GET）と `/a2a`（JSON-RPC と従来の Agent Card）を backend に届ける。
+- **受ける**（見本には無い）: backend の `PENELOPE_A2A_*` を `penelope-backend-env` に書く（[docs/a2a.md](../../docs/a2a.md)・[docs/backend.md](../../docs/backend.md)）。`tokenreview` で確かめるなら、backend に API server の audience の token を projected で mount し、ServiceAccount `penelope` に `system:auth-delegator` を付ける。外から呼ぶ場合は、Ingress で `/.well-known/agent-card.json`（token なしの GET）と `/a2a`（JSON-RPC）を backend に届ける。
 
 ## volume と持ち主
 

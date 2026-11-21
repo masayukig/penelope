@@ -730,7 +730,7 @@ describe("the UI's API", () => {
       // Guards against: the senders' calls going to the Web UI, or asked for the owner's cookie.
       const a2a: Handler = async (request, response) => sendJson(response, 200, { a2a: request.url });
       const { call } = await setup(t, { a2a, web });
-      for (const pathname of ["/a2a", "/a2a/", "/a2a/.well-known/agent-card.json", "/.well-known/agent-card.json"]) {
+      for (const pathname of ["/a2a", "/a2a/", "/a2a/unknown", "/.well-known/agent-card.json"]) {
         const answer = await call(pathname, undefined);
         assert.deepEqual(answer.json(), { a2a: pathname });
       }
@@ -742,11 +742,9 @@ describe("the UI's API", () => {
     it("is not found while it is closed, rather than the Web UI's page", async (t) => {
       // Guards against: a sender reading the page as an Agent Card, or taking a closed way in for an open one.
       const { call } = await setup(t, { web });
-      for (const pathname of ["/a2a/.well-known/agent-card.json", "/.well-known/agent-card.json"]) {
-        const answer = await call(pathname, undefined);
-        assert.equal(answer.status, 404, pathname);
-        assert.equal(typeof answer.json().error, "string");
-      }
+      const answer = await call("/.well-known/agent-card.json", undefined);
+      assert.equal(answer.status, 404);
+      assert.equal(typeof answer.json().error, "string");
     });
   });
 
