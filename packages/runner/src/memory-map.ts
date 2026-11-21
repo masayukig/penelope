@@ -120,16 +120,18 @@ export async function memoryMap(root: string, files: MemoryFile[], reads: Memory
   }
   const dates = commitDates(root, paths);
   const inbound = new Map<string, number>();
-  const shapes = new Map<string, { sections: Section[]; broken: Set<string> }>();
+  const shapes = new Map<string, { sections: Section[]; broken: Set<string>; outgoing: Set<string> }>();
   for (const path of paths) {
     const { sections, links } = await markdownShape(root, path);
     const broken = new Set<string>();
+    const outgoing = new Set<string>();
     for (const target of links) {
       if (target === path) continue;
       if (paths.has(target)) inbound.set(target, (inbound.get(target) ?? 0) + 1);
-      else if (!dirs.has(target)) broken.add(target);
+      if (paths.has(target) || dirs.has(target)) outgoing.add(target);
+      else broken.add(target);
     }
-    shapes.set(path, { sections, broken });
+    shapes.set(path, { sections, broken, outgoing });
   }
   const history = await dates;
   const byPath = new Map(reads.map(({ path, dates }) => [path, dates]));
@@ -139,15 +141,16 @@ export async function memoryMap(root: string, files: MemoryFile[], reads: Memory
     const dir = dirname(path);
     const group = groups.get(dir) ?? [];
     const readDates = byPath.get(path) ?? [];
-    const { sections, broken } = shapes.get(path)!;
-    group.push(JSON.stringify([basename(path), bytes, history.get(path)?.changed ?? null, history.get(path)?.night ?? null,
+    const { sections, broken, outgoing } = shapes.get(path)!;
+    const { changed, night } = history.get(path) ?? {};
+    group.push(JSON.stringify([basename(path), bytes, changed ?? null, night ?? null,
       readDates.at(-1) ?? null, readDates.filter((date) => date >= since && date <= today).length,
-      inbound.get(path) ?? 0, sections, [...broken]]));
+      inbound.get(path) ?? 0, sections, [...broken], [...outgoing]]));
     groups.set(dir, group);
   }
   return [
     "# Memory map",
-    "Directories and filenames are relative to the memory root. Each row has [file, bytes, last committed change, last night-worker write, last daytime reference, daytime references in 30 days, incoming links, headings with line counts, broken link targets]. References are a usage estimate, not an exact read count. Dates are UTC; null means unknown or not recorded. Zero incoming links means no links from other files.",
+    "Directories and filenames are relative to the memory root. Each row has [file, bytes, last committed change, last night-worker write, last daytime reference, daytime references in 30 days, incoming links, headings with line counts, broken link targets, reachable outgoing link targets]. References are a usage estimate, not an exact read count. Dates are UTC; null means unknown or not recorded. Zero incoming links means no links from other files.",
     ...[...groups].map(([dir, rows]) => `${JSON.stringify(dir === "." ? "./" : `${dir}/`)}\n${rows.join("\n")}`),
   ].join("\n\n");
 }

@@ -23,7 +23,7 @@ test("the map shows Markdown sections and local file links without copying the b
   const map = await memoryMap(root, await memorySnapshot(root), [], today);
   assert.match(map, /"topic name\.md",9,null,null,null,0,1/);
   assert.match(map, /"unlinked\.md",9,null,null,null,0,0/);
-  assert.match(map, /"topics\/"\n\["index\.md",\d+,null,null,null,0,0,\[\["Current",6\],\["Next",6\]\],\["gone\.md"\]\]/);
+  assert.match(map, /"topics\/"\n\["index\.md",\d+,null,null,null,0,0,\[\["Current",6\],\["Next",6\]\],\["gone\.md"\],\["topic name\.md"\]\]/);
   assert.doesNotMatch(map, /body outside the map|none\.md|# example/);
 });
 

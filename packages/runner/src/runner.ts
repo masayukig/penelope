@@ -35,6 +35,7 @@ import { inlineImages } from "./images.ts";
 import { Jobs } from "./jobs.ts";
 import { memoryMap } from "./memory-map.ts";
 import { memoryReads, NIGHT_REFLECTION } from "./memory-reads.ts";
+import { planArchive, reviewTopics, weekDiary } from "./memory-review.ts";
 import { TurnModels } from "./model-settings.ts";
 import { MemoryMoves, repairMemoryReferences } from "./memory-moves.ts";
 import { type DaytimeRecords, memoryChanges, memorySnapshot } from "./night-memory.ts";
@@ -59,6 +60,8 @@ import {
   type Places,
   readPromptFiles,
   reflectionInput,
+  reviewContentInput,
+  reviewStructureInput,
   systemPrompt,
   VERIFIER,
   verifierInput,
@@ -505,7 +508,7 @@ export class Runner {
     }
     // A nightly event that comes again after its switch was made only needs telling.
     const made = this.state?.nightly === event.seq;
-    const stages = made ? undefined : await this.nightly(event.seq);
+    const stages = made ? undefined : await this.nightly(event.seq, payload.review_date);
     let reported: NightStages | undefined;
     if (stages) {
       // Do not send runner-only fields through the current activity contract.
@@ -524,7 +527,7 @@ export class Runner {
   }
 
   /** Each step is attempted even if one before it failed (ADR-0044). */
-  private async nightly(seq: number): Promise<RunnerNightStages> {
+  private async nightly(seq: number, reviewDate?: string): Promise<RunnerNightStages> {
     const nightStarted = new Date().toISOString();
     const { memoryDir, identity, promptLayerTargetBytes, nightCarryDays } = this.config;
     const manager = this.session!.session.sessionManager;
@@ -565,19 +568,60 @@ export class Runner {
       const transcripts = [current, ...carried].flatMap(({ main, subAgents }) => [main, ...subAgents]);
       const memory = await memorySnapshot(memoryDir);
       return this.nightWorker(seq, VERIFIER, verifierSystemPrompt(identity, this.places, memory),
-        verifierInput(this.places, current, carried, memoryChanges(verifierMemory, memory), verifierMemory !== undefined), transcripts);
+        verifierInput(this.places, current, carried, memoryChanges(verifierMemory, memory), verifierMemory !== undefined), { transcripts });
     });
-    let curator = await this.nightStage("curator", async () => {
-      const memory = await memorySnapshot(memoryDir);
-      const layer = await alwaysReadLayer(memoryDir, promptLayerTargetBytes);
-      const map = await memoryMap(memoryDir, memory, reads, today);
-      return this.nightWorker(seq, "curator", curatorSystemPrompt(identity, this.places, memory),
-        curatorInput(memory, memoryChanges(curatorMemory, memory), curatorMemory !== undefined, layer, map));
-    });
+    const lastReviews = new Map(this.state!.lastTopicReviews);
+    const curate = async (review?: { kind: "content"; date: string } | { kind: "structure" }) => {
+      const moves = new MemoryMoves();
+      let topics: string[] = [];
+      const result = await this.nightStage("curator", async () => {
+        const memory = await memorySnapshot(memoryDir);
+        const map = await memoryMap(memoryDir, memory, reads, today);
+        const system = curatorSystemPrompt(identity, this.places, memory);
+        if (review?.kind === "structure") {
+          return this.nightWorker(seq, "curator", system, reviewStructureInput(this.places, memory, map), { moves });
+        }
+        const layer = await alwaysReadLayer(memoryDir, promptLayerTargetBytes);
+        if (review?.kind === "content") {
+          const paths = memory.map(({ path }) => path);
+          topics = reviewTopics(memory, lastReviews, this.config.reviewTopicMaxBytes);
+          return this.nightWorker(seq, "curator", system,
+            reviewContentInput(review.date, topics, weekDiary(paths, review.date), planArchive(paths, review.date), layer, map), { moves });
+        }
+        return this.nightWorker(seq, "curator", system,
+          curatorInput(memory, memoryChanges(curatorMemory, memory), curatorMemory !== undefined, layer, map), { moves });
+      });
+      if (review?.kind === "content" && result.result === "done") {
+        for (const path of topics) lastReviews.set(path, review.date);
+      }
+      // Snapshot dates at the origins before applying any renames. Changes on a failed turn are not rolled back.
+      const relocated = [...moves.history].flatMap(([to, [from]]) => from === undefined ? [] : [{ to, from, date: lastReviews.get(from) }]);
+      for (const { from, to } of relocated) {
+        lastReviews.delete(from);
+        lastReviews.delete(to);
+      }
+      for (const { to, date } of relocated) if (date !== undefined) lastReviews.set(to, date);
+      return result;
+    };
+    let curator: NightTurnReport;
+    if (reviewDate === undefined) {
+      curator = await curate();
+    } else {
+      const content = await curate({ kind: "content", date: reviewDate });
+      const structure = await curate({ kind: "structure" });
+      const turn_id = structure.turn_id ?? content.turn_id;
+      const reasons = [...new Set([content.reason, structure.reason].filter(Boolean))];
+      // The existing stage can carry only one turn ID. It refers to the last turn that ran.
+      curator = {
+        result: content.result === "done" && structure.result === "done" ? "done" : "failed",
+        ...(reasons.length ? { reason: reasons.join("; ") } : {}),
+        ...(turn_id ? { turn_id } : {}),
+      };
+    }
 
     // Use the memory left by the whole curator stage, so its edits are not
     // mistaken for daytime changes after a successful verification.
-    const after = verifier.result === "done" || curator.result === "done"
+    const after = verifier.result === "done" || curator.result === "done" || lastReviews.size > 0
       ? await memorySnapshot(memoryDir).catch((error: unknown) => {
         const reason = `The night baseline could not be taken: ${failure(error)}`;
         this.log(reason);
@@ -586,10 +630,15 @@ export class Runner {
         return undefined;
       })
       : undefined;
+    if (after && lastReviews.size) {
+      const paths = new Set(after.map(({ path }) => path));
+      for (const path of lastReviews.keys()) if (!paths.has(path)) lastReviews.delete(path);
+    }
     await this.keepNightState({
       ...(after !== undefined && verifier.result === "done" ? { verifierMemory: after } : {}),
       ...(after !== undefined && curator.result === "done" ? { curatorMemory: after } : {}),
       unverifiedRecords: verifier.result === "done" ? [] : [...carried, current],
+      ...(this.state!.lastTopicReviews || lastReviews.size ? { lastTopicReviews: [...lastReviews] } : {}),
     });
 
     let session: NightStage;
@@ -614,7 +663,7 @@ export class Runner {
   }
 
   /** Keep night work independently of whether a new daytime session opens. */
-  private async keepNightState(update: Partial<Pick<SessionState, "verifierMemory" | "curatorMemory" | "unverifiedRecords">>): Promise<void> {
+  private async keepNightState(update: Partial<Pick<SessionState, "verifierMemory" | "curatorMemory" | "unverifiedRecords" | "lastTopicReviews">>): Promise<void> {
     const state = { ...this.state!, ...update };
     this.state = state;
     await writeState(this.config, state).catch((error: unknown) => {
@@ -634,9 +683,9 @@ export class Runner {
   }
 
   private async nightWorker(
-    seq: number, stage: Exclude<NightTurnStage, "reflection">, system: string, input: string, transcripts?: string[],
+    seq: number, stage: Exclude<NightTurnStage, "reflection">, system: string, input: string,
+    { transcripts, moves }: { transcripts?: string[]; moves?: MemoryMoves },
   ): Promise<NightTurnReport> {
-    const moves = stage === "curator" ? new MemoryMoves() : undefined;
     const tools = nightTools(this.config, transcripts, moves);
     const { session } = await openSession(
       { ...this.setup, tools, extensions: [], fileOnly: true }, system,
