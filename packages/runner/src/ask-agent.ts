@@ -9,8 +9,8 @@ const REPLY_PREVIEW_CHARS = 2000;
 const DEFAULT_JOB_TAIL_CHARS = 4000;
 const IMAGE_LIST_CHARS = 1200;
 
-const usage = `Usage: ask-agent <name> '<message>' [--image <path>]...
-       ask-agent <name> --task <id> '<answer>' [--image <path>]...
+const usage = `Usage: ask-agent <name> '<message>' [--image <path> | --file <path>]...
+       ask-agent <name> --task <id> '<answer>' [--image <path> | --file <path>]...
        ask-agent <name> --wait <id>`;
 const quote = (arg: string) => `'${arg.replaceAll("'", "'\\''")}'`;
 const jobStart = (args: string[], cwd?: string) =>
@@ -28,7 +28,7 @@ function request([name, first, ...rest]: string[]) {
   const images: string[] = [];
   for (let i = 0; i < rest.length; i += 2) {
     const image = rest[i + 1];
-    if (rest[i] !== "--image" || !image || /^[a-z][a-z0-9+.-]*:\/\//i.test(image)) return;
+    if ((rest[i] !== "--image" && rest[i] !== "--file") || !image || /^[a-z][a-z0-9+.-]*:\/\//i.test(image)) return;
     images.push(resolve(image));
   }
   return { name, taskId, text, images };
@@ -146,7 +146,7 @@ async function main(args: string[]) {
   }
   for (const path of req.images) {
     if (!(await stat(path).catch(() => undefined))?.isFile()) {
-      console.error("No request sent: each --image must be a local file.");
+      console.error("No request sent: each --image and --file must be a local file.");
       return 2;
     }
   }
