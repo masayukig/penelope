@@ -36,7 +36,7 @@ import { Jobs } from "./jobs.ts";
 import { memoryMap } from "./memory-map.ts";
 import { memoryReads, NIGHT_REFLECTION } from "./memory-reads.ts";
 import { TurnModels } from "./model-settings.ts";
-import { memoryChanges, memorySnapshot } from "./night-memory.ts";
+import { type DaytimeRecords, memoryChanges, memorySnapshot } from "./night-memory.ts";
 import { nightTools } from "./night-tools.ts";
 import {
   nightManager,
@@ -117,6 +117,11 @@ const modelError = (message: { errorMessage?: string }) => message.errorMessage 
 /** A turn of the night as its step: a turn the runner cut is a step that did not get done. */
 const stageOf = ({ result, reason, turn_id }: Outcome & { turn_id: string }): NightTurnReport =>
   result === "done" ? { result, turn_id } : { result: "failed", reason: result === "stopped" ? `Stopped: ${reason}` : (reason ?? ""), turn_id };
+
+// Runner-only metadata until the activity record has a field for it.
+type RunnerNightStages = NightStages & { verifier: NightTurnReport & { droppedRecords?: number } };
+
+const utcDay = (time: string): number => Math.floor(Date.parse(time) / 86_400_000);
 
 export class Runner {
   private readonly config: Config;
@@ -499,8 +504,14 @@ export class Runner {
     // A nightly event that comes again after its switch was made only needs telling.
     const made = this.state?.nightly === event.seq;
     const stages = made ? undefined : await this.nightly(event.seq);
+    let reported: NightStages | undefined;
+    if (stages) {
+      // Do not send runner-only fields through the current activity contract.
+      const { droppedRecords: _dropped, ...verifier } = stages.verifier;
+      reported = { ...stages, verifier };
+    }
     await this.backend
-      .rotated({ seq: event.seq, ...(stages ? { stages } : {}) })
+      .rotated({ seq: event.seq, ...(reported ? { stages: reported } : {}) })
       .catch((error: unknown) => this.log(`rotation not sent: ${failure(error)}`));
     // Without a new session the event is not acked: it comes again, and the night is run again.
     if (stages && stages.session.result !== "done") {
@@ -511,10 +522,9 @@ export class Runner {
   }
 
   /** Each step is attempted even if one before it failed (ADR-0044). */
-  private async nightly(seq: number): Promise<NightStages> {
+  private async nightly(seq: number): Promise<RunnerNightStages> {
     const nightStarted = new Date().toISOString();
-    const { memoryDir, identity, promptLayerTargetBytes } = this.config;
-    const before = this.state?.nightMemory;
+    const { memoryDir, identity, promptLayerTargetBytes, nightCarryDays } = this.config;
     const manager = this.session!.session.sessionManager;
     const today = nightStarted.slice(0, 10);
     const previousReads = this.state?.memoryReads ?? [];
@@ -531,32 +541,60 @@ export class Runner {
         manager.appendCustomEntry(NIGHT_REFLECTION, false);
       }
     });
-    const verifier = await this.nightStage(VERIFIER, async () => {
-      const main = this.state!.file;
-      const header = this.session!.session.sessionManager.getHeader();
-      if (!header) throw new Error("The daytime session has no header.");
-      const records = await this.subAgents.recordsSince(Date.parse(header.timestamp));
+    const { file: main, verifierMemory, curatorMemory, unverifiedRecords = [] } = this.state!;
+    const header = manager.getHeader();
+    // Collect originals for carry-over even if the verifier cannot start.
+    const originals = header
+      ? await this.subAgents.recordsSince(Date.parse(header.timestamp)).then((subAgents) => ({ subAgents }), (error: unknown) => ({ error }))
+      : { error: new Error("The daytime session has no header.") };
+    const current: DaytimeRecords = {
+      main, started: header?.timestamp ?? nightStarted, ended: nightStarted,
+      subAgents: "subAgents" in originals ? originals.subAgents : unverifiedRecords.find((record) => record.main === main)?.subAgents ?? [],
+    };
+    // A retry of the same switch still has the same daytime session.
+    const previous = unverifiedRecords.filter((record) => record.main !== main);
+    const cutoff = utcDay(nightStarted) - nightCarryDays;
+    const carried = previous.filter(({ ended }) => utcDay(ended) >= cutoff);
+    const droppedRecords = previous.length - carried.length;
+    if (droppedRecords) this.log(`night verifier: dropped ${droppedRecords} unverified daytime record(s) older than ${nightCarryDays} UTC days`);
+
+    let verifier = await this.nightStage(VERIFIER, async () => {
+      if ("error" in originals) throw originals.error;
+      const transcripts = [current, ...carried].flatMap(({ main, subAgents }) => [main, ...subAgents]);
       const memory = await memorySnapshot(memoryDir);
       return this.nightWorker(seq, VERIFIER, verifierSystemPrompt(identity, this.places, memory),
-        verifierInput(this.places, { started: header.timestamp, ended: nightStarted, main, subAgents: records },
-          memoryChanges(before, memory), before !== undefined),
-        nightTools(this.config, [main, ...records]));
+        verifierInput(this.places, current, carried, memoryChanges(verifierMemory, memory), verifierMemory !== undefined),
+        nightTools(this.config, transcripts));
     });
-    const curator = await this.nightStage("curator", async () => {
+    let curator = await this.nightStage("curator", async () => {
       const memory = await memorySnapshot(memoryDir);
       const layer = await alwaysReadLayer(memoryDir, promptLayerTargetBytes);
       const map = await memoryMap(memoryDir, memory, reads, today);
       return this.nightWorker(seq, "curator", curatorSystemPrompt(identity, this.places, memory),
-        curatorInput(memory, memoryChanges(before, memory), before !== undefined, layer, map),
+        curatorInput(memory, memoryChanges(curatorMemory, memory), curatorMemory !== undefined, layer, map),
         nightTools(this.config));
     });
+
+    // Use the memory left by the whole curator stage, so its edits are not
+    // mistaken for daytime changes after a successful verification.
+    const after = verifier.result === "done" || curator.result === "done"
+      ? await memorySnapshot(memoryDir).catch((error: unknown) => {
+        const reason = `The night baseline could not be taken: ${failure(error)}`;
+        this.log(reason);
+        if (verifier.result === "done") verifier = { ...verifier, result: "failed", reason };
+        if (curator.result === "done") curator = { ...curator, result: "failed", reason };
+        return undefined;
+      })
+      : undefined;
+    await this.keepNightState({
+      ...(after !== undefined && verifier.result === "done" ? { verifierMemory: after } : {}),
+      ...(after !== undefined && curator.result === "done" ? { curatorMemory: after } : {}),
+      unverifiedRecords: verifier.result === "done" ? [] : [...carried, current],
+    });
+
     let session: NightStage;
     try {
-      const nightMemory = await memorySnapshot(memoryDir).catch((error: unknown) => {
-        this.log(`night memory baseline not kept: ${failure(error)}`);
-        return undefined;
-      });
-      const state: SessionState = { file: await newSessionFile(this.config), nightly: seq, ...(nightMemory ? { nightMemory } : {}), memoryReads: reads };
+      const state: SessionState = { ...this.state!, file: await newSessionFile(this.config), nightly: seq, memoryReads: reads };
       const next = await this.openMainSession(state.file);
       try {
         await writeState(this.config, state);
@@ -572,7 +610,17 @@ export class Runner {
       this.log(`the new session could not start: ${failure(error)}`);
       session = { result: "failed", reason: `The new session could not start: ${failure(error)}` };
     }
-    return { reflection, verifier, curator, session };
+    return { reflection, verifier: { ...verifier, ...(droppedRecords ? { droppedRecords } : {}) }, curator, session };
+  }
+
+  /** Keep night work independently of whether a new daytime session opens. */
+  private async keepNightState(update: Partial<Pick<SessionState, "verifierMemory" | "curatorMemory" | "unverifiedRecords">>): Promise<void> {
+    const state = { ...this.state!, ...update };
+    this.state = state;
+    await writeState(this.config, state).catch((error: unknown) => {
+      // The rotation's write can still persist the checkpoint with the new session.
+      this.log(`night checkpoint not saved: ${failure(error)}`);
+    });
   }
 
   private async nightStage(stage: NightTurnStage, run: () => Promise<NightTurnReport>): Promise<NightTurnReport> {
