@@ -48,3 +48,4 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0044 | [夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) | Accepted |
 | 0045 | [夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md) | Accepted |
 | 0046 | [モデル要求では接続先の上限に合わせて古い画像を省き、失敗を次のターンに伝える](0046-budget-images-before-model-requests.md) | Accepted |
+| 0047 | [A2A のメッセージでは画像の中身を受け、出来事の添付にする](0047-receive-a2a-images-as-event-attachments.md) | Proposed |
