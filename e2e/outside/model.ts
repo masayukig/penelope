@@ -124,7 +124,10 @@ export function script(messages: readonly ChatMessage[]): Answer {
       const hasImage = Array.isArray(user?.content) && user.content.some((part) =>
         part.type === "image_url" && part.image_url?.url === `data:image/png;base64,${E2E_PNG}`);
       const path = /"path":"([^"]+\/a2a\/files\/[^"]+)"/.exec(input)?.[1];
-      if (!hasImage || !path) return [{ text: "Missing A2A image or attachment path." }];
+      if (!hasImage || !path) {
+        const reason = !hasImage ? "Missing A2A image in the model input." : "Missing A2A attachment path.";
+        return [{ calls: [replyToAgent(input, "completed", reason)] }, { text: reason }];
+      }
       const answer = replyToAgent(input, "completed", "E2E-A2A-DONE");
       return [{ calls: [{ ...answer, args: { ...answer.args, images: [path] } }] }, { text: "Answered." }];
     }

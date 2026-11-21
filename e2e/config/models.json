@@ -6,7 +6,7 @@
       "api": "openai-completions",
       "apiKey": "e2e-surrogate-model-0001",
       "compat": { "supportsStore": false, "supportsDeveloperRole": false },
-      "models": [{ "id": "scripted", "name": "Scripted", "contextWindow": 128000, "maxTokens": 4096 }]
+      "models": [{ "id": "scripted", "name": "Scripted", "input": ["text", "image"], "contextWindow": 128000, "maxTokens": 4096 }]
     }
   }
 }
