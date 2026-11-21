@@ -9,9 +9,9 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0003 | [sandbox の外向きはすべて Sentinel を通し、既定は素通しで記録する](0003-all-egress-through-the-sentinel-passthrough-by-default.md) | Accepted（一部を ADR-0014 で置き換え） |
 | 0004 | [本物の鍵は Sentinel が持ち、鍵の出どころは差し替えられる口にする](0004-the-sentinel-keeps-the-keys-through-a-replaceable-source.md) | Accepted（一部を ADR-0021 で置き換え） |
 | 0005 | [承認待ちは Sentinel が持ち、オーナーは Web UI で答える](0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md) | Accepted |
-| 0006 | [記憶は `/memory` の形を保ち、検査をやめ、コミットだけを sandbox の外で行う](0006-memory-kept-compatible-without-checks-committed-outside.md) | Accepted |
+| 0006 | [記憶は `/memory` の形を保ち、検査をやめ、コミットだけを sandbox の外で行う](0006-memory-kept-compatible-without-checks-committed-outside.md) | Accepted（一部を ADR-0049 で置き換え） |
 | 0007 | [セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える](0007-one-session-switched-nightly-with-a-one-turn-curator.md) | Accepted（一部を ADR-0044 で置き換え） |
-| 0008 | [プロンプトは事実と環境だけを伝え、やり方は任せる](0008-prompts-state-facts-and-leave-the-how.md) | Accepted（一部を ADR-0045 で置き換え） |
+| 0008 | [プロンプトは事実と環境だけを伝え、やり方は任せる](0008-prompts-state-facts-and-leave-the-how.md) | Accepted（一部を ADR-0045 と ADR-0049 で置き換え） |
 | 0009 | [最初の UI は Web だけにし、新しい API と Astryx で作る](0009-web-ui-first-with-a-new-api-and-astryx.md) | Accepted（一部を ADR-0016 で置き換え） |
 | 0010 | [人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる](0010-github-oauth-for-people-tokenreview-for-a2a.md) | Accepted（一部を ADR-0018 で置き換え） |
 | 0011 | [sandbox の image は開発の一式を持ち、汎用のユーザーの HOME で作業する](0011-a-full-dev-image-and-a-generic-user-home.md) | Accepted |
@@ -45,8 +45,13 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0039 | [Pi 拡張はオーナーの置き場と記憶から本人のセッションだけに読み込む](0039-load-owner-and-memory-extensions-in-the-main-session.md) | Accepted |
 | 0042 | [配置が一覧に載せる image の skill を選ぶ](0042-select-image-skills-per-deployment.md) | Accepted |
 | 0043 | [モデルと思考の深さはオーナーが設定画面で選ぶ](0043-the-owner-picks-the-model-and-thinking-level-in-the-web-ui.md) | Accepted（一部を ADR-0044 で置き換え） |
-| 0044 | [夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) | Accepted |
+| 0044 | [夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) | Accepted（一部を ADR-0050 と ADR-0051 で置き換え） |
 | 0045 | [夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md) | Accepted |
 | 0046 | [モデル要求では接続先の上限に合わせて古い画像を省き、失敗を次のターンに伝える](0046-budget-images-before-model-requests.md) | Accepted |
 | 0047 | [A2A のメッセージで画像を受け、Task の成果として返す](0047-exchange-images-over-a2a.md) | Accepted |
 | 0048 | [A2A は `ask-agent` で名前を指定して頼み、裏の仕事で返事を待つ](0048-ask-agents-by-name-and-wait-in-a-background-job.md) | Accepted |
+| 0049 | [配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md) | Accepted |
+| 0050 | [夜は記憶の見取り図を渡し、棚卸しで中身と構成を分けて見直す](0050-organize-memory-with-a-map-and-a-weekly-review.md) | Accepted |
+| 0051 | [照合と整理の基準は別々に持ち、成功したときだけ進める](0051-carry-unfinished-night-work-forward.md) | Accepted |
+| 0052 | [夜の係が移動した記憶への参照は runner が直す](0052-repair-memory-references-after-nightly-moves.md) | Accepted |
+| 0053 | [目的に沿った問いで記憶を評価する CLI を持つ](0053-evaluate-memory-with-purpose-questions.md) | Accepted |

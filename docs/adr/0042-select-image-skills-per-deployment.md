@@ -33,6 +33,7 @@ ADR-0035 の Decision「道具の使い方は image の skill にする」のう
 ## Related ADRs
 
 - Supersedes（一部）: [ADR-0035 道具の使い方とどの配置にも同じ skill は sandbox の image に skill として入れ、オーナー・記憶の後に並べる](0035-tool-usage-and-shared-skills-as-image-skills.md)（Decision「道具の使い方は image の skill にする」の、つねに一覧に載せる点）
+- Related: [ADR-0049 配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md)（記憶の書き方は記憶の skill に置き、image の skill の選択は変えない）。
 
 ## References
 

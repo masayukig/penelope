@@ -1,7 +1,7 @@
 # 0044. 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする
 
 - Date: 2026-11-20
-- Status: Accepted
+- Status: Accepted（一部を [ADR-0050 夜は記憶の見取り図を渡し、棚卸しで中身と構成を分けて見直す](0050-organize-memory-with-a-map-and-a-weekly-review.md) と [ADR-0051 照合と整理の基準は別々に持ち、成功したときだけ進める](0051-carry-unfinished-night-work-forward.md) で置き換え）
 
 ## Context
 
@@ -14,6 +14,8 @@
 原本と照らして内容を直す仕事と、読みやすい形に変える仕事は、必要な資料と判断が異なる。Dreaming の実例では、原本を読む係がメモを検証・補強した後、別の係が構成を整える。この分担だけを取り入れ、記憶の置き場やセッションの仕組みは変えない。
 
 ## Decision
+
+[ADR-0050 夜は記憶の見取り図を渡し、棚卸しで中身と構成を分けて見直す](0050-organize-memory-with-a-map-and-a-weekly-review.md) は、目的・入力と、棚卸しの夜だけの整理係のターン構成を更新する。[ADR-0051 照合と整理の基準は別々に持ち、成功したときだけ進める](0051-carry-unfinished-night-work-forward.md) は、差分の基準と照合に渡す記録を更新する。夜の 4 段、棚卸し専用の係を置かないこと、照合と整理の担当の分離は維持する。
 
 ### 1. 夜の切り替えを 4 段にする
 
@@ -83,6 +85,9 @@
 - Supersedes（一部）: [ADR-0038](0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md) の Decision 項 1（ターンの結果ときっかけは、runner がターンの終わりの口で知らせる）と項 2（夜の切り替えは、runner が段ごとの結果をまとめて知らせる）の対象に照合係を足し、記憶の変更量と `handoff.md` の未更新を記録する。結果を知らせる仕組みは維持する。
 - Supersedes（一部）: [ADR-0043](0043-the-owner-picks-the-model-and-thinking-level-in-the-web-ui.md) の Decision 項 3（各ターンでの設定の適用）のうち、夜の係にも日中と同じモデルを適用する決定。日中と振り返りのモデル選択は変えない。夜の指定が使えないときは日中の設定に戻し、ほかのモデルは自動で探さない。
 - Related: [ADR-0045 夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md) は、夜の目的の伝え方とモデル別の手順を扱う。
+- Superseded by（一部）: [ADR-0050 夜は記憶の見取り図を渡し、棚卸しで中身と構成を分けて見直す](0050-organize-memory-with-a-map-and-a-weekly-review.md)（Decision 項 1（夜の切り替えを 4 段にする）、項 2（各段に資料と目的を渡す）、項 3（週に一度は整理係の対象を記憶全体にする）、項 6（大きな記録は、1 ターンで照合しきれないときに分ける）のうち、夜の目的・入力と、棚卸しの整理係を 1 ターンにまとめる点）。
+- Superseded by（一部）: [ADR-0051 照合と整理の基準は別々に持ち、成功したときだけ進める](0051-carry-unfinished-night-work-forward.md) の Decision 項 2（各段に資料と目的を渡す）のうち、差分の基準と照合に渡す記録。
+- Related: [ADR-0053 目的に沿った問いで記憶を評価する CLI を持つ](0053-evaluate-memory-with-purpose-questions.md)（Decision 項 8（翌日の回答で効果を確かめる）の架空の台本による検証とは別に、配置ごとの記憶を問いで評価する）。
 
 ## References
 

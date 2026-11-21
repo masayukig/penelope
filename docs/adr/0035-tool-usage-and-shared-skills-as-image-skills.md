@@ -75,6 +75,7 @@ skill にも同じことが起きている。skill は、名前・説明・場�
 - Related: ADR-0008 プロンプトは事実と環境だけを伝え、やり方は任せる
 - Related: ADR-0011 sandbox の image は開発の一式を持ち、汎用のユーザーの HOME で作業する
 - Related: ADR-0026 なつみ・ミャオ・アキも 1 人 1 つの配置で penelope に移し、記憶は履歴ごと写して、戻し道は持たない
+- Related: [ADR-0049 配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md)（image の `goals` skill は仕事の計画を扱い、知識の目的は配置ごとの記憶に置く）。
 
 ## References
 

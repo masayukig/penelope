@@ -1,7 +1,7 @@
 # 0008. プロンプトは事実と環境だけを伝え、やり方は任せる
 
 - Date: 2026-11-14
-- Status: Accepted（一部を [ADR-0045 夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md) で置き換え）
+- Status: Accepted（一部を [ADR-0045 夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md) と [ADR-0049 配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md) で置き換え）
 
 ## Context
 
@@ -12,6 +12,8 @@ penelope では、エージェントは Pi の基本のツールで何でもで�
 ## Decision
 
 対象は、システムプロンプト、ツールの説明、ターンの入力の文面である。
+
+[ADR-0049 配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md) は、日中に加える記憶と、日中・夜の係に共通の記憶の形の説明に限って例外を加える。
 
 - 事実と環境を伝え、やり方はエージェントに任せる。指図と禁止を積み重ねない。
 - システムプロンプトに書くのは次のものだけである。
@@ -53,6 +55,7 @@ penelope では、エージェントは Pi の基本のツールで何でもで�
 - Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える（本体のセッションの切り替え）
 - Related: [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md)（夜の各段に渡す目的と資料）
 - Superseded by（一部）: [ADR-0045 夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md)（Decision のプロンプトに書く内容と手順を置かない方針に、夜に限った例外を設ける）
+- Superseded by（一部）: [ADR-0049 配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md)（Decision のうち、プロンプトに足す記憶の範囲と書き方の規則を置かない点に例外を加える）。
 
 ## References
 

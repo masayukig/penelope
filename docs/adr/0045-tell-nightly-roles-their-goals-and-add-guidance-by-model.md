@@ -37,6 +37,8 @@
 - Supersedes（一部）: [ADR-0008 プロンプトは事実と環境だけを伝え、やり方は任せる](0008-prompts-state-facts-and-leave-the-how.md) の Decision（プロンプトに書く内容と、手順をプロンプトに書かないという決定）。夜の上記 3 か所だけに目的と条件付きの手順を足し、それ以外の方針は維持する。
 - Related: [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) の Decision 項 2（各段に資料と目的を渡す）と項 5（夜の係にだけ別のモデルを手で選べるようにする）。
 - Related: [ADR-0043 モデルと思考の深さはオーナーが設定画面で選ぶ](0043-the-owner-picks-the-model-and-thinking-level-in-the-web-ui.md) の Decision（オーナーが選んだモデルを各ターンで使い、自動では切り替えない）。
+- Related: [ADR-0049 配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md)（日中と夜の係の記憶の形に時点と根拠の 1 行を加える。モデル別の手順の層は変えない）。
+- Related: [ADR-0050 夜は記憶の見取り図を渡し、棚卸しで中身と構成を分けて見直す](0050-organize-memory-with-a-map-and-a-weekly-review.md)（照合係と整理係に伝える目的を、配置ごとの知識づくりに沿って具体化する）。
 
 ## References
 
