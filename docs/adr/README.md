@@ -50,3 +50,11 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0046 | [モデル要求では接続先の上限に合わせて古い画像を省き、失敗を次のターンに伝える](0046-budget-images-before-model-requests.md) | Accepted |
 | 0047 | [A2A のメッセージで画像を受け、Task の成果として返す](0047-exchange-images-over-a2a.md) | Accepted |
 | 0048 | [A2A は `ask-agent` で名前を指定して頼み、裏の仕事で返事を待つ](0048-ask-agents-by-name-and-wait-in-a-background-job.md) | Accepted |
+
+fork（masayukig/penelope）の ADR。上流の番号と重ならないよう `fork-` を付ける。
+
+| 番号 | タイトル | Status |
+| --- | --- | --- |
+| fork-0040 | [Signal は receivers のプラグインが signal-cli の JSON-RPC で受け、送り口は Sentinel から Unix socket で届ける](fork-0040-signal-through-signal-cli-in-a-receivers-plugin-with-a-send-socket.md) | Accepted |
+| fork-0041 | [Signal のグループは、配置が許したものだけを、メンバー全員の発言ごと受ける](fork-0041-signal-groups-the-owner-allowed-received-from-every-member.md) | Accepted |
+| fork-0042 | [Signal のグループへの投稿の判定と本人の承認は、配置が選んだときだけ、Signal のプラグインの中で Signal で行う](fork-0042-signal-group-posts-judged-and-held-for-the-owner-inside-the-plugin.md) | Accepted |
