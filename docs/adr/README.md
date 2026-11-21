@@ -21,7 +21,7 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0015 | [終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない](0015-fold-ended-turns-before-they-are-sent.md) | Accepted（一部を ADR-0031 で置き換え） |
 | 0016 | [最初の Web UI からアバターを表情ごとの絵で出し、アバターは 1 つの部品に閉じる](0016-show-the-avatar-and-expression-from-the-first-web-ui.md) | Accepted |
 | 0017 | [ターンの入力は 1 行 1 件の JSON を `<events>` で囲み、1 件の型を契約にする](0017-turn-input-as-json-lines-in-events.md) | Accepted |
-| 0018 | [A2A の依頼は backend が Task として持って出来事にし、送り手は差し替えられる確かめ方で確かめる](0018-a2a-tasks-in-the-backend-and-replaceable-sender-checks.md) | Accepted |
+| 0018 | [A2A の依頼は backend が Task として持って出来事にし、送り手は差し替えられる確かめ方で確かめる](0018-a2a-tasks-in-the-backend-and-replaceable-sender-checks.md) | Accepted（一部を ADR-0047 で置き換え） |
 | 0019 | [ssh は別のコンテナの ssh-agent の socket で行い、鍵は sandbox に見せない](0019-ssh-through-an-agent-socket-keys-kept-out-of-the-sandbox.md) | Superseded by ADR-0021 |
 | 0020 | [コネクタは Sentinel の登録と使い方の文書の組にし、文書の一覧をシステムプロンプトに出す](0020-connectors-with-a-usage-document-listed-in-the-prompt.md) | Accepted（一部を ADR-0035 で置き換え） |
 | 0021 | [自分で作った VM への ssh の鍵は、エージェントが自分で HOME に作る](0021-her-own-ssh-key-in-home-for-the-vms-she-makes.md) | Accepted |
@@ -48,3 +48,4 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0044 | [夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) | Accepted |
 | 0045 | [夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md) | Accepted |
 | 0046 | [モデル要求では接続先の上限に合わせて古い画像を省き、失敗を次のターンに伝える](0046-budget-images-before-model-requests.md) | Accepted |
+| 0047 | [A2A のメッセージで画像を受け、Task の成果として返す](0047-exchange-images-over-a2a.md) | Accepted |
