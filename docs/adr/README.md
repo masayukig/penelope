@@ -47,3 +47,4 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0043 | [モデルと思考の深さはオーナーが設定画面で選ぶ](0043-the-owner-picks-the-model-and-thinking-level-in-the-web-ui.md) | Accepted（一部を ADR-0044 で置き換え） |
 | 0044 | [夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) | Accepted |
 | 0045 | [夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md) | Accepted |
+| 0046 | [モデル要求では接続先の上限に合わせて古い画像を省き、失敗を次のターンに伝える](0046-budget-images-before-model-requests.md) | Accepted |

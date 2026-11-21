@@ -655,6 +655,23 @@ test("a turn whose model request fails ends as failed, with the reason", async (
   assert.match(end!.reason ?? "", /the model is away/);
 });
 
+test("a redelivered event after a restart brings the previous model error to the agent", async () => {
+  const { fake, start, calls } = await world();
+  fake.dropAcks.add(1);
+  const stop = await start(() => ({ error: `Too many images. ${"x".repeat(5_000)}` }));
+  fake.push(ui(1, "look again"));
+  await until(() => acked(fake).includes(1));
+  await stop();
+
+  fake.dropAcks.delete(1);
+  await start(() => ({ text: "I can see the error now" }));
+  await until(() => acked(fake).filter((seq) => seq === 1).length === 2);
+  const input = calls.at(-1)!.lastText;
+  assert.match(input, /"seq":1/);
+  assert.match(input, /previous model request failed.*Too many images\./i);
+  assert.ok(input.length < 2_000, "a long provider error does not crowd out the event");
+});
+
 test("a turn cut by the runner stopping ends as stopped", async () => {
   const { fake, start, calls } = await world();
   const stop = await start(() => new Promise<Answer>(() => {}));
@@ -676,6 +693,45 @@ test("the images of the owner's message go into the turn as images", async () =>
   assert.deepEqual(calls[0]!.lastImages, ["image/png"]);
   assert.ok(calls[0]!.lastText.includes(png), "the path is in the text too");
 });
+
+for (const limited of [true, false]) {
+  test(limited ? "only the newest image is sent when the provider limits images" : "a provider without a limit receives all images", async () => {
+    const { fake, start, calls, config } = await world({ turnFold: false });
+    await mkdir(config.agentDir, { recursive: true });
+    await writeFile(join(config.agentDir, "models.json"), JSON.stringify({
+      providers: { [limited ? PROVIDER : "other"]: { maxImagesPerRequest: 1 } },
+    }));
+    const old = join(config.home, "old.png");
+    const read = join(config.home, "read.png");
+    const recent = join(config.home, "recent.png");
+    for (const path of [old, read, recent]) {
+      await writeFile(path, Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63f8cfc0f01f00050001ff89993d1d0000000049454e44ae426082", "hex"));
+    }
+    await start((call) => call.lastText.includes("read another")
+      ? { calls: [{ tool: "read", args: { path: read } }] }
+      : { text: "seen" });
+    fake.push({ ...ui(1, "first"), attachments: [{ path: old, mime_type: "image/png", size: 70 }] });
+    await until(() => acked(fake).includes(1));
+    fake.push(ui(2, "read another"));
+    await until(() => acked(fake).includes(2));
+    fake.push({ ...ui(3, "last"), attachments: [{ path: recent, mime_type: "image/png", size: 70 }] });
+    await until(() => acked(fake).includes(3));
+
+    const request = calls.at(-1)!;
+    const images = request.messages.flatMap((message) =>
+      Array.isArray(message.content) ? message.content.filter((part) => part.type === "image") : []);
+    assert.equal(images.length, limited ? 1 : 3);
+    if (limited) {
+      assert.deepEqual(request.lastImages, ["image/png"]);
+      assert.ok(request.userTexts.some((text) => text.includes(`Image omitted from the model request. Read ${JSON.stringify(old)}`)));
+      const toolResult = request.messages.find((message) => message.role === "toolResult");
+      assert.ok(toolResult?.content.some((part) => part.type === "text" && part.text.includes(`Read ${JSON.stringify(read)}`)));
+      const [session] = (await readdir(config.sessionDir)).filter((file) => file.endsWith(".jsonl"));
+      const transcript = await readFile(join(config.sessionDir, session!), "utf8");
+      assert.equal(transcript.match(/"type":"image"/g)?.length, 3, "the recorded images are still present");
+    }
+  });
+}
 
 test("an event handled already is dropped when it comes again", async () => {
   const { fake, start, calls } = await world();

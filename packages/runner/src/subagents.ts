@@ -69,7 +69,7 @@ export interface StartRequest {
 
 export interface SubAgentsOptions {
   config: Config;
-  /** Pi's setup for a sub-agent's session: no tools beside Pi's own, no extensions. */
+  /** Pi's setup for a sub-agent's session: Pi's own tools and the shared provider limits. */
   setup: PiSetup;
   /** The main agent's client of the backend; each sub-agent calls it as itself. */
   backend: Backend;

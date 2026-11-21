@@ -191,16 +191,23 @@ export function turnLines(events: DeliveredEvent[], slack?: SlackDrawing): TurnL
   ];
 }
 
-/** What Pi could not load immediately before this turn; details are in the runner log. */
-export function withExtensionNotes(input: string, notices: readonly ExtensionNotice[]): string {
-  if (notices.length === 0) return input;
+/** Runner diagnostics outside the event block, not part of any event. */
+export function withRunnerNotes(input: string, notices: readonly ExtensionNotice[], previousModelError?: string): string {
+  if (notices.length === 0 && previousModelError === undefined) return input;
   const note = {
-    extensions: notices.slice(-5).map(({ kind, path, reason }) => ({
-      kind, path: path.slice(0, 240), reason: reason.split("\n")[0]!.slice(0, 240),
-    })),
-    total: notices.length,
+    ...(notices.length > 0 ? {
+      extensions: notices.slice(-5).map(({ kind, path, reason }) => ({
+        kind, path: path.slice(0, 240), reason: reason.split("\n")[0]!.slice(0, 240),
+      })),
+      total: notices.length,
+    } : {}),
+    ...(previousModelError === undefined ? {} : {
+      model_error: `The previous model request failed: ${previousModelError.length > 1_000
+        ? `${previousModelError.slice(0, 999)}…`
+        : previousModelError}`,
+    }),
   };
-  return `${input}\n\n<runner_notes>\n${JSON.stringify(note)}\n</runner_notes>`;
+  return `${input}\n\n<runner_notes>\n${JSON.stringify(note).replaceAll("<", "\\u003c")}\n</runner_notes>`;
 }
 
 /** One input for the events handed over together. */

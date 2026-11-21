@@ -64,13 +64,14 @@ import {
 } from "./prompts.ts";
 import { SubAgents } from "./subagents.ts";
 import { backendTools, jobTools, subAgentTools } from "./tools.ts";
-import { formatEvents, withExtensionNotes } from "./turn-input.ts";
+import { formatEvents, withRunnerNotes } from "./turn-input.ts";
 
 export interface RunnerOptions {
   config: Config;
   backend: Backend;
   modelRuntime: ModelRuntime;
   settings: () => SettingsManager;
+  imageLimits?: ReadonlyMap<string, number>;
   log?: (line: string) => void;
   /** The first wait before a sub-agent's notice or a job's end is sent again (ADR-0022, ADR-0030). */
   retryMs?: number;
@@ -110,6 +111,8 @@ const isHeartbeat = (event: DeliveredEvent) => event.source === "heartbeat";
 
 const failure = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+const modelError = (message: { errorMessage?: string }) => message.errorMessage ?? "The provider did not give a reason.";
+
 /** A turn of the night as its step: a turn the runner cut is a step that did not get done. */
 const stageOf = ({ result, reason, turn_id }: Outcome & { turn_id: string }): NightTurnReport =>
   result === "done" ? { result, turn_id } : { result: "failed", reason: result === "stopped" ? `Stopped: ${reason}` : (reason ?? ""), turn_id };
@@ -146,7 +149,7 @@ export class Runner {
     this.log = options.log ?? ((line) => process.stderr.write(`${line}\n`));
     this.extensionTrials = new MemoryExtensionTrials(join(this.config.home, ".penelope-extension-trials.json"), this.log);
     const turnModels = new TurnModels(options.modelRuntime, this.backend, this.log);
-    const pi = { config: options.config, modelRuntime: options.modelRuntime, turnModels, settings: options.settings, log: this.log };
+    const pi = { config: options.config, modelRuntime: options.modelRuntime, turnModels, settings: options.settings, log: this.log, imageLimits: options.imageLimits };
     // A sub-agent has Pi's tools alone, and its turns are not folded.
     this.subAgents = new SubAgents({
       config: options.config,
@@ -337,8 +340,8 @@ export class Runner {
   /**
    * One turn: Pi runs `input`, and what comes during it joins it. Then the
    * backend is told the turn ended (it commits /memory), and the events are
-   * acked. A turn that fails is not acked: the backend hands its events over
-   * again. The end tells how the turn went and what was handed into it, for
+   * acked unless running Pi threw. A provider error returned by Pi is still a
+   * finished attempt. The end tells how the turn went and what was handed into it, for
    * the activity record (ADR-0038); that is also what this returns.
    *
    * An ordinary turn is one of her day's session, made of events: events can
@@ -351,9 +354,11 @@ export class Runner {
     const { night, images } = options;
     const ordinary = night === undefined;
     const main = this.session?.session === session ? this.session : undefined;
+    const previous = lastAssistant(session.messages);
+    const previousModelError = previous?.stopReason === "error" ? modelError(previous) : undefined;
     let preparing: string | undefined;
     try {
-      if (main) input = withExtensionNotes(input, await main.beforeTurn());
+      input = withRunnerNotes(input, await main?.beforeTurn() ?? [], previousModelError);
     } catch (error) {
       preparing = `Could not reload extensions: ${failure(error)}`;
     }
@@ -410,10 +415,10 @@ export class Runner {
     let outcome = this.outcome(session, thrown);
     if (ordinary && !failed) {
       const idle = turn.heartbeat && !called;
-      if (this.config.turnFold && !spoke && !idle && !this.stopping) {
+      if (outcome.result === "done" && this.config.turnFold && !spoke && !idle && !this.stopping) {
         asked = true;
         const asking = this.outcome(session, await this.ask(session, recorder.turnId));
-        if (outcome.result === "done" && asking.result !== "done") {
+        if (asking.result !== "done") {
           outcome = { ...asking, reason: `The request before folding: ${asking.reason ?? ""}` };
         }
       }
@@ -453,7 +458,7 @@ export class Runner {
       return { result: "stopped", reason: "The runner was stopping." };
     }
     if (thrown !== undefined) return { result: "failed", reason: thrown };
-    if (last?.stopReason === "error") return { result: "failed", reason: last.errorMessage ?? "The model's request failed." };
+    if (last?.stopReason === "error") return { result: "failed", reason: modelError(last) };
     if (last?.stopReason === "aborted") return { result: "failed", reason: "The run was cancelled." };
     return { result: "done" };
   }

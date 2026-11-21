@@ -9,6 +9,7 @@ import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 
 import { Backend } from "./backend.ts";
 import { ConfigError, readConfig } from "./config.ts";
+import { readImageLimits } from "./image-limit.ts";
 import { Runner } from "./runner.ts";
 
 export interface Result {
@@ -39,14 +40,17 @@ async function serve(env: Readonly<Record<string, string | undefined>>): Promise
     }
     throw error;
   }
+  const modelsPath = `${config.agentDir}/models.json`;
+  const imageLimits = await readImageLimits(modelsPath);
   const modelRuntime = await ModelRuntime.create({
     authPath: `${config.agentDir}/auth.json`,
-    modelsPath: `${config.agentDir}/models.json`,
+    modelsPath,
   });
   const runner = new Runner({
     config,
     backend: new Backend({ url: config.backend.url, token: config.backend.token, agent: config.agent }),
     modelRuntime,
+    imageLimits,
     settings: () => SettingsManager.create(config.home, config.agentDir),
   });
   const controller = new AbortController();

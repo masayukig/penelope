@@ -17,6 +17,7 @@ import {
 import type { NightTurnStage, TurnResult } from "@penelope/contract";
 
 import type { Config } from "./config.ts";
+import { imageLimitExtension } from "./image-limit.ts";
 import type { TurnModels } from "./model-settings.ts";
 import type { MemoryFile } from "./night-memory.ts";
 import { type ExtensionNotice, type MemoryExtensionTrials, SessionExtensions } from "./extensions.ts";
@@ -31,6 +32,7 @@ export interface PiSetup {
   tools: ToolDefinition[];
   /** The runner's own factories, given to Pi as they are. */
   extensions: ExtensionFactory[];
+  imageLimits?: ReadonlyMap<string, number> | undefined;
   /** Night workers use only the supplied file tools, with no skills or other resources. */
   fileOnly?: boolean;
   /** Opt in to owner and memory extensions, only for the main session. */
@@ -146,7 +148,9 @@ export async function openSession(
     settingsManager,
     noExtensions: true,
     noSkills: fileOnly === true,
-    extensionFactories: setup.extensions,
+    extensionFactories: setup.imageLimits?.size
+      ? [...setup.extensions, imageLimitExtension(setup.imageLimits)]
+      : setup.extensions,
     ...(disk ? { additionalExtensionPaths: disk.paths } : {}),
     noContextFiles: true,
     noPromptTemplates: true,
