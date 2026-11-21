@@ -49,3 +49,4 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0045 | [夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md) | Accepted |
 | 0046 | [モデル要求では接続先の上限に合わせて古い画像を省き、失敗を次のターンに伝える](0046-budget-images-before-model-requests.md) | Accepted |
 | 0047 | [A2A のメッセージで画像を受け、Task の成果として返す](0047-exchange-images-over-a2a.md) | Accepted |
+| 0048 | [A2A は `ask-agent` で名前を指定して頼み、裏の仕事で返事を待つ](0048-ask-agents-by-name-and-wait-in-a-background-job.md) | Accepted |
