@@ -19,7 +19,7 @@ penelope では、記憶の検査をやめる（ADR-0006）。Pi は sandbox の
 
 ## Decision
 
-夜の段の構成と照合・整理の分担は [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) で置き換えた。本体のセッションを 1 本にすること、backend と runner の分担、日中の compaction は変えない。
+夜の段の構成と照合・整理の分担は [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) で置き換えた。棚卸しの夜の整理係は [ADR-0050 夜は記憶の見取り図を渡し、棚卸しで中身と構成を分けて見直す](0050-organize-memory-with-a-map-and-a-weekly-review.md) に従う。本体のセッションを 1 本にすること、backend と runner の分担、日中の compaction は変えない。
 
 ### 3 段は残す
 
@@ -64,6 +64,7 @@ penelope では、記憶の検査をやめる（ADR-0006）。Pi は sandbox の
 - Related: ADR-0008 プロンプトは事実と環境だけを伝え、やり方は任せる
 - Related: ADR-0015 終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない（compaction の手前に畳み込みを足す）
 - Related（natsumi、このリポジトリの外）: ADR 0009「長期記憶と、夜の session の切り替え」、ADR 0055「記憶の組み直しは、人格を持たない整理係が夜に行う」、ADR 0068「整理係は人間の記憶のように、工程を分けて古い記憶を要約し、出来事を知識にする」
+- Related: [ADR-0050 夜は記憶の見取り図を渡し、棚卸しで中身と構成を分けて見直す](0050-organize-memory-with-a-map-and-a-weekly-review.md)（棚卸しの夜だけ整理係を 2 ターンに分ける。本体のセッションは 1 本のまま）。
 
 ## References
 

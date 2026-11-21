@@ -94,6 +94,7 @@ natsumi では、Slack・外のエージェントの返事・監視の警報を 
 - Related: [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md)（夜の段構成と段が失敗したときの扱い）
 - Related: ADR-0008 プロンプトは事実と環境だけを伝え、やり方は任せる
 - Related: ADR-0011 sandbox の image は開発の一式を持ち、汎用のユーザーの HOME で作業する
+- Related: [ADR-0051 照合と整理の基準は別々に持ち、成功したときだけ進める](0051-carry-unfinished-night-work-forward.md)（失敗した段の入力は次の夜に持ち越す。出来事の処理や `/sources` の保存期間は変えない）。
 
 ## References
 
