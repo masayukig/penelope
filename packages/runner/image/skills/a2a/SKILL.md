@@ -11,7 +11,7 @@ Use `ask-agent` in `job_start` to send a request and wait for the reply in one b
 {"command":"ask-agent helper 'Check the report'"}
 ```
 
-The job's end comes as an event of source `job`, with the reply, Task state and ID, and any saved image paths. Read the job's output file if the reply is longer than the tail in the event.
+The job's end comes as an event of source `job`, with the start of the reply, Task state and ID, and saved paths. `Reply file` points to the full text under `~/a2a/<Task ID>/`. When `Reply` says it was truncated, read that file for the rest.
 
 - `input-required`: use the `Next` command with `job_start`, replacing `<answer>` with your answer to the same Task.
 - `timed-out`: use the `Next` command with `job_start` to resume waiting on the same Task, without resending or canceling it. If the runner's limit ended the job first, look for the Task ID in its output before deciding whether to send again.
@@ -28,7 +28,7 @@ Pass a local file path, not a URL, to `ask-agent --image`. Repeat the flag for u
 {"command":"ask-agent helper 'What does this diagram show?' --image ./diagram.png"}
 ```
 
-Images from the reply are saved in a new directory under `~/a2a/<Task ID>/`. Use the paths in `Images` to read them.
+Images from the reply are saved in a new directory under `~/a2a/<Task ID>/`. Use the paths or directory in `Images` to find them.
 
 ## Direct `a2a` use
 

@@ -2,8 +2,12 @@
 import { spawnSync } from "node:child_process";
 import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { parse } from "yaml";
+
+const REPLY_PREVIEW_CHARS = 2000;
+const DEFAULT_JOB_TAIL_CHARS = 4000;
+const IMAGE_LIST_CHARS = 1200;
 
 const usage = `Usage: ask-agent <name> '<message>' [--image <path>]...
        ask-agent <name> --task <id> '<answer>' [--image <path>]...
@@ -13,6 +17,7 @@ const jobStart = (args: string[], cwd?: string) =>
   `job_start ${JSON.stringify({ command: ["ask-agent", ...args.map(quote)].join(" "), ...(cwd ? { cwd } : {}) })}`;
 const validId = (id: unknown): id is string => typeof id === "string" && /^[A-Za-z0-9_][A-Za-z0-9._-]{0,199}$/.test(id);
 const oneLine = (value: string) => value.replace(/[\x00-\x1f\x7f]/g, " ");
+const prefix = (value: string, max: number) => value.slice(0, max).replace(/[\uD800-\uDBFF]$/, "");
 
 function request([name, first, ...rest]: string[]) {
   if (!name || !first) return;
@@ -103,6 +108,23 @@ async function directory(path: string) {
   return path;
 }
 
+async function saveReply(dir: string, reply: string): Promise<string> {
+  for (let n = 1; ; n++) {
+    const path = join(dir, n === 1 ? "reply.md" : `reply-${n}.md`);
+    try {
+      await writeFile(path, reply, { flag: "wx", mode: 0o600 });
+      return path;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+  }
+}
+
+function displayPath(path: string) {
+  // An unusually long HOME path must not crowd out the Task details.
+  return path.length <= 512 && path === oneLine(path) ? path : `~/${relative(homedir(), path)}`;
+}
+
 async function main(args: string[]) {
   const req = request(args);
   if (!req) { console.error(usage); return 2; }
@@ -130,12 +152,27 @@ async function main(args: string[]) {
   }
 
   const { name, label } = entry;
-  const emit = (text: string) => console.log(text.replaceAll(token, "[redacted]"));
+  const redact = (text: string) => text.replaceAll(token, token.length >= 10 ? "[redacted]" : "*");
   let id = req.taskId;
-  function report(state: string, reply = "", files: string[] = [], reason?: string, next?: string) {
-    emit(`Reply:\n${reply || "(none)"}\nAgent: ${oneLine(label)} (${name})\nState: ${state}\nTask ID: ${id ?? "(none)"}\nImages: ${JSON.stringify(files)}`);
-    if (reason) emit(`Reason: ${oneLine(reason).slice(0, 600)}`);
-    if (next) emit(`Next: ${next}`);
+  function report(state: string, options: { reply?: string; files?: string[]; replyFile?: string; reason?: string; next?: string } = {}) {
+    const { reply = "", files = [], replyFile, reason, next } = options;
+    const list = JSON.stringify(files.map(displayPath));
+    const images = list.length <= IMAGE_LIST_CHARS ? list : `(see directory ${displayPath(dirname(files[0]!))})`;
+    const footer = redact([
+      `Agent: ${oneLine(label)} (${name})`,
+      `State: ${state}`,
+      `Task ID: ${id ?? "(none)"}`,
+      `Images: ${images}`,
+      `Reply file: ${replyFile ? displayPath(replyFile) : "(none)"}`,
+      ...(reason ? [`Reason: ${prefix(oneLine(redact(reason)), 600)}`] : []),
+      ...(next ? [`Next: ${next}`] : []),
+    ].join("\n"));
+    const marker = replyFile ? "(truncated; read the Reply file)" : "(truncated; no Reply file available)";
+    // Count the separators too, so even the start of the preview survives the runner's default tail.
+    const budget = DEFAULT_JOB_TAIL_CHARS - footer.length - "Reply:\n\n\n".length;
+    const preview = reply.length <= Math.min(REPLY_PREVIEW_CHARS, budget) ? reply
+      : `${prefix(reply, Math.min(REPLY_PREVIEW_CHARS, budget - marker.length - 1))}\n${marker}`;
+    console.log(`Reply:\n${preview || "(none)"}\n${footer}`);
   }
 
   const cwd = await mkdtemp(join(tmpdir(), "ask-agent-"));
@@ -145,43 +182,55 @@ async function main(args: string[]) {
     await writeFile(join(cwd, ".env"), "");
     if (req.text !== undefined) {
       const sent = callA2a(["send", "--async", ...(id ? ["--task-id", id] : []), ...req.images.flatMap((path) => ["--file-part", path]), req.text], auth, cwd);
-      if (sent.code !== 0) { report("error", "", [], sent.problem); return 1; }
+      if (sent.code !== 0) { report("error", { reason: sent.problem }); return 1; }
       const received = sent.event?.task?.id;
       if (!validId(received) || (id && id !== received)) {
-        report("error", textOf(sent.event?.message), [], "Send did not return the expected Task ID; no retry was made.");
+        report("error", { reply: redact(textOf(sent.event?.message)), reason: "Send did not return the expected Task ID; no retry was made." });
         return 1;
       }
       id = received;
     }
     if (!id) throw new Error("Missing Task ID");
     // Leave the ID in the job log even if the runner stops us before a2a times out.
-    emit(`Waiting for ${name}, Task ID: ${id}`);
+    console.log(redact(`Waiting for ${name}, Task ID: ${id}`));
     const waitAgain = jobStart([name, "--wait", id]);
+    let taskDir: string;
     let filesDir: string;
     try {
       const root = await directory(join(homedir(), "a2a"));
-      filesDir = await mkdtemp(join(await directory(join(root, id)), "result-"));
+      taskDir = await directory(join(root, id));
+      filesDir = await mkdtemp(join(taskDir, "result-"));
     } catch {
-      report("error", "", [], "Could not create the Task's image directory under HOME.");
+      report("error", { reason: "Could not create the Task's output directory under HOME." });
       return 1;
     }
     const got = callA2a(["task", "get", "--wait", "--poll-interval", "30s", "--timeout", "2h", "--save-fileparts", filesDir, id], auth, cwd);
     const files = (await readdir(filesDir)).sort().map((file) => join(filesDir, file));
     if (!files.length) await rm(filesDir, { recursive: true });
-    if (got.code === 5) { report("timed-out", "", files, "The remote Task was not canceled.", waitAgain); return 5; }
-    if (got.code !== 0) { report("error", "", files, got.problem); return 1; }
+    if (got.code === 5) { report("timed-out", { files, reason: "The remote Task was not canceled.", next: waitAgain }); return 5; }
+    if (got.code !== 0) { report("error", { files, reason: got.problem }); return 1; }
 
     const task = got.event?.task;
     const state = task?.id === id ? task?.status?.state?.replace(/^TASK_STATE_/, "").toLowerCase().replaceAll("_", "-") : undefined;
-    const reply = [textOf(task?.status?.message), ...(task?.artifacts ?? []).map(textOf)].filter(Boolean).join("\n");
-    switch (state) {
-      case "input-required": report(state, reply, files, undefined, jobStart([name, "--task", id, "<answer>"])); return 0;
-      case "completed": report(state, reply, files); return 0;
-      case "failed": case "rejected": case "canceled": case "auth-required":
-        report(state, reply, files, textOf(task?.status?.message) || `The remote Task is ${state}.`);
-        return 1;
-      default: report("error", "", files, "GetTask did not return the expected Task in a terminal or interrupted state."); return 1;
+    const done = state === "completed" || state === "input-required";
+    if (!done && state !== "failed" && state !== "rejected" && state !== "canceled" && state !== "auth-required") {
+      report("error", { files, reason: "GetTask did not return the expected Task in a terminal or interrupted state." });
+      return 1;
     }
+    const statusText = textOf(task?.status?.message);
+    const reply = redact([statusText, ...(task?.artifacts ?? []).map(textOf)].filter(Boolean).join("\n"));
+    const next = state === "input-required" ? jobStart([name, "--task", id, "<answer>"]) : undefined;
+    let replyFile: string | undefined;
+    if (reply) {
+      try {
+        replyFile = await saveReply(taskDir, reply);
+      } catch {
+        report(state, { reply, files, next, reason: "Could not save the full reply under HOME." });
+        return 1;
+      }
+    }
+    report(state, { reply, replyFile, files, next, reason: done ? undefined : statusText || `The remote Task is ${state}.` });
+    return done ? 0 : 1;
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

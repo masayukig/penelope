@@ -87,7 +87,7 @@ test("a question gives a job_start command to answer the same task", async (t) =
   const [send] = await calls();
   assert.equal(send?.[send.indexOf("--task-id") + 1], "task-1");
   assert.equal(send?.at(-1), "Main");
-  assert.match(result.stdout, /Reply:\nWhich branch\?\nAgent: ヘルパー \(helper\)\nState: input-required\nTask ID: task-1\nImages: \[\]\nNext: job_start .*--task.*task-1.*<answer>.*\n$/);
+  assert.match(result.stdout, /Reply:\nWhich branch\?\nAgent: ヘルパー \(helper\)\nState: input-required\nTask ID: task-1\nImages: \[\]\nReply file: .*\/a2a\/task-1\/reply\.md\nNext: job_start .*--task.*task-1.*<answer>.*\n$/);
 });
 
 test("a wait timeout offers to wait again without resending or canceling the task", async (t) => {
@@ -98,22 +98,27 @@ test("a wait timeout offers to wait again without resending or canceling the tas
   assert.deepEqual(extra, []);
   assert.deepEqual(get?.slice(0, 2), ["task", "get"]);
   assert.equal(get?.[get.indexOf("--timeout") + 1], "2h");
-  assert.match(result.stdout, /State: timed-out\nTask ID: task-1\nImages: \[\]\nReason: The remote Task was not canceled\.\nNext: job_start .*--wait.*task-1.*\n$/);
+  assert.match(result.stdout, /State: timed-out\nTask ID: task-1\nImages: \[\]\nReply file: \(none\)\nReason: The remote Task was not canceled\.\nNext: job_start .*--wait.*task-1.*\n$/);
 });
 
-test("completion keeps the status and saved image paths after a long reply", async (t) => {
-  const { home, run } = await setup(t, `
-const dir = args[args.indexOf('--save-fileparts') + 1];
-fs.writeFileSync(dir + '/render.png', 'image bytes');
-console.log(JSON.stringify({task: {id: 'task-1', status: {state: 'TASK_STATE_COMPLETED'}, artifacts: [{parts: [{text: 'x'.repeat(4200)}]}]}}));`);
+test("a long question leaves its beginning, full reply file and next step in the job tail", async (t) => {
+  const question = "Which branch?";
+  const details = "x".repeat(4200);
+  const task = {
+    id: "task-1",
+    status: { state: "TASK_STATE_INPUT_REQUIRED", message: { parts: [{ text: question }] } },
+    artifacts: [{ parts: [{ text: details }] }],
+  };
+  const { home, run } = await setup(t, `console.log(${JSON.stringify(JSON.stringify({ task }))});`);
   const result = run(["helper", "--wait", "task-1"]);
   assert.equal(result.status, 0, result.stderr);
-  assert.ok(result.stdout.includes("x".repeat(4200)));
   const tail = result.stdout.slice(-4000);
-  assert.match(tail, /Agent: ヘルパー \(helper\)\nState: completed\nTask ID: task-1\n/);
-  const [image] = JSON.parse(tail.match(/Images: (.+)/)![1]!);
-  assert.ok(image.startsWith(join(home, "a2a", "task-1") + "/"));
-  assert.equal(await readFile(image, "utf8"), "image bytes");
+  assert.match(tail, /Reply:\nWhich branch\?\n/);
+  assert.match(tail, /\(truncated; read the Reply file\)\nAgent: ヘルパー \(helper\)\nState: input-required\nTask ID: task-1\nImages: \[\]\nReply file: [^\n]+\nNext: job_start .*--task.*task-1.*\n$/);
+  assert.ok(!result.stdout.includes(details));
+  const replyFile = tail.match(/Reply file: (.+)/)![1]!;
+  assert.equal(replyFile, join(home, "a2a", "task-1", "reply.md"));
+  assert.equal(await readFile(replyFile, "utf8"), `${question}\n${details}`);
 });
 
 test("a2a errors are reported without exposing the bearer value or retrying the send", async (t) => {
