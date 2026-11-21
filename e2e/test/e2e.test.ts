@@ -653,10 +653,11 @@ describe("the Pod end to end", () => {
     // The mention is now, and brings the fetched message with it.
     await replied("E2E-REPLY-SLACK");
     const [call] = await callsFor("E2E-SLACK-MENTION", 0);
-    // The mention is inline, so its image goes in as an image too; the scripted model takes no images, and Pi says so after the text.
-    const [input, omitted] = where(call!).input.split(/(?<=<\/events>)/);
-    assert.match(omitted ?? "", /image/, "the image goes in beside the text");
-    const events = eventLines(input!);
+    // The mention is inline, so its image goes in beside the text of this input.
+    const user = call!.messages.findLast((message) => message.role === "user");
+    assert.ok(Array.isArray(user?.content) && user.content.some((part) =>
+      part.type === "image_url" && part.image_url?.url.startsWith("data:image/png;base64,")), "the image goes in beside the text");
+    const events = eventLines(where(call!).input);
     const mention = events.find((line): line is TurnEvent => line.kind === undefined && line.source === "slack" && line.delivery === "now");
     assert.ok(mention?.text !== undefined, JSON.stringify(events));
 
