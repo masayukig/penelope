@@ -46,7 +46,7 @@
 - Related: [ADR-0035 道具の使い方とどの配置にも同じ skill は sandbox の image に skill として入れ、オーナー・記憶の後に並べる](0035-tool-usage-and-shared-skills-as-image-skills.md) と [ADR-0042 配置が一覧に載せる image の skill を選ぶ](0042-select-image-skills-per-deployment.md) の扱う image の `goals` skill は仕事の計画を扱う。記憶の書き方は記憶の skill に置く。
 - Related: [ADR-0045 夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md)。時点と根拠の 1 行は共通の記憶の形であり、モデル別の手順の層は変えない。
 - Related: [ADR-0050 夜は記憶の見取り図を渡し、棚卸しで中身と構成を分けて見直す](0050-organize-memory-with-a-map-and-a-weekly-review.md)（夜に目的を使う）。
-- Related: [ADR-0052 棚卸しで移動した記憶への参照は runner が直す](0052-keep-memory-links-working-after-moves.md)（目的の本文の意味は変えず、移動したファイルへの参照だけを runner が修正する）。
+- Related: [ADR-0052 夜の係が移動した記憶への参照は runner が直す](0052-repair-memory-references-after-nightly-moves.md)（目的の本文の意味は変えず、移動したファイルへの参照だけを runner が修正する）。
 - Related: [ADR-0053 目的に沿った問いで記憶を評価する CLI を持つ](0053-evaluate-memory-with-purpose-questions.md)（目的に置いた問いを CLI の評価に使う）。
 
 ## References

@@ -20,7 +20,7 @@ natsumi の server は、ターンの終わりに記憶をコミットし、そ�
 
 ## Decision
 
-[ADR-0049 配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md) は固定名と書き手の約束を一部更新する。[ADR-0052 棚卸しで移動した記憶への参照は runner が直す](0052-keep-memory-links-working-after-moves.md) は runner による機械的な参照の修正を加える。検査を復活させず、コミットは sandbox の外で行う。
+[ADR-0049 配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md) は固定名と書き手の約束を一部更新する。[ADR-0052 夜の係が移動した記憶への参照は runner が直す](0052-repair-memory-references-after-nightly-moves.md) は runner による機械的な参照の修正を加える。検査を復活させず、コミットは sandbox の外で行う。
 
 ### `/memory` の形を保つ
 
@@ -66,7 +66,7 @@ natsumi の server は、ターンの終わりに記憶をコミットし、そ�
 - Related: ADR-0008 プロンプトは事実と環境だけを伝え、やり方は任せる
 - Related（natsumi、このリポジトリの外）: ADR 0018「記憶を git で持ち、shell で読み書きし、夜に組み直す」、ADR 0055「記憶の組み直しは、人格を持たない整理係が夜に行う」、ADR 0067「本人が ssh で記憶を自分でコミットする」、ADR 0068「整理係は人間の記憶のように、工程を分けて古い記憶を要約し、出来事を知識にする」
 - Superseded by（一部）: [ADR-0049 配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md)（Decision「`/memory` の形を保つ」と「検査をやめる」に任意の固定名と、強制しない書き手の約束を加える）。
-- Related: [ADR-0052 棚卸しで移動した記憶への参照は runner が直す](0052-keep-memory-links-working-after-moves.md)（Decision「コミットは sandbox の外で backend がする」は維持し、runner は参照を直す）。
+- Related: [ADR-0052 夜の係が移動した記憶への参照は runner が直す](0052-repair-memory-references-after-nightly-moves.md)（Decision「コミットは sandbox の外で backend がする」は維持し、runner は参照を直す）。
 
 ## References
 

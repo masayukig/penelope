@@ -53,5 +53,5 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0049 | [配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md) | Accepted |
 | 0050 | [夜は記憶の見取り図を渡し、棚卸しで中身と構成を分けて見直す](0050-organize-memory-with-a-map-and-a-weekly-review.md) | Accepted |
 | 0051 | [照合と整理の基準は別々に持ち、成功したときだけ進める](0051-carry-unfinished-night-work-forward.md) | Accepted |
-| 0052 | [棚卸しで移動した記憶への参照は runner が直す](0052-keep-memory-links-working-after-moves.md) | Accepted |
+| 0052 | [夜の係が移動した記憶への参照は runner が直す](0052-repair-memory-references-after-nightly-moves.md) | Accepted |
 | 0053 | [目的に沿った問いで記憶を評価する CLI を持つ](0053-evaluate-memory-with-purpose-questions.md) | Accepted |

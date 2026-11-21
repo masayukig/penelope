@@ -54,7 +54,7 @@ runner は毎晩、整理係に記憶全体の見取り図を渡す。ファイ�
 - Related: [ADR-0049 配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md)（`PURPOSE.md` と毎回読む層）。
 - Related: [ADR-0038 活動の記録は backend が 1 行の要約として持ち、ターンの結果と夜の段の結果を runner が知らせる](0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md) の Decision 項 2（夜の切り替えは、runner が段ごとの結果をまとめて知らせる）に、目安の超過を加える。
 - Related: [ADR-0051 照合と整理の基準は別々に持ち、成功したときだけ進める](0051-carry-unfinished-night-work-forward.md)（整理係の差分の基準）。
-- Related: [ADR-0052 棚卸しで移動した記憶への参照は runner が直す](0052-keep-memory-links-working-after-moves.md)（構成のターンで動かしたファイルの参照と、切れたリンクを次の見取り図に出す扱い）。
+- Related: [ADR-0052 夜の係が移動した記憶への参照は runner が直す](0052-repair-memory-references-after-nightly-moves.md)（夜の係が動かしたファイルの参照と、切れたリンクを次の見取り図に出す扱い）。
 - Related: [ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える](0007-one-session-switched-nightly-with-a-one-turn-curator.md)（本体のセッションは 1 本のまま）。
 - Related: [ADR-0045 夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md)（配置ごとの知識の目的を共通の入力に足し、モデル別の手順の層は変えない）。
 
