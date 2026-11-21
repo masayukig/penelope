@@ -11,11 +11,11 @@ backend の UI 向けの API と同じ TCP の待ち受け（`PENELOPE_LISTEN`�
 
 | 道 | 中身 |
 | --- | --- |
-| `GET /a2a/.well-known/agent-card.json` | Agent Card。token なしで読める |
+| `GET /.well-known/agent-card.json`（従来の `GET /a2a/.well-known/agent-card.json` も同じ） | Agent Card。token なしで読める |
 | `POST /a2a/`（`POST /a2a` も同じ） | JSON-RPC の呼び出し |
 
-- 受け口が閉じているとき（送り手の allow-list が空のとき）は、`/a2a` と `/a2a/` の下のすべての道が、ほかの知らない道と同じ `404`（`{error}`）である。Agent Card も返さない。Web UI のページにもならない。
-- `/a2a/` の下の道には、オーナーのログインの cookie は要らず、使わない。
+- 受け口が閉じているとき（送り手の allow-list が空のとき）は、ルートの Agent Card、`/a2a`、`/a2a/` の下のすべての道が `404`（`{error}`）になる。Web UI のページは返さない。
+- これらの道には、オーナーのログインの cookie は要らず、使わない。
 
 ## 版と呼び出し
 
@@ -34,6 +34,9 @@ backend の UI 向けの API と同じ TCP の待ち受け（`PENELOPE_LISTEN`�
 
 ## Agent Card
 
+接続設定の宛先にはホストのルート（例: `https://helper.agents.example.com/`）を書き、a2a-cli の `-a` にそのまま渡す。
+a2a-cli はルートの `/.well-known/agent-card.json` から Agent Card を読み、`a2a send` は Card に書かれた `/a2a/` の呼び出し口へ送る。
+
 | 欄 | 中身 |
 | --- | --- |
 | `name` | エージェントの名前（`PENELOPE_AGENT_NAME`、無ければアバターの名前。UI に出す名前と同じ） |
@@ -43,7 +46,7 @@ backend の UI 向けの API と同じ TCP の待ち受け（`PENELOPE_LISTEN`�
 | `securitySchemes` | `bearer`（HTTP の Bearer）1 つ |
 | `defaultInputModes`・`defaultOutputModes` | `text/plain` |
 
-- 応答は `Cache-Control: public, max-age=300`。
+- どちらの道も同じ Agent Card を返す。応答は `Cache-Control: public, max-age=300`。
 
 ## 送り手の確かめ
 

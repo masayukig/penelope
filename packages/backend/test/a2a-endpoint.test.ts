@@ -118,6 +118,15 @@ describe("the A2A way in", () => {
     assert.equal(card.capabilities.pushNotifications ?? false, false);
   });
 
+  it("serves the same public Agent Card at the host root and the legacy path", async (t) => {
+    const { port } = await setup(t);
+    const root = await ask({ port }, "/.well-known/agent-card.json");
+    const legacy = await ask({ port }, "/a2a/.well-known/agent-card.json");
+    assert.equal(root.status, 200);
+    assert.deepEqual(root.json(), legacy.json());
+    assert.equal(root.headers["cache-control"], legacy.headers["cache-control"]);
+  });
+
   it("takes a request as a working task, and hands back her answer when it is done", async (t) => {
     // Guards against: a sender's request lost, or her answer not where the senders' clients read it (the artifact).
     const { base, inbox, queue } = await setup(t);

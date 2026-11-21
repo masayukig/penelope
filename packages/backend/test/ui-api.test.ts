@@ -726,23 +726,27 @@ describe("the UI's API", () => {
   describe("the A2A way in", () => {
     const web: Handler = async (_request, response) => sendJson(response, 200, { page: true });
 
-    it("is handed /a2a and what is under it, without a login", async (t) => {
+    it("is handed the A2A paths, including root discovery, without a login", async (t) => {
       // Guards against: the senders' calls going to the Web UI, or asked for the owner's cookie.
       const a2a: Handler = async (request, response) => sendJson(response, 200, { a2a: request.url });
       const { call } = await setup(t, { a2a, web });
-      for (const pathname of ["/a2a", "/a2a/", "/a2a/.well-known/agent-card.json"]) {
+      for (const pathname of ["/a2a", "/a2a/", "/a2a/.well-known/agent-card.json", "/.well-known/agent-card.json"]) {
         const answer = await call(pathname, undefined);
         assert.deepEqual(answer.json(), { a2a: pathname });
       }
-      assert.deepEqual((await call("/a2another", undefined)).json(), { page: true });
+      for (const pathname of ["/", "/a2another", "/.well-known/other.json"]) {
+        assert.deepEqual((await call(pathname, undefined)).json(), { page: true });
+      }
     });
 
     it("is not found while it is closed, rather than the Web UI's page", async (t) => {
       // Guards against: a sender reading the page as an Agent Card, or taking a closed way in for an open one.
       const { call } = await setup(t, { web });
-      const answer = await call("/a2a/.well-known/agent-card.json", undefined);
-      assert.equal(answer.status, 404);
-      assert.equal(typeof answer.json().error, "string");
+      for (const pathname of ["/a2a/.well-known/agent-card.json", "/.well-known/agent-card.json"]) {
+        const answer = await call(pathname, undefined);
+        assert.equal(answer.status, 404, pathname);
+        assert.equal(typeof answer.json().error, "string");
+      }
     });
   });
 
