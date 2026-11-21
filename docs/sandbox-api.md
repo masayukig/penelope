@@ -191,7 +191,7 @@ runner は、本体のセッションにだけ、裏の仕事を扱う 3 つの�
 - body は `{agent, in_reply_to, state, text?, images?}`（型は `A2AReplyRequest`）。
   - `in_reply_to`: 答える `a2a` の出来事の `seq`（[events.md](events.md) の「A2A の出来事」）。Task の依頼の出来事でも、聞き返しへの答えの出来事でもよい。
   - `state`: `completed` は Task を閉じる。`text` と `images` はともに任意で、画像だけでも返せる。`input-required` は送り手に `text` を聞き返し、Task を開いたまま答えを待つ。`text` は必須で、画像は添えられない。
-  - `images`: `reply` と同じ `{name, data}` の並び。PNG・JPEG・GIF・WebP、復号後で 1 枚 5 MiB、4 枚まで。backend は中身の先頭のバイトで種類を確かめ、Task に写しを保存する。合わない画像がある場合は `400`、保存できない場合は `500` で、返事も Task の状態変更も残さない。
+  - `images`: `reply` と同じ `{name, data}` の並び。PNG・JPEG・GIF・WebP、復号後で 1 枚 5 MiB、4 枚まで。backend は中身の先頭のバイトで種類を確かめ、写しを `PENELOPE_ASSETS_DIR` に置き、Task と結び付ける（[backend.md](backend.md#作ったものの写し)）。合わない画像がある場合は `400`、保存できない場合は `500` で、返事も Task の状態変更も残さない。
 - 応答は `200` と `{task_id, state}`（型は `A2AReplyResponse`）。送り手は `GetTask` で読みに来る（[a2a.md](a2a.md)）。
 - `in_reply_to` が `a2a` の出来事の `seq` でなければ `404`、Task が閉じていれば（`completed`・`failed`・`rejected`）`409`、聞き返しに `text` が無ければ `400`。どれも Task は変わらない。
 - `reply_to_agent` では `images` に sandbox のパスの並びを渡す。絶対パスまたは HOME からの相対パスを使う。runner が読み、backend は元のファイルに触れない。

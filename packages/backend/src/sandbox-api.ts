@@ -172,6 +172,10 @@ export function sandboxHandler(options: SandboxOptions): Handler {
           if (error instanceof InboxRefusal) {
             throw new HttpError(error.kind === "no-such-event" ? 404 : error.kind === "closed" ? 409 : 400, error.message);
           }
+          if (error instanceof AssetStoreError) {
+            log(`a2a replies: ${error.message}`);
+            throw new HttpError(500, "not sent: the images could not be kept");
+          }
           throw error;
         }
         return;

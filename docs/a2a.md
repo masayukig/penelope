@@ -130,10 +130,11 @@ gated の後ろで受けるときの確かめ方。gated は、gated の audienc
 | `history` | 送り手（`ROLE_USER`）とエージェント（`ROLE_AGENT`）の文章を順に並べ、画像が添えられたメッセージには `[Images attached]` を付ける。画像本体やパスは載せない |
 
 - 期限で `failed` になった Task と `rejected` の Task も、送り手は `GetTask` で読める。
+- 成果画像の写しが 1 枚でも読めなければ、画像を省いた Task は返さない。`GetTask` は HTTP `500` と JSON-RPC の内部エラー（`-32603`）を返す。Task の状態は変えず、写しの保存先も公開しない。
 
 ## 状態
 
 - Task とメッセージは SQLite の `a2a_tasks` と `a2a_messages` に置く。送り手のメッセージの行は、それがなった出来事の `seq` を持つ。エージェントの返事は、この `seq` で Task を引く。
-- 受信画像は `/sources/a2a/files/` に保存し、Task に二重には保存しない。完了時に返した画像の写しは `a2a_tasks.response_images` に保存し、Task と同じ寿命を持つ。`a2a_messages.has_images` は添付の有無だけを記録する。
-- 既存の DB は backend の起動時に自動で移行する。一方通行で、移行後の DB は旧版 backend では開けない。旧版に戻すには移行前の DB が必要である。
+- 受信画像は `/sources/a2a/files/` に保存し、Task に二重には保存しない。完了時に返した画像の写しは `PENELOPE_ASSETS_DIR` にファイルとして保存し、Task と同じ寿命を持つ。`a2a_tasks.response_images` は画像本体を持たず、置き場のファイル名・artifact のファイル名・MIME を返事の順番で並べた JSON を持つ。`a2a_messages.has_images` は添付の有無だけを記録する。
+- 既存の DB は backend の起動時に schema 11 へ自動で移行する。一方通行で、移行後の DB は旧版 backend では開けない。旧版に戻すには移行前の DB が必要である。
 - 消さない。いつまで残すかは、量が問題になったときに決める（[backend.md](backend.md) の「状態」）。

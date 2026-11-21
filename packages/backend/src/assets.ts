@@ -1,11 +1,8 @@
-// What the agents made, copied by the backend (ADR-0032), and the images the
-// owner sent (ADR-0034): for now only images, each tied to its line of the
-// history. A copy is a file under its own directory, apart from /sources and
-// /memory, and a row of `assets` with its kind, type, size, time, who made it
-// and the line it came with, so that a list of all of them can be made later.
-// A copy never changes and is never removed.
+// Backend copies of images for the conversation (ADR-0032, ADR-0034) and
+// A2A Task artifacts (ADR-0047). Files are immutable and live apart from
+// /sources and /memory. Only conversation copies have UI asset rows.
 import { randomUUID } from "node:crypto";
-import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
@@ -143,6 +140,11 @@ export class Assets {
     );
     const at = iso(this.now());
     stored.forEach((image, position) => insert.run(image.id, image.mime_type, image.size, image.name, image.file, agent ?? null, at, messageId, position));
+  }
+
+  /** Reads a stored file by its backend-generated basename, not by a sandbox path or a UI ID. */
+  read(file: string): Buffer {
+    return readFileSync(path.join(this.dir, file));
   }
 
   /** Removes the files of copies that were not recorded. */

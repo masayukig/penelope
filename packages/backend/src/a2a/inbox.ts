@@ -6,7 +6,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import type { A2APayload, A2AReplyRequest, A2AReplyResponse, A2ATaskState } from "@penelope/contract";
 
-import type { CheckedImage } from "../assets.ts";
+import type { Assets, CheckedImage, StoredImage } from "../assets.ts";
 import { transaction } from "../db.ts";
 import type { Queue } from "../queue.ts";
 import { type Attachment, uniqueFileName } from "../sources.ts";
@@ -25,7 +25,8 @@ export type InboxLimits = {
 };
 
 type IncomingMessage = { text: string; messageId: string; contextId?: string; taskId?: string; attachments?: readonly Attachment[] };
-type ResponseImage = { filename: string; mediaType: string; raw: string };
+type ImageRef = { filename: string; mediaType: string; file: string };
+type ResponseImage = Omit<ImageRef, "file"> & { bytes: Buffer };
 
 export type TaskMessage = { role: "sender" | "agent"; messageId: string; text: string; atMs: number; hasImages: boolean };
 
@@ -74,12 +75,14 @@ type MessageRow = { role: "sender" | "agent"; message_id: string; text: string; 
 export class Inbox {
   private readonly db: DatabaseSync;
   private readonly queue: Queue;
+  private readonly assets: Assets;
   private readonly now: () => number;
   private readonly limits: InboxLimits;
 
-  constructor(db: DatabaseSync, queue: Queue, options: { now: () => number; limits: InboxLimits }) {
+  constructor(db: DatabaseSync, queue: Queue, options: { assets: Assets; now: () => number; limits: InboxLimits }) {
     this.db = db;
     this.queue = queue;
+    this.assets = options.assets;
     this.now = options.now;
     this.limits = options.limits;
   }
@@ -122,29 +125,39 @@ export class Inbox {
     if (reply.state === "input-required" && (text === undefined || images.length > 0)) {
       throw new InboxRefusal("needs-text", "a question needs its text and cannot carry images");
     }
-    return transaction(this.db, () => {
-      const now = this.now();
-      this.expire(now);
-      const found = this.db
-        .prepare("SELECT t.task_id, t.sender, t.context_id, t.state, t.reason, t.updated_ms FROM a2a_messages m JOIN a2a_tasks t USING (task_id) WHERE m.seq = ?")
-        .get(reply.in_reply_to) as TaskRow | undefined;
-      if (!found) throw new InboxRefusal("no-such-event", `the event ${reply.in_reply_to} is not a message of an A2A task`);
-      if (found.state !== "working" && found.state !== "input-required") {
-        throw new InboxRefusal("closed", `the task is ${found.state}${found.reason ? `: ${found.reason}` : ""}`);
-      }
-      if (text !== undefined || images.length) {
-        this.insertMessage(found.task_id, { role: "agent", message_id: randomUUID(), text: text ?? "", at_ms: now, has_images: Number(images.length > 0) }, null);
-      }
-      const names = new Set<string>();
-      const copies: ResponseImage[] = images.map((image) => ({
-        filename: uniqueFileName(image.name, names),
-        mediaType: image.mime_type,
-        raw: Buffer.from(image.data).toString("base64"),
-      }));
-      this.db.prepare("UPDATE a2a_tasks SET state = ?, updated_ms = ?, response_images = ? WHERE task_id = ?")
-        .run(reply.state, now, copies.length ? JSON.stringify(copies) : null, found.task_id);
-      return { task_id: found.task_id, state: reply.state };
-    });
+    let stored: StoredImage[] = [];
+    try {
+      return transaction(this.db, () => {
+        const now = this.now();
+        this.expire(now);
+        const found = this.db
+          .prepare("SELECT t.task_id, t.sender, t.context_id, t.state, t.reason, t.updated_ms FROM a2a_messages m JOIN a2a_tasks t USING (task_id) WHERE m.seq = ?")
+          .get(reply.in_reply_to) as TaskRow | undefined;
+        if (!found) throw new InboxRefusal("no-such-event", `the event ${reply.in_reply_to} is not a message of an A2A task`);
+        if (found.state !== "working" && found.state !== "input-required") {
+          throw new InboxRefusal("closed", `the task is ${found.state}${found.reason ? `: ${found.reason}` : ""}`);
+        }
+
+        // Write the copies before recording any reference to them. They do
+        // not have UI asset rows: only the sender's Task can reach them.
+        if (images.length > 0) stored = this.assets.write(images);
+        const names = new Set<string>();
+        const refs: ImageRef[] = stored.map((image) => ({
+          file: image.file,
+          filename: uniqueFileName(image.name, names),
+          mediaType: image.mime_type,
+        }));
+        if (text !== undefined || refs.length > 0) {
+          this.insertMessage(found.task_id, { role: "agent", message_id: randomUUID(), text: text ?? "", at_ms: now, has_images: Number(refs.length > 0) }, null);
+        }
+        this.db.prepare("UPDATE a2a_tasks SET state = ?, updated_ms = ?, response_images = ? WHERE task_id = ?")
+          .run(reply.state, now, refs.length ? JSON.stringify(refs) : null, found.task_id);
+        return { task_id: found.task_id, state: reply.state };
+      });
+    } catch (error) {
+      this.assets.discard(stored);
+      throw error;
+    }
   }
 
   private open(sender: string, message: IncomingMessage, now: number): TaskView {
@@ -227,9 +240,19 @@ export class Inbox {
       state: row.state,
       ...(row.reason === null ? {} : { reason: row.reason }),
       messages: messages.map((m) => ({ role: m.role, messageId: m.message_id, text: m.text, atMs: m.at_ms, hasImages: m.has_images === 1 })),
-      responseImages: stored?.response_images ? JSON.parse(stored.response_images) as ResponseImage[] : [],
+      responseImages: this.readImages(stored?.response_images),
       updatedMs: row.updated_ms,
     };
+  }
+
+  private readImages(value: string | null | undefined): ResponseImage[] {
+    if (!value) return [];
+    try {
+      const refs = JSON.parse(value) as ImageRef[];
+      return refs.map(({ file, filename, mediaType }) => ({ filename, mediaType, bytes: this.assets.read(file) }));
+    } catch (cause) {
+      throw new Error("the task's artifact images could not be read", { cause });
+    }
   }
 }
 

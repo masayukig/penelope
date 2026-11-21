@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 
 import type { A2APayload } from "@penelope/contract";
 
 import { Inbox, InboxRefusal } from "../src/a2a/inbox.ts";
+import { Assets } from "../src/assets.ts";
 import { openDatabase } from "../src/db.ts";
 import { Queue } from "../src/queue.ts";
 import { Sources } from "../src/sources.ts";
@@ -29,8 +30,10 @@ function setup(t: { after: (fn: () => void) => void }, limits = { deadlineMs: 24
     awake: new AwakeHours("07:00-23:00", "UTC"),
     redeliverMs: 5 * MINUTE,
   });
-  const inbox = new Inbox(db, queue, { now: clock.now, limits });
-  return { sourcesDir, clock, queue, inbox };
+  const assetsDir = path.join(dir, "assets");
+  const assets = new Assets(db, assetsDir, { now: clock.now });
+  const inbox = new Inbox(db, queue, { assets, now: clock.now, limits });
+  return { sourcesDir, clock, queue, inbox, db, assetsDir };
 }
 
 const lines = (file: string) => readFileSync(file, "utf8").trim().split("\n").map((line) => JSON.parse(line));
@@ -127,6 +130,30 @@ describe("the A2A inbox", () => {
           ["agent", "Done."],
         ],
       );
+    });
+
+    it("does not complete the task if the asset directory cannot be written", (t) => {
+      const { inbox, queue, assetsDir } = setup(t);
+      const task = inbox.receive("claude", message("show me"));
+      const [event] = queue.take({ after: 0 });
+      writeFileSync(assetsDir, "not a directory");
+      assert.throws(() => inbox.reply({ in_reply_to: event!.seq, state: "completed" }, [
+        { name: "diagram.gif", mime_type: "image/gif", data: Buffer.from("GIF89a") },
+      ]), /images could not be kept/);
+      assert.equal(inbox.task("claude", task.taskId)?.state, "working");
+    });
+
+    it("discards the new copies if recording the completed task fails", (t) => {
+      const { inbox, queue, db, assetsDir } = setup(t);
+      const task = inbox.receive("claude", message("show me"));
+      const [event] = queue.take({ after: 0 });
+      db.exec(`CREATE TRIGGER refuse_completion BEFORE UPDATE OF state ON a2a_tasks
+        WHEN NEW.state = 'completed' BEGIN SELECT RAISE(ABORT, 'cannot record completion'); END`);
+      assert.throws(() => inbox.reply({ in_reply_to: event!.seq, state: "completed" }, [
+        { name: "diagram.gif", mime_type: "image/gif", data: Buffer.from("GIF89a") },
+      ]), /cannot record completion/);
+      assert.equal(inbox.task("claude", task.taskId)?.state, "working");
+      assert.deepEqual(readdirSync(assetsDir), []);
     });
 
     it("may close without words, but cannot ask without them", (t) => {

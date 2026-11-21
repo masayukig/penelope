@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -10,7 +10,7 @@ import { Client, DefaultAgentCardResolver, JsonRpcTransportFactory } from "@a2a-
 import { a2aHandler } from "../src/a2a/endpoint.ts";
 import { Inbox } from "../src/a2a/inbox.ts";
 import { Senders, type SenderCheck, type Verdict } from "../src/a2a/senders.ts";
-import { checkImages } from "../src/assets.ts";
+import { Assets, checkImages } from "../src/assets.ts";
 import { openDatabase } from "../src/db.ts";
 import { close, listenTcp } from "../src/http.ts";
 import { Queue } from "../src/queue.ts";
@@ -44,7 +44,9 @@ async function setup(t: { after: (fn: () => void | Promise<void>) => void }, { d
     awake: new AwakeHours("07:00-23:00", "UTC"),
     redeliverMs: 5 * MINUTE,
   });
-  const inbox = new Inbox(db, queue, { now: clock.now, limits: { deadlineMs: 24 * 60 * MINUTE, maxOpenTasks: 3 } });
+  const assetsDir = path.join(dir, "assets");
+  const assets = new Assets(db, assetsDir, { now: clock.now });
+  const inbox = new Inbox(db, queue, { assets, now: clock.now, limits: { deadlineMs: 24 * 60 * MINUTE, maxOpenTasks: 3 } });
   let base = "";
   const server = await listenTcp(
     async (request, response) => {
@@ -65,7 +67,7 @@ async function setup(t: { after: (fn: () => void | Promise<void>) => void }, { d
     await close(server);
     db.close();
   });
-  return { port, base, inbox, queue, clock, sourcesDir: path.join(dir, "sources") };
+  return { port, base, inbox, queue, clock, sourcesDir: path.join(dir, "sources"), assetsDir };
 }
 
 /** A sender as the agents that call her are: the SDK's client, with its token on every call. */
@@ -287,6 +289,25 @@ describe("the A2A way in", () => {
     ]);
     assert.match(textOf(done.history.at(-1)?.parts), /image/i);
     assert.ok(done.history.at(-1)?.parts.every((part) => part.content?.$case === "text"));
+  });
+
+  it("fails GetTask instead of dropping an unreadable artifact image", async (t) => {
+    const { base, port, inbox, queue, assetsDir } = await setup(t);
+    const client = await sender(base);
+    const task = await send(client, text("Show me the diagram."));
+    inbox.reply({ in_reply_to: queueSeq(queue), state: "completed" }, checkImages([{ name: "diagram.gif", data: "R0lGODlh" }]));
+    const [file] = readdirSync(assetsDir);
+    assert.ok(file);
+    rmSync(path.join(assetsDir, file));
+
+    const answer = await ask({ port }, "/a2a/", {
+      method: "POST",
+      headers: { authorization: "Bearer sa-agents-claude", "a2a-version": "1.0" },
+      body: jsonRpc("GetTask", { id: task.id }),
+    });
+    assert.equal(answer.status, 500);
+    assert.equal(answer.json().error.code, -32603);
+    assert.ok(!answer.body.toString().includes(assetsDir));
   });
 
   it("refuses a URL attachment and a streaming call", async (t) => {

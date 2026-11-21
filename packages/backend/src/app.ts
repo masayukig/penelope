@@ -80,7 +80,7 @@ export async function startBackend(
     log,
   });
   const sessions = new LoginSessions(db, { now });
-  const inbox = new Inbox(db, queue, { now, limits: config.a2a?.limits ?? { deadlineMs: 24 * 3_600_000, maxOpenTasks: 3 } });
+  const inbox = new Inbox(db, queue, { assets, now, limits: config.a2a?.limits ?? { deadlineMs: 24 * 3_600_000, maxOpenTasks: 3 } });
   const login = new GitHubLogin({ settings: config.github, ...(githubEndpoints ? { endpoints: githubEndpoints } : {}), sessions, now, log });
   const subscriptions = new PushSubscriptions(db, { now });
   const vapid = config.webPush === undefined ? undefined : vapidKeyOf(config.webPush.vapidKey);

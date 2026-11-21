@@ -272,8 +272,8 @@ function toTask(task: TaskView, historyLength: number | undefined): Task {
   const parts: Part[] = [];
   if (task.state === "completed") {
     if (hers?.text) parts.push(textPart(hers.text));
-    for (const { filename, mediaType, raw } of task.responseImages) {
-      parts.push({ content: { $case: "raw", value: Buffer.from(raw, "base64") }, metadata: undefined, filename, mediaType });
+    for (const { filename, mediaType, bytes } of task.responseImages) {
+      parts.push({ content: { $case: "raw", value: bytes }, metadata: undefined, filename, mediaType });
     }
   }
   return {
