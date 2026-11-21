@@ -221,7 +221,9 @@ export class Jobs {
       let live: Live | undefined;
       let failed: Promise<Error> | undefined;
       try {
-        child = spawn("bash", ["-c", request.command], { cwd, detached: true, stdio: ["ignore", handle.fd, handle.fd] });
+        child = spawn("bash", ["-c", request.command], {
+          cwd, detached: true, stdio: ["ignore", handle.fd, handle.fd], env: { ...process.env, PENELOPE_JOB_ID: id },
+        });
         const pid = child.pid;
         if (pid === undefined) {
           failed = new Promise<Error>((resolve) => child.once("error", resolve));

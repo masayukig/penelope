@@ -210,6 +210,7 @@ COPY packages/runner/image/sdctl /usr/local/bin/sdctl
 COPY --from=sandbox-porkadot /var/lib/gems/ /var/lib/gems/
 COPY --from=sandbox-porkadot /usr/local/bin/porkadot /usr/local/bin/porkadot
 COPY packages/runner/image/entrypoint.sh /usr/local/bin/penelope-sandbox
+COPY --chmod=0755 packages/runner/image/ask-agent /usr/local/bin/ask-agent
 WORKDIR /opt/penelope/runner
 COPY --from=ts-build /src/packages/runner/package.json ./
 COPY --from=ts-build /src/packages/runner/dist ./dist

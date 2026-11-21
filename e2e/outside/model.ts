@@ -83,6 +83,10 @@ export function script(messages: readonly ChatMessage[]): Answer {
     if (input.includes("E2E-JOB-START")) {
       return [{ calls: [{ name: "job_start", args: { command: "sleep 2; echo E2E-JOB-$((6 * 7))" } }] }, { text: "Started the job." }];
     }
+    if (input.includes("E2E-ASK-AGENT-START")) {
+      const command = `echo ${E2E_PNG} | base64 -d > ask-diagram.png && ask-agent 'E2E Helper' 'Describe this diagram' --image ask-diagram.png`;
+      return [{ calls: [{ name: "job_start", args: { command } }] }, { text: "Asked the helper." }];
+    }
     if (input.includes("E2E-SCHEDULE-ADD")) {
       return [
         { calls: [{ name: "schedule_add", args: { reason: "E2E-SCHEDULE-REASON", cron: "0 9 1 1 *" } }] },

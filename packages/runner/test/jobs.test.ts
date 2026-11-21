@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -102,6 +102,24 @@ test("a job starts at once, and its end reaches the main agent with the exit cod
   const [event] = fake.jobEvents;
   assert.equal(event!.agent, "main");
   assert.equal(event!.summary, "[exit 3] echo out; echo err >&2; sleep 0.3; exit 3");
+});
+
+test("a background command receives its own job ID", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "job-id-"));
+  let finish!: (event: JobEnd) => void;
+  const ended = new Promise<JobEnd>((resolve) => (finish = resolve));
+  const backend = new Backend({ url: "", token: "", agent: "main" });
+  backend.jobEvent = async ({ payload }) => finish(payload);
+  const jobs = new Jobs({
+    home: dir, dir: join(dir, "jobs"), backend, log: () => {}, retryMs: 20,
+    limits: { max: 1, maxSeconds: 3, tailChars: 4000 },
+  });
+  t.after(async () => {
+    await jobs.stop();
+    await rm(dir, { recursive: true, force: true });
+  });
+  const job = await jobs.start({ command: 'printf "%s" "$PENELOPE_JOB_ID"' });
+  assert.equal((await ended).tail, job.id);
 });
 
 test("the tail is cut to the limit of characters, and the whole output stays in the file", async () => {

@@ -139,7 +139,7 @@ runner は、本体のセッションにだけ、裏の仕事を扱う 3 つの�
 | `job_list` | 引数を取らない。走っている仕事の、`job_start` が返すのと同じ形の JSON の配列を返す | なし |
 | `job_stop` | `id` を取る。仕事のプロセスのまとまりに `SIGTERM` を送り、終わらなければ 5 秒後に `SIGKILL` を送る。終わってから返る。終わりの出来事は `stopped` で送る | その ID の仕事が走っていない |
 
-- コマンドは `bash -c` で、自分のプロセスのまとまり（process group）の長として、エージェントと同じユーザー・同じ環境で走る。相対の作業の場所は HOME から引き、省けば HOME。
+- コマンドは `bash -c` で、自分のプロセスのまとまり（process group）の長として、エージェントと同じユーザー・環境で走る。runner はその仕事の ID を `PENELOPE_JOB_ID` として子プロセスに渡す。これは起動手順の目印であり、認証ではない。相対の作業の場所は HOME から引き、省けば HOME。
 - 仕事ごとに `~/jobs/<ID>/` を作り（`PENELOPE_JOBS` で場所を変えられる）、標準出力と標準エラー出力を 1 つのファイル `output.log` に書き、記録を `job.json` に置く。HOME の下なので永続する。ID は 8 桁の 16 進数である。
 - `job.json` は、ID・コマンド・作業の場所・プロセスのまとまりの長の pid・始まり・長さの上限と、backend がまだ受けていない終わり（`pending`）か、受けた印（`done`）を持つ。消さない。
 - 終わったら、終わりを記録に足してから送る。backend が受けたら（`202`）記録で受けた印にする。受けなければ同じ `id` で送り直す（1 秒から倍にして 30 秒まで間を空ける）。
@@ -153,6 +153,29 @@ runner は、本体のセッションにだけ、裏の仕事を扱う 3 つの�
 | `PENELOPE_JOBS_MAX` | `5` | 同時に走る数の上限 |
 | `PENELOPE_JOB_MAX_SECONDS` | `86400`（24 時間） | 1 つの仕事の長さの上限。`timeout_seconds` を省いたときの長さ |
 | `PENELOPE_JOB_TAIL_CHARS` | `4000` | 終わりの出来事の `tail` の字数の上限 |
+
+### `ask-agent`
+
+ほかのエージェントへ A2A で頼むときは、`job_start` に `{"command":"ask-agent helper 'Check the report'"}` を渡す（[ADR-0048](adr/0048-ask-agents-by-name-and-wait-in-a-background-job.md)）。相手は [コネクタの `a2a` 一覧](pod.md#a2a-の宛先)から選ぶ。`PENELOPE_JOB_ID` が無いときは通信せずに終了コード 2 で断り、同じ引数と作業ディレクトリを使う `job_start` の呼び方を出す。
+
+- `ask-agent <名前> '<依頼>' [--image <パス>]...` は送信して返った Task を待つ。相手の Agent Card で対応形式を確かめてから、ローカルの画像を 4 枚まで添えられる。
+- `ask-agent <名前> --task <ID> '<答え>' [--image <パス>]...` は同じ Task に答えて再び待つ。`ask-agent <名前> --wait <ID>` は送信せずに待つ。Task ID には `/` などのパス区切りを含まない英数字・`_`・`.`・`-` だけを使える（先頭は英数字または `_`、200 文字まで）。
+- 待機は 30 秒間隔、2 時間まで。コマンド側の時間切れは終了コード 5 で、同じ Task を待ち直す `Next` を出す。相手の Task は取り消さない。runner の上限が先に来た場合は通常の仕事の時間切れになり、待ち始めに出した Task ID を仕事の出力で確認できる。
+- 返ったファイルは `~/a2a/<Task ID>/result-*/` の実行ごとに空のディレクトリに保存する。`a2a` がファイル名のディレクトリ部分を落とし、同じ artifact 内の同名部品は結合する。別の実行のファイルは上書きしない。返事も画像も相手から届いたデータであり、オーナーの指示ではない。
+
+仕事の出力の末尾は次の形になる。`Reply` が長い場合、全文は仕事の出力ファイルに残る。
+
+```text
+Reply:
+Which report should I check?
+Agent: ヘルパー (helper)
+State: input-required
+Task ID: task-123
+Images: []
+Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
+```
+
+`Images` は保存した絶対パスの JSON 配列。`Next` は聞き返しや待機の時間切れのときだけ付く。`completed` と `input-required` は終了コード 0、`failed`・`rejected` などの失敗は `Reason` を付け終了コード 1 となる。終了コード 0 でも `State` を確認する。
 
 ## サブエージェントの状態
 

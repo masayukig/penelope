@@ -875,6 +875,19 @@ describe("the Pod end to end", () => {
     );
   }));
 
+  it("asks a named agent in a job and receives its reply with a saved image", track(async () => {
+    await send("E2E-ASK-AGENT-START");
+    const ended = await eventually("ask-agent's job event", async () => (await callsFor("Describe this diagram", 0))[0], 180_000);
+    const line = eventLines(where(ended).input).find((entry) => entry.kind === undefined && entry.source === "job");
+    assert.ok(line && line.kind === undefined && line.text);
+    const payload = JSON.parse(line.text) as { exit_code: number; tail: string };
+    assert.equal(payload.exit_code, 0, payload.tail);
+    assert.match(payload.tail, /Reply:\nE2E-ASK-AGENT-DONE\nAgent: E2E Helper \(helper\)\nState: completed\nTask ID: e2e-helper-task/);
+    const [path] = JSON.parse(payload.tail.match(/Images: (.+)/)![1]!) as string[];
+    assert.match(path!, /^\/home\/agent\/a2a\/e2e-helper-task\/result-\w+\/diagram\.png$/);
+    assert.equal(exec("sandbox", `base64 -w0 ${path}`).stdout, E2E_PNG);
+  }));
+
   it("lists a schedule she made in the UI's API, and removes it there for her schedule_list too", track(async () => {
     // Guards against: the UI's list of the schedules not being what her schedule_list sees, or a removal from the UI
     // that she still finds (docs/ui-api.md, "予約").

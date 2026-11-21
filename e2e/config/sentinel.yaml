@@ -15,6 +15,12 @@ hosts:
       - place: bearer
         surrogate: e2e-surrogate-model-0001
         source: { file: /run/secrets/e2e/model-key }
+  - name: helper.example.com
+    upstream_ca: /run/secrets/e2e/outside-ca.crt
+    credentials:
+      - place: bearer
+        surrogate: e2e-surrogate-helper-0001
+        source: { file: /run/secrets/e2e/model-key }
   - name: backend.example.com
     upstream: unix:///run/penelope/sandbox/backend.sock
     credentials:
