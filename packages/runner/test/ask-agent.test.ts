@@ -71,6 +71,16 @@ test("a display name selects the URL and the token together, then waits for the 
   }
 });
 
+test("--file sends a local file that is not an image as a file part, like --image", async (t) => {
+  const { home, run, calls } = await setup(t, `console.log(JSON.stringify({task: {id: 'task-1', status: {state: 'TASK_STATE_COMPLETED'}}}));`);
+  await writeFile(join(home, "body.csv"), "date,weight\n");
+  await writeFile(join(home, "photo.png"), "png");
+  const result = run(["helper", "Register this", "--file", "body.csv", "--image", "photo.png"]);
+  assert.equal(result.status, 0, result.stderr);
+  const [send] = await calls();
+  assert.deepEqual(send?.filter((_, i) => send[i - 1] === "--file-part"), [join(home, "body.csv"), join(home, "photo.png")]);
+});
+
 test("an ambiguous alias across connector documents does not send anything", async (t) => {
   const { home, run, calls } = await setup(t, "");
   await writeFile(join(home, "connectors", "second.md"), `---\na2a: [{name: third, label: helper}]\n---\n`);

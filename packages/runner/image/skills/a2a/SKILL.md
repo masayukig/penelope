@@ -28,6 +28,12 @@ Pass a local file path, not a URL, to `ask-agent --image`. Repeat the flag for u
 {"command":"ask-agent helper 'What does this diagram show?' --image ./diagram.png"}
 ```
 
+To send another kind of file (a CSV, a PDF) to an agent that takes it, pass it with `--file` the same way. Do not paste the file's content into the message instead. `--image` and `--file` together are up to four files:
+
+```json
+{"command":"ask-agent helper 'Register this measurement' --file ./body.csv"}
+```
+
 Images from the reply are saved in a new directory under `~/a2a/<Task ID>/`. Use the paths or directory in `Images` to find them.
 
 ## Direct `a2a` use
