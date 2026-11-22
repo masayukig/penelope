@@ -3,15 +3,15 @@
 // stops the main agent gets a `self` event. These tests drive the main agent
 // with the scripted model, the way a deployment's model would.
 import assert from "node:assert/strict";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import type { SelfEventRequest, SubAgentStatus, TurnEndRequest } from "@penelope/contract";
+import type { SelfEventRequest, SubAgentStatus, TurnEndRequest, TurnEvent } from "@penelope/contract";
 
 import { type FakeBackend, until } from "./fake-backend.ts";
 import { OTHER_MODEL, PROVIDER, type Answer, type Call, type Script } from "./fake-model.ts";
-import { acked, activities, ui, world } from "./world.ts";
+import { acked, activities, heartbeat, ui, world } from "./world.ts";
 
 const SUB_AGENT_TOOLS = ["subagent_close", "subagent_list", "subagent_send", "subagent_start"];
 const MAIN_ONLY_TOOLS = [...SUB_AGENT_TOOLS, "reply", "reply_to_agent", "schedule_add", "schedule_list", "schedule_remove", "self_event", "job_start", "job_list", "job_stop"];
@@ -329,6 +329,26 @@ test("after a restart, a sub-agent that was running is waiting, interrupted, and
   assert.equal(notices(fake)[1]!.id, "cut/2");
   const last = calls.filter((call) => !isMain(call)).at(-1)!;
   assert.deepEqual(last.userTexts, ["the first request", "go on"]);
+});
+
+test("a heartbeat shows a legacy waiting sub-agent with the record's last modification time", async () => {
+  const { fake, start, calls, config } = await world({ turnFold: false });
+  const dir = join(config.subAgentDir, "legacy");
+  const path = join(dir, "agent.json");
+  await mkdir(dir, { recursive: true });
+  await writeFile(path, JSON.stringify({
+    name: "legacy", purpose: "Check alerts", cwd: config.home, session: join(dir, "session.jsonl"), state: "waiting", stops: 1, pending: [],
+  }));
+  const modified = new Date("2026-11-14T09:00:00.000Z");
+  await utimes(path, modified, modified);
+
+  await start(() => ({ text: "noted" }));
+  fake.push(heartbeat(1));
+  await until(() => acked(fake).includes(1));
+  const line = JSON.parse(calls[0]!.lastText.split("\n")[1]!) as TurnEvent;
+  assert.deepEqual(line.pending?.subagents, {
+    items: [{ name: "legacy", purpose: "Check alerts", state: "waiting", since: modified.toISOString() }], omitted: 0,
+  });
 });
 
 test("a notice the backend did not take is sent again with the same id, after a restart too", async () => {
