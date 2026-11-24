@@ -209,6 +209,11 @@ export function foldAskInput(): string {
   return "This turn is about to be folded. Write anything from it you want to keep. No tool runs while you answer.";
 }
 
+/** The reminder of a turn that is ending with `a2a` events it has not answered. */
+export function unansweredA2AInput(seqs: readonly number[]): string {
+  return `The \`a2a\` events ${seqs.join(", ")} of this turn have no answer: their agents wait until you call \`reply_to_agent\`. Answer each now, \`completed\` with your answer (a short acknowledgement is enough when nothing more is needed) or \`input-required\` with a question.`;
+}
+
 function nightRole(identity: Identity, places: Places, role: string): string {
   return `You are the ${role} of the memory of ${identity.name}, ${identity.role}, whose owner is ${identity.owner}. You have no personality and take no part in their conversations. You work on the memory at night, between ${identity.name}'s sessions, in one turn.
 
