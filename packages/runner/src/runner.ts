@@ -58,6 +58,7 @@ import {
   readPromptFiles,
   reflectionInput,
   systemPrompt,
+  unansweredA2AInput,
   VERIFIER,
   verifierInput,
   verifierSystemPrompt,
@@ -83,6 +84,8 @@ type Outcome = Required<Pick<TurnEndRequest, "result">> & Pick<TurnEndRequest, "
 interface TurnOptions {
   /** The seqs of the events handed in as its input; events join an ordinary turn only. */
   seqs?: number[];
+  /** Those of them that are `a2a` events. */
+  a2a?: number[];
   /** For a turn of the nightly switch: its control event and step. The turn is not ordinary. */
   night?: { seq: number; stage: NightTurnStage };
   images?: ImageContent[];
@@ -92,6 +95,9 @@ interface TurnOptions {
 interface Turn {
   session: AgentSession;
   seqs: number[];
+  /** The seqs of its `a2a` events, and those `reply_to_agent` answered. */
+  a2a: number[];
+  answered: Set<number>;
   /** Whether every event of the turn so far is a heartbeat (ADR-0031). */
   heartbeat: boolean;
   /** The steers and follow-ups handed to Pi during the turn, until Pi has them. */
@@ -108,6 +114,8 @@ const sleep = (ms: number, signal: AbortSignal) =>
   });
 
 const isHeartbeat = (event: DeliveredEvent) => event.source === "heartbeat";
+
+const a2aSeqs = (events: DeliveredEvent[]) => events.filter((event) => event.source === "a2a").map((event) => event.seq);
 
 const failure = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -170,7 +178,7 @@ export class Runner {
     });
     this.setup = {
       ...pi,
-      tools: [...backendTools(options.backend, { home: options.config.home, turn: () => this.turnId }), ...subAgentTools(this.subAgents), ...jobTools(this.jobs, options.config.jobs)],
+      tools: [...backendTools(options.backend, { home: options.config.home, turn: () => this.turnId, answered: (seq) => this.turn?.answered.add(seq) }), ...subAgentTools(this.subAgents), ...jobTools(this.jobs, options.config.jobs)],
       extensions: [
         foldExtension({
           folding: () => options.config.turnFold,
@@ -288,6 +296,7 @@ export class Runner {
     // steer, so that the turn sees it with what led up to it. Batched events
     // alone follow the turn.
     turn.seqs.push(...events.map((event) => event.seq));
+    turn.a2a.push(...a2aSeqs(events));
     turn.heartbeat &&= events.every(isHeartbeat);
     const steer = events.some((event) => event.delivery === "now");
     turn.queued.push(
@@ -325,6 +334,7 @@ export class Runner {
       const [text, images] = await this.input(events);
       await this.turnOf(this.session!.session, text, {
         seqs: events.map((event) => event.seq),
+        a2a: a2aSeqs(events),
         ...(images ? { images } : {}),
         heartbeat: events.every(isHeartbeat),
       });
@@ -376,7 +386,9 @@ export class Runner {
         compactions++;
       }
     });
-    const turn: Turn = { session, seqs: [...(options.seqs ?? [])], heartbeat: options.heartbeat ?? false, queued: [] };
+    const turn: Turn = {
+      session, seqs: [...(options.seqs ?? [])], a2a: [...(options.a2a ?? [])], answered: new Set(), heartbeat: options.heartbeat ?? false, queued: [],
+    };
     this.turnId = recorder.turnId;
     this.folded = 0;
     recorder.start();
@@ -391,6 +403,7 @@ export class Runner {
       if (ordinary) this.turn = turn;
       let text = input;
       let withImages = images;
+      let reminded = false;
       for (;;) {
         await session.prompt(text, withImages ? { images: withImages } : undefined);
         withImages = undefined;
@@ -401,7 +414,16 @@ export class Runner {
           count = turn.queued.length;
           await Promise.allSettled(turn.queued);
         }
-        if (session.pendingMessageCount === 0) break;
+        if (session.pendingMessageCount === 0) {
+          // An agent that asked over A2A waits on reply_to_agent alone: a turn
+          // ending without it is reminded once, and then ends as it is.
+          const unanswered = turn.a2a.filter((seq) => !turn.answered.has(seq));
+          if (reminded || unanswered.length === 0 || this.stopping || this.outcome(session, undefined).result !== "done") break;
+          reminded = true;
+          this.log(`turn ${recorder.turnId}: reminded of unanswered a2a events ${unanswered.join(",")}`);
+          text = unansweredA2AInput(unanswered);
+          continue;
+        }
         const { steering, followUp } = session.clearQueue();
         text = [...steering, ...followUp].join("\n\n");
       }
