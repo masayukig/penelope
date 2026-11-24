@@ -7,7 +7,7 @@ import type { DeliveredEvent, HeartbeatPending, MemoryRepairRequest, SessionRota
 
 import type { Config } from "../src/config.ts";
 import { newSessionFile, writeState } from "../src/pi.ts";
-import { FOLDING, foldAskInput } from "../src/prompts.ts";
+import { FOLDING, foldAskInput, unansweredA2AInput } from "../src/prompts.ts";
 import { until } from "./fake-backend.ts";
 import { MODEL, OTHER_MODEL, PROVIDER, type Answer, type Call, type Script } from "./fake-model.ts";
 import { acked, activities, closers, heartbeat, ui, world } from "./world.ts";
@@ -1379,4 +1379,55 @@ test("folding goes on after a restart", async () => {
   const sent = JSON.stringify(firstCallOf(calls, "second").messages);
   assert.ok(sent.includes("echo pods-output"), "the call of the first turn stays as a line");
   assert.ok(!sent.includes("pods-output\\n"), "its output goes");
+});
+
+function a2a(seq: number): DeliveredEvent {
+  return {
+    seq,
+    source: "a2a",
+    id: `a2a-${seq}`,
+    stream: "other",
+    occurred_at: "2026-11-14T09:00:00Z",
+    received_at: "2026-11-14T09:00:00Z",
+    summary: "a request from other",
+    delivery: "now",
+    inline: false,
+    appended: { path: "/sources/a2a/other/2026-11-14.jsonl", lines: [seq, seq] },
+  };
+}
+
+const answer = { tool: "reply_to_agent", args: { in_reply_to: 5, state: "completed", text: "done" } };
+const reminders = (calls: Call[]) => calls.filter((call) => call.lastRole === "user" && call.lastText === unansweredA2AInput([5]));
+
+test("an a2a event answered with reply_to_agent is not reminded", async () => {
+  const { fake, start, calls } = await world();
+  await start((call) => (call.lastRole === "user" ? { calls: [answer] } : { text: "answered" }));
+  fake.push(a2a(5));
+  await until(() => acked(fake).includes(5));
+  assert.equal(reminders(calls).length, 0);
+  assert.equal(fake.sent("POST", "/v1/a2a/replies").length, 1);
+});
+
+test("a turn ending with an a2a event unanswered is reminded once, in the same turn", async () => {
+  const { fake, start, calls } = await world();
+  await start((call) => {
+    if (call.lastRole === "user" && reminders([call]).length === 1) return { calls: [answer] };
+    return { text: "noted" };
+  });
+  fake.push(a2a(5));
+  await until(() => acked(fake).includes(5));
+  // Guards against: the agent that asked waiting a day for a task nobody closes (an open task fails only at the backend's deadline).
+  assert.equal(reminders(calls).length, 1);
+  assert.deepEqual(fake.sent("POST", "/v1/a2a/replies").map((r) => (r as { in_reply_to: number }).in_reply_to), [5]);
+  assert.deepEqual(fake.sent("POST", "/v1/turns/end").map((t) => (t as TurnEndRequest).seqs), [[5]], "the reminder is part of the turn");
+});
+
+test("a turn still not answering after the reminder ends as it would have", async () => {
+  const { fake, start, calls } = await world();
+  await start(() => ({ text: "noted" }));
+  fake.push(a2a(5));
+  await until(() => acked(fake).includes(5));
+  assert.equal(reminders(calls).length, 1, "reminded once, not again");
+  assert.equal(fake.sent("POST", "/v1/a2a/replies").length, 0);
+  assert.deepEqual(fake.sent("POST", "/v1/turns/end").map((t) => (t as TurnEndRequest).result), ["done"]);
 });

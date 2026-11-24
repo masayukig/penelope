@@ -44,7 +44,10 @@ async function readImages(paths: readonly string[], home: string, maxImages = RE
 }
 
 /** `turn` names the turn under way, for a reply to carry (ADR-0038). */
-export function backendTools(backend: Backend, { home, turn }: { home: string; turn?: () => string | undefined }): ToolDefinition[] {
+export function backendTools(
+  backend: Backend,
+  { home, turn, answered }: { home: string; turn?: () => string | undefined; answered?: (seq: number) => void },
+): ToolDefinition[] {
   const reply = defineTool({
     name: "reply",
     label: "Reply",
@@ -97,6 +100,7 @@ export function backendTools(backend: Backend, { home, turn }: { home: string; t
       if (paths?.length && reply.state !== "completed") throw new Error("Not sent: only a completed answer can carry images.");
       const images = paths?.length ? await readImages(paths, home, A2A_IMAGES_MAX, A2A_IMAGE_MAX_BYTES) : undefined;
       const task = await backend.a2aReply({ ...reply, ...(images === undefined ? {} : { images }) });
+      answered?.(reply.in_reply_to);
       return text(`Sent: the task is ${task.state}.`);
     },
   });
