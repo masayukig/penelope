@@ -12,6 +12,9 @@ import { after, describe, test } from "node:test";
 import { SettingsError, type ConnectionEvent } from "../src/plugin.ts";
 import { eventOf, fold, signal, signalPlugin, type Audience } from "../src/plugins/signal.ts";
 
+// The parts of ConnectionIO the Signal plugin does not use.
+const UNUSED_IO = { readStatus: async () => undefined, setHeartbeatNote: async () => true, clearHeartbeatNote: async () => true };
+
 const OWNER = "+15550000001";
 const AGENT = "+15550000002";
 const STRANGER = "+15550000003";
@@ -193,6 +196,7 @@ describe("the Signal plugin against signal-cli", () => {
     const sendSocket = join(dir, "send.sock");
     const connection = signalPlugin({ backoffMs: () => 10 }).create({ ...SETTINGS, groups: { family: GROUP }, socket: cli.path, send_socket: sendSocket }, env);
     const handle = connection.start({
+      ...UNUSED_IO,
       deliver: async (events) => {
         if (!take) {
           take = true; // the first try is not taken, the next is
@@ -322,7 +326,8 @@ describe("the Signal plugin against signal-cli", () => {
     await cli.listen();
     const lines: string[] = [];
     const connection = signalPlugin({ backoffMs: () => 10 }).create({ ...SETTINGS, groups: { family: GROUP }, names: ["iori"], socket: cli.path, typing_seconds: 0.05 }, env);
-    const handle = connection.start({ deliver: async () => true, log: (line) => lines.push(line), now: () => new Date() });
+    const handle = connection.start({
+      ...UNUSED_IO, deliver: async () => true, log: (line) => lines.push(line), now: () => new Date() });
     try {
       await until(() => cli.clients.length === 1 && lines.includes("connected"));
       cli.push(inGroup({ message: "chatting" }));
@@ -351,7 +356,8 @@ describe("the Signal plugin against signal-cli", () => {
     const sendSocket = join(dir, "typing-send.sock");
     const OWNER_UUID = "0b0e5b1c-1111-4222-8333-444455556666";
     const connection = signalPlugin({ backoffMs: () => 10 }).create({ ...SETTINGS, senders: [OWNER_UUID], socket: cli.path, send_socket: sendSocket, typing_seconds: 0.2 }, env);
-    const handle = connection.start({ deliver: async () => true, log: (line) => lines.push(line), now: () => new Date() });
+    const handle = connection.start({
+      ...UNUSED_IO, deliver: async () => true, log: (line) => lines.push(line), now: () => new Date() });
     try {
       await until(() => lines.includes("connected"));
       cli.push({ ...message({ message: "hi" }), sourceUuid: OWNER_UUID });
@@ -383,7 +389,8 @@ describe("the Signal plugin while the intake refuses or it stops", () => {
     await cli.listen();
     const lines: string[] = [];
     const connection = signalPlugin({ backoffMs: () => 60_000 }).create({ ...SETTINGS, socket: cli.path }, env);
-    const handle = connection.start({ deliver: async () => false, log: (line) => lines.push(line), now: () => new Date() });
+    const handle = connection.start({
+      ...UNUSED_IO, deliver: async () => false, log: (line) => lines.push(line), now: () => new Date() });
     await until(() => lines.includes("connected"));
     cli.push(message({ message: "hi" }));
     await new Promise((resolve) => setTimeout(resolve, 50)); // refused once, waiting to try again
@@ -405,6 +412,7 @@ describe("the Signal plugin while the intake refuses or it stops", () => {
     const held = new Promise<void>((resolve) => (release = resolve));
     const connection = signalPlugin({ backoffMs: () => 10 }).create({ ...SETTINGS, socket: cli.path }, env);
     const handle = connection.start({
+      ...UNUSED_IO,
       deliver: async (events) => {
         await held;
         delivered.push(...events);
@@ -438,6 +446,7 @@ describe("the Signal plugin while the intake refuses or it stops", () => {
     const sendSocket = join(dir, "own-send.sock");
     const connection = signalPlugin({ backoffMs: () => 5 }).create({ ...SETTINGS, groups: { family: GROUP }, socket: cli.path, send_socket: sendSocket }, env);
     const handle = connection.start({
+      ...UNUSED_IO,
       deliver: async (events) => {
         if (refusals-- > 0) return false; // a backend restarting
         delivered.push(...events);
@@ -469,6 +478,7 @@ describe("the Signal plugin while the intake refuses or it stops", () => {
     let clock = 0;
     const connection = signalPlugin({ backoffMs: () => 1 }).create({ ...SETTINGS, socket: cli.path }, env);
     const handle = connection.start({
+      ...UNUSED_IO,
       deliver: async () => false,
       log: (line) => lines.push(line),
       now: () => new Date((clock += 10 * 60 * 1000)), // ten minutes a look
