@@ -7,7 +7,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import type { AgentStatus, DeliveredEvent, JobEventRequest, ModelSelection, Schedule, SelfEventRequest } from "@penelope/contract";
+import type { AgentStatus, DeliveredEvent, JobEventRequest, ModelSelection, Schedule, SelfEventRequest, SleepResponse } from "@penelope/contract";
 
 export const TOKEN = "real-token-example";
 
@@ -26,6 +26,7 @@ export class FakeBackend {
   readonly url: Promise<string>;
   modelSelection: ModelSelection | null = null;
   status: AgentStatus | undefined;
+  sleepResponse: SleepResponse | undefined;
   /** Seqs whose ack is dropped, as if the runner had stopped before it reached the backend. */
   readonly dropAcks = new Set<number>();
   private readonly events: DeliveredEvent[] = [];
@@ -47,6 +48,7 @@ export class FakeBackend {
   /** When set, every reply is refused with a 400 and this error, as the backend refuses an image. */
   refuseReplies: string | undefined;
   refuseMemoryRepairs = false;
+  failRotationReports = 0;
   private readonly server: Server;
 
   constructor() {
@@ -153,6 +155,7 @@ export class FakeBackend {
       for (const seq of (body as { seqs: number[] }).seqs) if (!this.dropAcks.has(seq)) this.acked.add(seq);
       return answer(204);
     }
+    if (key === "POST /v1/sleep" && this.sleepResponse) return answer(200, this.sleepResponse);
     if (key === "POST /v1/replies") {
       if (this.refuseReplies !== undefined) return answer(400, { error: this.refuseReplies });
       return answer(201, { id: `r-${++this.replies}` });
@@ -190,6 +193,10 @@ export class FakeBackend {
     }
     if (key === "POST /v1/memory/repairs") {
       return this.refuseMemoryRepairs ? answer(503, { error: "unavailable" }) : answer(204);
+    }
+    if (key === "POST /v1/sessions/rotated" && this.failRotationReports > 0) {
+      this.failRotationReports--;
+      return answer(503, { error: "unavailable" });
     }
     if (
       key === "POST /v1/agents" ||

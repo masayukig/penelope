@@ -417,7 +417,7 @@ test("the main turn end reports the model's last context usage and window", asyn
 
 test("an event that comes during a turn steers it; the turn acks both", async () => {
   const { fake, start, calls } = await world();
-  fake.status = { sleepiness: 25, awake_seconds: 21_600 };
+  fake.status = { sleep: { state: "awake" }, sleepiness: 25, awake_seconds: 21_600 };
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
   await start(async (call) => {
@@ -439,7 +439,7 @@ test("an event that comes during a turn steers it; the turn acks both", async ()
 
   assert.ok(calls.some((c) => c.userTexts.length === 2 && c.userTexts[1]!.includes("and this")));
   const [initial, steer] = calls.at(-1)!.userTexts;
-  assert.match(initial!, /<runner_notes>\n\{"status":\{"sleepiness":25,"awake_seconds":21600\}\}\n<\/runner_notes>/);
+  assert.match(initial!, /<runner_notes>\n\{"status":\{"sleep":\{"state":"awake"\},"sleepiness":25,"awake_seconds":21600\}\}\n<\/runner_notes>/);
   assert.doesNotMatch(steer!, /runner_notes/);
   // Guards against: the activity record missing what joined the turn as its trigger.
   assert.deepEqual((fake.sent("POST", "/v1/turns/end") as TurnEndRequest[]).map((end) => end.seqs), [[1, 2]]);
@@ -1007,6 +1007,20 @@ test("a nightly event that comes again after the switch only tells and acks", as
   assert.equal(calls.length, made);
   // Guards against: the steps of the night told again as if it had been run again.
   assert.deepEqual(fake.sent("POST", "/v1/sessions/rotated")[1], { agent: "main", seq: 1 });
+});
+
+test("a rejected switch report is retried on redelivery before the control event is acked", async () => {
+  const { fake, start, config } = await world();
+  fake.failRotationReports = 1;
+  fake.redeliverMs = 50;
+  await start(nightWrites(config));
+  fake.push(nightly(1));
+
+  await until(() => acked(fake).includes(1));
+  const writes = fake.received.filter(({ method, path }) =>
+    method === "POST" && (path === "/v1/sessions/rotated" || path === "/v1/events/ack"));
+  assert.deepEqual(writes.map(({ path }) => path), ["/v1/sessions/rotated", "/v1/sessions/rotated", "/v1/events/ack"]);
+  assert.deepEqual(writes[1]!.body, { agent: "main", seq: 1 });
 });
 
 test("a verifier's turn that fails is recorded without skipping the curator or new session", async () => {

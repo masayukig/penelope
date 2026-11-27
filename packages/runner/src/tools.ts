@@ -80,6 +80,25 @@ export function backendTools(backend: Backend, { home, turn }: { home: string; t
     },
   });
 
+  const sleep = defineTool({
+    name: "sleep",
+    exposure: "model-only",
+    label: "Sleep",
+    description: "Sleep after the current turn. No events reach you until the accepted wake time. Another call before the session switch finishes replaces the wake time.",
+    parameters: Type.Object({
+      wake_at: Type.String({ description: "The future wake time in RFC 3339, with a time zone." }),
+    }),
+    async execute(_id, params) {
+      const { wake_at, duration_seconds, clamped } = await backend.sleep(params);
+      const hours = Math.floor(duration_seconds / 3600);
+      const minutes = Math.floor(duration_seconds / 60) % 60;
+      const seconds = duration_seconds % 60;
+      const duration = [hours && `${hours}h`, minutes && `${minutes}m`, seconds && `${seconds}s`].filter(Boolean).join(" ");
+      const when = `${wake_at} (${duration} from now)`;
+      return text(clamped ? `Wake time clamped to ${when} by the maximum sleep duration.` : `Sleep requested until ${when}.`);
+    },
+  });
+
   const replyToAgent = defineTool({
     name: "reply_to_agent",
     exposure: "model-only",
@@ -162,7 +181,7 @@ export function backendTools(backend: Backend, { home, turn }: { home: string; t
     },
   });
 
-  return [reply, replyToAgent, scheduleAdd, scheduleList, scheduleRemove, selfEvent] as ToolDefinition[];
+  return [reply, sleep, replyToAgent, scheduleAdd, scheduleList, scheduleRemove, selfEvent] as ToolDefinition[];
 }
 
 export function subAgentTools(agents: SubAgents): ToolDefinition[] {

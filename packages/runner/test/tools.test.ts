@@ -36,8 +36,17 @@ async function call(name: string, params: Record<string, unknown>): Promise<stri
 }
 
 test("the tools", () => {
-  assert.deepEqual([...tools.keys()].sort(), ["reply", "reply_to_agent", "schedule_add", "schedule_list", "schedule_remove", "self_event"]);
+  assert.deepEqual([...tools.keys()].sort(), ["reply", "reply_to_agent", "schedule_add", "schedule_list", "schedule_remove", "self_event", "sleep"]);
   for (const tool of tools.values()) assert.ok(tool.description.length > 0);
+});
+
+test("sleep shows the accepted local wake time and duration when it clamps the request", async () => {
+  const requested = "2026-11-17T09:00:00Z";
+  const accepted = "2026-11-17T06:00:00+09:00";
+  fake.sleepResponse = { wake_at: accepted, duration_seconds: 41_400, clamped: true };
+  const result = await call("sleep", { wake_at: requested });
+  assert.equal(result, `Wake time clamped to ${accepted} (11h 30m from now) by the maximum sleep duration.`);
+  assert.deepEqual(fake.sent("POST", "/v1/sleep"), [{ agent: "main", wake_at: requested }]);
 });
 
 test("reply sends the text, the expression and the event it answers", async () => {

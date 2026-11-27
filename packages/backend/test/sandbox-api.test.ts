@@ -14,16 +14,17 @@ import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
 import { ModelSettings } from "../src/model-settings.ts";
 import { Feed } from "../src/feed.ts";
+import { Heartbeat } from "../src/heartbeat.ts";
 import { close, listenTcp } from "../src/http.ts";
 import { MemoryView } from "../src/memory-view.ts";
 import { Memory } from "../src/memory.ts";
 import { Queue } from "../src/queue.ts";
 import { ActivityRecord } from "../src/record.ts";
 import { sandboxHandler } from "../src/sandbox-api.ts";
-import { cronOf, Schedules } from "../src/schedules.ts";
+import { Schedules } from "../src/schedules.ts";
+import { Sleep } from "../src/sleep.ts";
 import { Sleepiness } from "../src/sleepiness.ts";
 import { Sources } from "../src/sources.ts";
-import { AwakeHours } from "../src/time.ts";
 import { ask, type Ask, FakeClock, tempDir } from "./support.ts";
 
 const TOKEN = "the-real-token";
@@ -31,17 +32,18 @@ const TOKEN = "the-real-token";
 async function setup(
   t: { after: (fn: () => void | Promise<void>) => void },
   token: string | undefined = TOKEN,
-  options: { inline?: string[]; delivery?: Record<string, "now" | "batch"> } = {},
+  options: { inline?: string[]; delivery?: Record<string, "now" | "batch">; timeZone?: string } = {},
 ) {
   const dir = tempDir(t);
   const clock = new FakeClock("2026-11-14T09:00:00Z");
   const db = openDatabase(path.join(dir, "backend.sqlite"));
-  const queue = new Queue(db, new Sources(path.join(dir, "sources"), "UTC"), {
-    now: Date.now,
+  const timeZone = options.timeZone ?? "UTC";
+  const queue = new Queue(db, new Sources(path.join(dir, "sources"), timeZone), {
+    now: clock.now,
     inline: new Set(options.inline ?? ["ui", "control"]),
     builtinDelivery: { self: "now", ...options.delivery },
     batch: { quietMs: 300_000, maxMs: 1_800_000 },
-    awake: new AwakeHours("00:00-00:00", "UTC"),
+    timeZone,
     redeliverMs: 300_000,
   });
   const feed = new Feed();
@@ -54,15 +56,21 @@ async function setup(
   const memoryDir = path.join(dir, "memory");
   mkdirSync(memoryDir);
   const memory = new Memory(memoryDir, { name: "penelope-backend", email: "backend@penelope.invalid" });
-  const memoryView = new MemoryView(memoryDir, db, { now: clock.now, timeZone: "UTC" });
-  const schedules = new Schedules(db, { now: Date.now, timeZone: "UTC" });
-  const inbox = new Inbox(db, queue, { assets, now: Date.now, limits: { deadlineMs: 86_400_000, maxOpenTasks: 3 } });
-  const record = new ActivityRecord(db, feed, { now: clock.now, timeZone: "UTC", nightly: cronOf("0 4 * * *", "UTC") });
+  const memoryView = new MemoryView(memoryDir, db, { now: clock.now, timeZone });
+  const schedules = new Schedules(db, { now: clock.now, timeZone });
+  const inbox = new Inbox(db, queue, { assets, now: clock.now, limits: { deadlineMs: 86_400_000, maxOpenTasks: 3 } });
+  const record = new ActivityRecord(db, feed, { now: clock.now, timeZone, sleepReportTimeoutMs: 60 * 60_000 });
   const modelSettings = new ModelSettings(db, clock.now);
-  const sleepiness = new Sleepiness(db, clock.now);
+  const sleepiness = new Sleepiness(db, clock.now, timeZone);
   const logs: string[] = [];
+  const log = (line: string) => logs.push(line);
+  const heartbeat = new Heartbeat(queue, conversation, { now: clock.now, inbox, record, sleepiness, log });
+  const sleep = new Sleep(db, queue, sleepiness, {
+    now: clock.now, timeZone, limits: { threshold: 90, defaultMs: 480 * 60_000, maxMs: 720 * 60_000 },
+    notes: (at, since) => heartbeat.notes(at, since), log,
+  });
   const server = await listenTcp(
-    sandboxHandler({ token, queue, conversation, agents, schedules, memory, memoryView, inbox, record, modelSettings, sleepiness, now: Date.now, log: (line) => logs.push(line) }),
+    sandboxHandler({ token, queue, conversation, agents, schedules, memory, memoryView, inbox, record, modelSettings, sleepiness, sleep, now: clock.now, log }),
     "127.0.0.1", 0,
   );
   const { port } = server.address() as AddressInfo;
@@ -131,7 +139,7 @@ describe("the sandbox's API", () => {
     assert.equal((await end("smaller", 1_000, 20_000)).status, 204);
     const status = await call("/v1/status?agent=main");
     assert.equal(status.status, 200);
-    assert.deepEqual(status.json(), { sleepiness: 90, awake_seconds: 0, context: { tokens: 1_000, context_window: 20_000 } });
+    assert.deepEqual(status.json(), { sleep: { state: "awake" }, sleepiness: 90, awake_seconds: 0, context: { tokens: 1_000, context_window: 20_000 } });
   });
 
   it("uses time awake when a runner does not report context", async (t) => {
@@ -140,7 +148,7 @@ describe("the sandbox's API", () => {
     assert.equal((await call("/v1/turns/end", { json: { agent: "main", turn_id: "legacy" } })).status, 204);
     const status = await call("/v1/status?agent=main");
     assert.equal(status.status, 200);
-    assert.deepEqual(status.json(), { sleepiness: 25, awake_seconds: 21_600 });
+    assert.deepEqual(status.json(), { sleep: { state: "awake" }, sleepiness: 25, awake_seconds: 21_600 });
   });
 
   it("rejects a context report that cannot describe a model window", async (t) => {
@@ -155,7 +163,114 @@ describe("the sandbox's API", () => {
     assert.equal((await call("/v1/turns/end", { json: { agent: "research", turn_id: "child", context } })).status, 204);
     const night = { seq: 7, stage: "reflection" };
     assert.equal((await call("/v1/turns/end", { json: { agent: "main", turn_id: "night", night, context } })).status, 204);
-    assert.deepEqual((await call("/v1/status?agent=main")).json(), { sleepiness: 0, awake_seconds: 0 });
+    assert.deepEqual((await call("/v1/status?agent=main")).json(), { sleep: { state: "awake" }, sleepiness: 0, awake_seconds: 0 });
+  });
+
+  describe("sleep", () => {
+    it("delivers only the switch until wake, then delivers both now and batch events with the wake notice", async (t) => {
+      const { call, clock, queue } = await setup(t);
+      const take = async (after = 0) => (await call(`/v1/events?agent=main&after=${after}`)).json().events;
+      const wake_at = "2026-11-14T09:02:00.000Z";
+      const response = await call("/v1/sleep", { json: { agent: "main", wake_at } });
+      assert.deepEqual([response.status, response.json()], [200, { wake_at: "2026-11-14T09:02:00.000+00:00", duration_seconds: 120, clamped: false }]);
+      await call("/v1/self-events", { json: self("after-sleep") });
+      const batch = queue.accept({ source: "news", id: "waiting", occurred_at: new Date(clock.now()).toISOString(), summary: "News", payload: null }).seq;
+      const [control, ...more] = await take();
+      assert.equal(control.source, "control");
+      assert.deepEqual(more, []);
+      assert.deepEqual(await take(control.seq), []);
+
+      clock.advance(2);
+      const events = await take(control.seq);
+      assert.deepEqual(events.map((event: { source: string }) => event.source), ["self", "news", "wake"]);
+      assert.equal(events[1].seq, batch);
+      assert.deepEqual(await take(events[2].seq), []);
+    });
+
+    it("includes still-open A2A work in the wake notice even with heartbeat off", async (t) => {
+      const { call, clock, inbox } = await setup(t);
+      const wake_at = "2026-11-14T09:02:00Z";
+      await call("/v1/sleep", { json: { agent: "main", wake_at } });
+      const task = inbox.receive("helper", { messageId: "review", text: "Review this" });
+      clock.advance(2);
+      const { events } = (await call("/v1/events?agent=main")).json();
+      const wake = events.find((event: { source: string }) => event.source === "wake");
+      assert.deepEqual(wake?.pending.a2a_tasks.items.map((item: { task_id: string }) => item.task_id), [task.taskId]);
+    });
+
+    it("replaces the wake time while falling asleep without starting another switch", async (t) => {
+      const { call } = await setup(t, TOKEN, { timeZone: "Asia/Tokyo" });
+      const first = "2026-11-14T09:05:00.000Z";
+      const wake_at = "2026-11-14T10:00:00.000Z";
+      for (const time of [first, wake_at]) assert.equal((await call("/v1/sleep", { json: { agent: "main", wake_at: time } })).status, 200);
+      const { events } = (await call("/v1/events?agent=main")).json();
+      assert.deepEqual(events.map((event: { source: string }) => event.source), ["control"]);
+      assert.deepEqual((await call("/v1/status?agent=main")).json().sleep, { state: "falling_asleep", wake_at: "2026-11-14T19:00:00.000+09:00" });
+    });
+
+    it("clamps a later request to the maximum duration from the first request", async (t) => {
+      const { call, clock } = await setup(t, TOKEN, { timeZone: "Asia/Tokyo" });
+      await call("/v1/sleep", { json: { agent: "main", wake_at: "2026-11-14T10:00:00Z" } });
+      clock.advance(10);
+      const response = await call("/v1/sleep", { json: { agent: "main", wake_at: "2026-11-16T09:00:00Z" } });
+      assert.deepEqual([response.status, response.json()], [200, {
+        wake_at: "2026-11-15T06:00:00.000+09:00", duration_seconds: 42_600, clamped: true,
+      }]);
+    });
+
+    it("uses the default sleep duration when a turn passes the safety limit", async (t) => {
+      const { call } = await setup(t);
+      const context = { tokens: 9_100, context_window: 10_000 };
+      await call("/v1/turns/end", { json: { agent: "main", turn_id: "full", context } });
+      assert.deepEqual((await call("/v1/status?agent=main")).json().sleep, {
+        state: "falling_asleep", wake_at: "2026-11-14T17:00:00.000+00:00",
+      });
+    });
+
+    it("uses one switch when a second sleep begins before the first switch finishes", async (t) => {
+      const { call, clock } = await setup(t);
+      const take = async (after = 0) => (await call(`/v1/events?agent=main&after=${after}`)).json().events;
+      await call("/v1/sleep", { json: { agent: "main", wake_at: "2026-11-14T09:01:00Z" } });
+      const [first] = await take();
+      assert.equal(first.source, "control");
+
+      clock.advance(1);
+      await call("/v1/sleep", { json: { agent: "main", wake_at: "2026-11-14T09:10:00Z" } });
+      assert.deepEqual(await take(first.seq), [], "do not hand out a second switch even while the first runner may still be working");
+
+      const done = { result: "done" };
+      await call("/v1/sessions/rotated", { json: {
+        agent: "main", seq: first.seq, stages: { reflection: done, verifier: done, curator: done, session: done },
+      } });
+      clock.advance(9);
+      assert.deepEqual((await take()).map((event: { source: string }) => event.source), ["wake", "wake"]);
+    });
+
+    it("drops context from the old session when the switch finishes after wake", async (t) => {
+      const { call, clock } = await setup(t);
+      await call("/v1/sleep", { json: { agent: "main", wake_at: "2026-11-14T09:01:00Z" } });
+      const [control] = (await call("/v1/events?agent=main")).json().events;
+      clock.advance(1);
+      await call("/v1/status?agent=main");
+      await call("/v1/turns/end", { json: {
+        agent: "main", turn_id: "old-session", context: { tokens: 6100, context_window: 10000 },
+      } });
+      clock.advance(10);
+      const done = { result: "done" };
+      await call("/v1/sessions/rotated", { json: {
+        agent: "main", seq: control.seq, stages: { reflection: done, verifier: done, curator: done, session: done },
+      } });
+      const context = { tokens: 500, context_window: 10000 };
+      await call("/v1/turns/end", { json: { agent: "main", turn_id: "new-session", context } });
+      assert.deepEqual((await call("/v1/status?agent=main")).json(), {
+        sleep: { state: "awake" }, sleepiness: 5, awake_seconds: 600, context,
+      });
+    });
+
+    it("refuses a sub-agent's sleep request", async (t) => {
+      const { call } = await setup(t);
+      assert.equal((await call("/v1/sleep", { json: { agent: "research", wake_at: "2026-11-14T10:00:00Z" } })).status, 400);
+    });
   });
 
   describe("taking events", () => {
@@ -576,21 +691,26 @@ describe("the sandbox's API", () => {
       assert.deepEqual(night?.kind === "night" && [night.result, night.stages], ["failed", stages]);
     });
 
-    it("resets sleepiness only once when a night opens a new session", async (t) => {
+    it("counts awake time from wake rather than session rotation", async (t) => {
       const { call, clock } = await setup(t);
-      const done = { result: "done" };
-      const stages = { reflection: done, verifier: done, curator: done, session: done };
-      const rotation = { agent: "main", seq: 7 };
       const status = async () => (await call("/v1/status?agent=main")).json();
-      clock.advance(12 * 60);
-      assert.equal((await call("/v1/sessions/rotated", { json: { ...rotation, stages: { ...stages, session: { result: "failed" } } } })).status, 204);
-      assert.deepEqual(await status(), { sleepiness: 50, awake_seconds: 43_200 });
-
-      assert.equal((await call("/v1/sessions/rotated", { json: { ...rotation, stages } })).status, 204);
-      assert.deepEqual(await status(), { sleepiness: 0, awake_seconds: 0 });
       clock.advance(6 * 60);
-      assert.equal((await call("/v1/sessions/rotated", { json: rotation })).status, 204);
-      assert.deepEqual(await status(), { sleepiness: 25, awake_seconds: 21_600 });
+      const wake_at = new Date(clock.now() + 480 * 60_000).toISOString();
+      await call("/v1/sleep", { json: { agent: "main", wake_at } });
+      const [control] = (await call("/v1/events?agent=main")).json().events;
+      clock.advance(30);
+      const done = { result: "done" };
+      await call("/v1/sessions/rotated", { json: {
+        agent: "main", seq: control.seq, stages: { reflection: done, verifier: done, curator: done, session: done },
+      } });
+      await call("/v1/events/ack", { json: { agent: "main", seqs: [control.seq] } });
+      clock.advance(1);
+      assert.deepEqual(await status(), { sleep: { state: "asleep", wake_at: wake_at.replace("Z", "+00:00") }, sleepiness: 25, awake_seconds: 21_600 });
+
+      clock.set(wake_at);
+      assert.deepEqual(await status(), { sleep: { state: "awake" }, sleepiness: 0, awake_seconds: 0 });
+      clock.advance(60);
+      assert.deepEqual(await status(), { sleep: { state: "awake" }, sleepiness: 4, awake_seconds: 3_600 });
     });
 
     it("keeps the latest read snapshot when an older night or a legacy report arrives later", async (t) => {
@@ -904,6 +1024,7 @@ describe("the sandbox's API", () => {
     const { call } = await setup(t);
     assert.equal((await call("/v1/nothing")).status, 404);
     assert.equal((await call("/v1/replies")).status, 405);
+    assert.equal((await call("/v1/sleep")).status, 405);
   });
 
   describe("A2A replies", () => {

@@ -15,8 +15,7 @@ kind: CronJob
 metadata:
   name: penelope-backup
 spec:
-  # After the nightly switch (PENELOPE_NIGHTLY_CRON, 04:00 in the example)
-  # has had time to end and commit. The time zone is the CronJob's own.
+  # A fixed backup time in the CronJob's time zone, independent of when the agent sleeps.
   schedule: "30 5 * * *"
   timeZone: Asia/Tokyo
   concurrencyPolicy: Forbid
