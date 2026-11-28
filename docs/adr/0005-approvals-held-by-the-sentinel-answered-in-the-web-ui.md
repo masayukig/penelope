@@ -1,7 +1,7 @@
 # 0005. 承認待ちは Sentinel が持ち、オーナーは Web UI で答える
 
 - Date: 2026-11-14
-- Status: Accepted
+- Status: Accepted（一部を [ADR-0079](0079-open-resident-pages-from-the-house.md) で置き換え）
 
 ## Context
 
@@ -55,6 +55,7 @@ natsumi では、関所が承認待ちを持ち、server のダッシュボー�
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0079 会話する配置は家に住み、承認は家で答え、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)（Decision 項 1（承認待ちの持ち主と答える場所）のうち、配置ごとの Web UI で答える点と、新しい承認待ちを Web Push か Slack で知らせる点。Sentinel は引き続き承認待ちと許可の判定を持つ）。
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく（答えの知らせ）
 - Related: ADR-0003 sandbox の外向きはすべて Sentinel を通し、既定は素通しで記録する（既定の扱いの ask）
 - Related: ADR-0009 最初の UI は Web だけにし、新しい API と Astryx で作る（承認の API と画面）
