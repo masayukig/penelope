@@ -12,7 +12,7 @@ import { after, before, describe, it, type TestContext } from "node:test";
 
 import { type Browser, chromium, type Page } from "playwright-core";
 
-import type { HouseDelivery, HousePersonView } from "@penelope/contract";
+import type { HouseConversationDelivery, HousePersonView } from "@penelope/contract";
 
 import { EVENING_BEHIND_MS, type FakeHouse, type FakeHouseOptions, playEvening, startFakeHouse } from "../dev/house.ts";
 
@@ -53,7 +53,66 @@ async function open(t: TestContext, house: FakeHouse, viewport: { width: number;
 const field = (page: Page, room: string) => page.getByLabel(`${room}で話す`, { exact: true });
 const focused = (page: Page) => page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent ?? "");
 
+const RED_PIXEL = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP438AAAAQBAYDFKhhdAAAAAElFTkSuQmCC";
+
 describe("the house's screen in a browser", () => {
+  it("keeps an image sent from a phone in the direct history", { timeout: 15_000 }, async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, PHONE);
+    await page.getByRole("link", { name: "さやかとの1対1を開く" }).click();
+    await page.getByLabel("画像を添付する").setInputFiles({ name: "夕焼け.png", mimeType: "image/png", buffer: Buffer.from(RED_PIXEL, "base64") });
+    await page.getByLabel("さやかへの発言").fill("今日の夕焼け");
+    await page.getByRole("button", { name: "送信" }).click();
+    await page.getByRole("button", { name: "夕焼け.png を拡大する" }).waitFor();
+
+    await page.reload();
+    const image = page.getByRole("img", { name: "夕焼け.png" });
+    await image.scrollIntoViewIfNeeded();
+    await image.evaluate((element: HTMLImageElement) => element.decode());
+  });
+
+  it("keeps the latest direct reply in view when attachments grow the phone composer", { timeout: 15_000 }, async (t) => {
+    const house = await evening(t);
+    const sayaka = house.agent("sayaka");
+    for (let i = 1; i <= 8; i++) await sayaka.reply({ text: `散歩の話 ${i}\n星がきれいだったよ。\nまた今度、一緒に行こう。` });
+    const page = await open(t, house, PHONE);
+    await page.getByRole("link", { name: "さやかとの1対1を開く" }).click();
+    await page.getByText("散歩の話 8", { exact: false }).waitFor();
+    const atEnd = () => {
+      const record = document.querySelector(".room-talk .astryx-chat-layout")!;
+      return record.scrollHeight - record.scrollTop - record.clientHeight < 2;
+    };
+    await page.waitForFunction(atEnd);
+
+    await page.getByLabel("画像を添付する").setInputFiles([1, 2, 3, 4].map((n) => ({ name: `写真${n}.png`, mimeType: "image/png", buffer: Buffer.from(RED_PIXEL, "base64") })));
+    await page.locator(".speak-attachments img").last().waitFor();
+    await page.waitForFunction(atEnd, undefined, { timeout: 2_000 });
+  });
+
+  it("returns focus to the link that opened a direct conversation on a phone", { timeout: 15_000 }, async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, PHONE);
+    const link = page.getByRole("link", { name: "さやかとの1対1を開く" });
+    await link.click();
+    await page.getByRole("button", { name: "間取りに戻る" }).click();
+
+    await page.waitForFunction(() => document.activeElement?.getAttribute("href") === "#/dm/sayaka");
+  });
+
+  it("opens an agent's room attachment large without leaving the room record", { timeout: 15_000 }, async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, PC);
+    await page.getByRole("button", { name: "居間を覗く" }).click();
+    await house.agent("penelope").reply({ text: "夕焼けを描いたよ", expression: "happy", images: [{ name: "絵.png", data: RED_PIXEL }] });
+    const thumbnail = page.getByRole("button", { name: "絵.png を拡大する" });
+    await thumbnail.click();
+    const viewer = page.getByRole("dialog", { name: "絵.png" });
+    await viewer.getByRole("img", { name: "絵.png" }).evaluate((element: HTMLImageElement) => element.decode());
+    await page.keyboard.press("Escape");
+    await viewer.waitFor({ state: "hidden" });
+    assert.equal(await page.evaluate(() => window.location.hash), "#/peek/living");
+  });
+
   it("reads a speech sent while the screen was closed when opened again", async (t) => {
     const house = await evening(t);
     const lee = await open(t, house, PC);
@@ -71,8 +130,8 @@ describe("the house's screen in a browser", () => {
 
   // ADR-0075, 7: whom a speech is addressed to is its own field. The `@` and what was typed after it are not text.
   it("sends an addressee picked with @ even when keepalive acknowledges the delivery first", { timeout: 15_000 }, async (t) => {
-    let received!: (delivery: HouseDelivery) => void;
-    const delivery = new Promise<HouseDelivery>((resolve) => (received = resolve));
+    let received!: (delivery: HouseConversationDelivery) => void;
+    const delivery = new Promise<HouseConversationDelivery>((resolve) => (received = resolve));
     const house = await evening(t, {
       onDelivery: (agent, delivered) => {
         const { event } = delivered;
@@ -100,7 +159,7 @@ describe("the house's screen in a browser", () => {
     const pending = await house.agent("penelope").sync();
     assert.equal(pending.some(({ event }) => event.id === delivered.event.id), false);
     // The callback observes both automatic and explicit syncs, even after their pending queues were acknowledged.
-    assert.deepEqual(delivered.answer_via, { command: "house say" });
+    assert.deepEqual(delivered.answer_via, { tool: "reply" });
   });
 
   it("focuses the conversation heading on a PC when entering and leaving", async (t) => {

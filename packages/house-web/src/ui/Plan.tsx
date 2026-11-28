@@ -4,12 +4,14 @@
 import { Button } from "@astryxdesign/core/Button";
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { Icon } from "@astryxdesign/core/Icon";
-import type { ReactNode, RefObject } from "react";
+import type { MouseEvent, ReactNode, RefObject } from "react";
 
 import type { HousePersonView } from "@penelope/contract";
 
+import { directWith } from "../model/session.ts";
 import { EyeIcon, ForwardIcon } from "./icons.tsx";
 import { AwayResident, keyOf, ResidentAvatar, ResidentCard, ResidentStack } from "./residents.tsx";
+import { UnreadBadge } from "./UnreadBadge.tsx";
 import { timeOf, withUnread, words } from "./words.ts";
 
 type Room = HousePersonView["rooms"][number];
@@ -23,6 +25,7 @@ export type PlanProps = {
   phone: boolean;
   openTalkFromTile: boolean;
   unread: number;
+  directUnread: ReadonlyMap<string, number>;
   lineNotice?: ReactNode;
   heading: RefObject<HTMLHeadingElement | null>;
   /** The way to the conversation on a phone. */
@@ -30,6 +33,7 @@ export type PlanProps = {
   onPeek: (room: string) => void;
   onEnter: (room: string) => void;
   onOpenTalk: () => void;
+  onDirect: (event: MouseEvent<HTMLAnchorElement>, agent: string) => void;
   onLogout: () => void;
 };
 
@@ -45,13 +49,8 @@ function Capacity({ room }: { room: Room }) {
   );
 }
 
-export function Plan({ house, mine, peek, online, phone, openTalkFromTile, unread, lineNotice, heading, dock, onPeek, onEnter, onOpenTalk, onLogout }: PlanProps) {
+export function Plan({ house, mine, peek, online, phone, openTalkFromTile, unread, directUnread, lineNotice, heading, dock, onPeek, onEnter, onOpenTalk, onDirect, onLogout }: PlanProps) {
   const myRoom = house.rooms.find(({ id }) => id === mine);
-  const unreadBadge = unread > 0 ? (
-    <span className="unread" aria-hidden>
-      {unread > 99 ? "99+" : unread}
-    </span>
-  ) : null;
   return (
     <div className="plan">
       <div className="plan-scroll">
@@ -86,7 +85,7 @@ export function Plan({ house, mine, peek, online, phone, openTalkFromTile, unrea
                 {room.occupants.length > 0 ? (
                   <ul className="residents" role="list">
                     {room.occupants.map((resident) => (
-                      <ResidentCard key={keyOf(resident)} resident={resident} self={resident.kind === "person" && resident.id === house.you.id} />
+                      <ResidentCard key={keyOf(resident)} resident={resident} self={resident.kind === "person" && resident.id === house.you.id} directUnread={directUnread.get(resident.id)} onDirect={resident.kind === "agent" && directWith(house, resident.id) ? onDirect : undefined} />
                     ))}
                   </ul>
                 ) : null}
@@ -104,7 +103,7 @@ export function Plan({ house, mine, peek, online, phone, openTalkFromTile, unrea
                         <Button
                           label={words.openTalk}
                           aria-label={withUnread(words.openTalk, phone ? 0 : unread)}
-                          endContent={phone ? undefined : unreadBadge}
+                          endContent={phone || unread === 0 ? undefined : <UnreadBadge count={unread} />}
                           variant="secondary"
                           size={phone ? "lg" : "sm"}
                           onClick={onOpenTalk}
@@ -148,7 +147,7 @@ export function Plan({ house, mine, peek, online, phone, openTalkFromTile, unrea
             {house.away.length > 0 ? (
               <ul className="residents" role="list">
                 {house.away.map((resident) => (
-                  <AwayResident key={keyOf(resident)} resident={resident} self={resident.kind === "person" && resident.id === house.you.id} />
+                  <AwayResident key={keyOf(resident)} resident={resident} self={resident.kind === "person" && resident.id === house.you.id} directUnread={directUnread.get(resident.id)} onDirect={resident.kind === "agent" && directWith(house, resident.id) ? onDirect : undefined} />
                 ))}
               </ul>
             ) : (
@@ -177,7 +176,7 @@ export function Plan({ house, mine, peek, online, phone, openTalkFromTile, unrea
                   )}
                 </span>
               </span>
-              {unreadBadge}
+              <UnreadBadge count={unread} />
               <ForwardIcon width={18} height={18} />
             </button>
           )}

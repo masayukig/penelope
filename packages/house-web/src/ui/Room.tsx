@@ -8,14 +8,15 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from "react";
 
-import type { HouseActor, HousePersonView } from "@penelope/contract";
+import type { HouseActor, HousePersonView, HouseSpeech } from "@penelope/contract";
 
-import type { RoomLog } from "../model/log.ts";
+import type { ConversationLog } from "../model/log.ts";
 import type { Line, Said } from "../model/session.ts";
 import { BackIcon, EnterIcon, EyeIcon, ReconnectIcon } from "./icons.tsx";
 import { isAsleep, keyOf, ResidentAvatar, ResidentCard, ResidentStack, type Shown } from "./residents.tsx";
 import { Speak, type Writing } from "./Speak.tsx";
 import { Timeline } from "./Timeline.tsx";
+import { UnreadBadge } from "./UnreadBadge.tsx";
 import { timeOf, withUnread, words } from "./words.ts";
 
 type Room = HousePersonView["rooms"][number];
@@ -35,7 +36,7 @@ export function LineNotice({ line, onRetry }: { line: Line; onRetry: () => void 
   return null;
 }
 
-type Shared = {
+export type ConversationPane = {
   you: HousePersonView["you"];
   residents: ReadonlyMap<string, Shown>;
   undelivered: ReadonlyMap<string, readonly HouseActor[]>;
@@ -44,17 +45,38 @@ type Shared = {
   line: Line;
   onRetry: () => void;
   heading: RefObject<HTMLHeadingElement | null>;
+  log: ConversationLog | undefined;
+  onOlder: () => Promise<void>;
 };
 
-function Record({ log, room, scroller, bottom, ...timeline }: { log: RoomLog | undefined; room: Room; scroller: RefObject<HTMLDivElement | null>; bottom: ReactNode } & Pick<Shared, "you" | "residents" | "undelivered" | "narrow"> & { onOlder: () => Promise<void> }) {
+export function ConversationRecord({ log, label, empty, scroller, bottom, ...timeline }: { log: ConversationLog | undefined; label: string; empty: string; scroller: RefObject<HTMLDivElement | null>; bottom: ReactNode } & Pick<ConversationPane, "you" | "residents" | "undelivered" | "narrow"> & { onOlder: () => Promise<void> }) {
+  const dock = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = scroller.current;
+    const composer = dock.current;
+    if (!element || !composer) return;
+    let height = composer.offsetHeight;
+    const observer = new ResizeObserver(() => {
+      const next = composer.offsetHeight;
+      const growth = next - height;
+      height = next;
+      // The dock is part of the scroll height. Check how close the reader was before it grew.
+      if (growth !== 0 && element.scrollHeight - element.scrollTop - element.clientHeight - Math.max(0, growth) < 160) {
+        element.scrollTop = element.scrollHeight;
+      }
+    });
+    observer.observe(composer);
+    return () => observer.disconnect();
+  }, [scroller]);
+
   return (
     <div className="room-talk">
       <ChatLayout
         ref={scroller}
         density="spacious"
-        aria-label={words.roomLog(room.name)}
-        composer={bottom}
-        emptyState={log?.whole !== undefined ? <EmptyState title={words.emptyRoom} headingLevel={3} /> : <p className="room-reading">{words.reading}</p>}
+        aria-label={label}
+        composer={<div className="room-bottom" ref={dock}>{bottom}</div>}
+        emptyState={log?.whole !== undefined ? <EmptyState title={empty} headingLevel={3} /> : <p className="room-reading">{words.reading}</p>}
       >
         {log !== undefined && log.events.length > 0 ? <Timeline log={log} scroller={scroller} {...timeline} /> : null}
       </ChatLayout>
@@ -62,17 +84,15 @@ function Record({ log, room, scroller, bottom, ...timeline }: { log: RoomLog | u
   );
 }
 
-export type MyRoomProps = Shared & {
+export type MyRoomProps = ConversationPane & {
   room: Room | undefined;
   access: "member" | "entering" | "read-only";
   entryNotice?: ReactNode;
-  log: RoomLog | undefined;
   touch: boolean;
   /** What is written for this room, and a way to change it that still means this room after the person left it. */
   writing: Writing;
   onWriting: (change: (writing: Writing) => Writing) => void;
-  onSay: (text: string, to: readonly string[]) => Promise<Said>;
-  onOlder: () => Promise<void>;
+  onSay: (speech: HouseSpeech) => Promise<Said>;
   onLeave: () => void;
   onBack: () => void;
 };
@@ -80,12 +100,6 @@ export type MyRoomProps = Shared & {
 export function MyRoom({ room, access, entryNotice, log, touch, writing, onWriting, onSay, onOlder, onLeave, onBack, heading, phone, line, onRetry, ...shared }: MyRoomProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const [sheet, setSheet] = useState(false);
-  // Astryx keeps the record's end in view as the record grows, not as what stands over the end grows.
-  const dockRows = `${writing.draft.to.length > 0} ${writing.unsent.length} ${line.kind}`;
-  useLayoutEffect(() => {
-    const element = scroller.current;
-    if (element && element.scrollHeight - element.scrollTop - element.clientHeight < 160) element.scrollTop = element.scrollHeight;
-  }, [dockRows]);
   const back = phone ? <IconButton icon={<Icon icon={BackIcon} />} label={words.backToPlan} variant="ghost" size="lg" onClick={onBack} /> : null;
   if (room === undefined) {
     return (
@@ -129,22 +143,23 @@ export function MyRoom({ room, access, entryNotice, log, touch, writing, onWriti
           </>
         )}
       </header>
-      <Record
+      <ConversationRecord
         log={log}
-        room={room}
+        label={words.roomLog(room.name)}
+        empty={words.emptyRoom}
         scroller={scroller}
         onOlder={onOlder}
         {...shared}
         bottom={
-          <div className="room-bottom">
+          <>
             <LineNotice line={line} onRetry={onRetry} />
             <div className="room-entry-status" role="status">
               {entryNotice ?? (member ? null : <p className="room-reading">{access === "entering" ? words.entering : words.readOnlyBody}</p>)}
             </div>
             {member ? (
-              <Speak key={room.id} room={room} others={others} online={line.kind === "open"} touch={touch} writing={writing} onWriting={onWriting} onSay={onSay} />
+              <Speak key={room.id} target={{ kind: "room", name: room.name, others }} online={line.kind === "open"} touch={touch} writing={writing} onWriting={onWriting} onSay={onSay} />
             ) : null}
-          </div>
+          </>
         }
       />
       {phone && member ? (
@@ -177,14 +192,12 @@ export function MyRoom({ room, access, entryNotice, log, touch, writing, onWriti
   );
 }
 
-export type PeekRoomProps = Shared & {
+export type PeekRoomProps = ConversationPane & {
   room: Room;
-  log: RoomLog | undefined;
   mine: Room | undefined;
   /** The person's own room is hidden while this one is looked into. */
   swapped: boolean;
   unread: number;
-  onOlder: () => Promise<void>;
   onEnter: () => void;
   onClose: () => void;
   onBackToMine: () => void;
@@ -225,14 +238,15 @@ export function PeekRoom({ room, log, mine, swapped, unread, onOlder, onEnter, o
           );
         })}
       </ul>
-      <Record
+      <ConversationRecord
         log={log}
-        room={room}
+        label={words.roomLog(room.name)}
+        empty={words.emptyRoom}
         scroller={scroller}
         onOlder={onOlder}
         {...shared}
         bottom={
-          <div className="room-bottom">
+          <>
             <LineNotice line={line} onRetry={onRetry} />
             <div className="peek-bar">
               <p className="peek-note">
@@ -261,18 +275,14 @@ export function PeekRoom({ room, log, mine, swapped, unread, onOlder, onEnter, o
                     onClick={onBackToMine}
                     {...(unread > 0
                       ? {
-                          endContent: (
-                            <span className="unread" aria-hidden>
-                              {unread > 99 ? "99+" : unread}
-                            </span>
-                          ),
+                          endContent: <UnreadBadge count={unread} />,
                         }
                       : {})}
                   />
                 ) : null}
               </div>
             </div>
-          </div>
+          </>
         }
       />
     </section>
