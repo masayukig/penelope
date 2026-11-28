@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 
-import type { HouseAgentStatus, HouseEnterResult, HouseSpeechResult, HouseSyncResult, HouseView } from "@penelope/contract";
+import type { HouseAgentStatus, HouseConversationSyncResult, HouseEnterResult, HouseReplyResult, HouseSpeechResult, HouseSyncResult, HouseView } from "@penelope/contract";
 import type { SenderCheck } from "@penelope/service-account-auth";
 
 import { parseConfig } from "../src/config.ts";
@@ -121,6 +121,17 @@ test("a resident gets their own speech in batch without a reply hint", async (t)
   assert.equal(own?.answer_via, undefined);
 });
 
+test("a modern deployment does not receive its own queued legacy speech", async (t) => {
+  const house = await open(t);
+  await house.enter("plant");
+  const { id } = await house.say("plant", "Already in my session");
+
+  const response = await house.request("plant", "/sync", "POST", { status: awake, protocol: 2 });
+  assert.equal(response.status, 200);
+  const { pending } = await response.json() as HouseConversationSyncResult;
+  assert.equal(pending.some(({ event }) => event.id === id), false);
+});
+
 test("sleep drops speech permanently but preserves room entry notifications", async (t) => {
   const house = await open(t);
   await house.enter("plant");
@@ -196,6 +207,83 @@ test("speech cannot name a different actor in the request", async (t) => {
   await house.enter("plant");
   assert.equal((await house.request("plant", "/rooms/living/say", "POST", { text: "Spoof", actor: "fern" })).status, 400);
   assert.deepEqual((await house.sync("plant")).pending, []);
+});
+
+test("a reply uses the agent's current room without returning its own speech", async (t) => {
+  const house = await open(t);
+  await house.enter("fern");
+  await house.enter("moss");
+  await house.enter("plant", "bath");
+  await house.enter("plant");
+  await house.sync("moss", sleeping);
+
+  const response = await house.request("plant", "/reply", "POST", { text: "Hello, Fern", to: ["fern"], expression: "happy" });
+  assert.equal(response.status, 200);
+  const { id, destination, not_delivered } = await response.json() as HouseReplyResult;
+  assert.deepEqual(destination, { kind: "room", room: { id: "living", name: "居間" } });
+  assert.deepEqual(not_delivered.map(({ id }) => id), ["moss"]);
+  assert.equal((await house.sync("plant")).pending.some(({ event }) => event.id === id), false);
+  const delivered = await house.request("fern", "/sync", "POST", { status: awake, protocol: 2 });
+  const { pending } = await delivered.json() as HouseConversationSyncResult;
+  const reply = pending.find(({ event }) => event.id === id);
+  assert.equal(reply?.stream, "living");
+  assert.ok(reply.event.kind === "speech");
+  assert.equal(reply.event.expression, "happy");
+  assert.deepEqual(reply.answer_via, { tool: "reply" });
+});
+
+test("a room reply reports addressed residents in another room or away", async (t) => {
+  const house = await open(t);
+  await house.enter("plant");
+  await house.enter("fern", "bath");
+
+  const response = await house.request("plant", "/reply", "POST", { text: "For Fern and Moss", to: ["fern", "moss"] });
+  assert.equal(response.status, 200);
+  const result = await response.json() as HouseReplyResult;
+  assert.equal(result.destination.kind, "room");
+  assert.deepEqual(result.absent_to, ["fern", "moss"]);
+  assert.deepEqual(result.not_delivered, []);
+});
+
+test("a room reply still rejects an invalid recipient list", async (t) => {
+  const house = await open(t);
+  await house.enter("plant");
+  const response = await house.request("plant", "/reply", "POST", { text: "Not for the room", to: "Fern" });
+  assert.equal(response.status, 400);
+});
+
+test("reply accepts exactly twenty thousand characters and refuses a longer body", async (t) => {
+  const house = await open(t);
+  await house.enter("plant");
+  assert.equal((await house.request("plant", "/reply", "POST", { text: "x".repeat(20_000) })).status, 200);
+  assert.equal((await house.request("plant", "/reply", "POST", { text: "x".repeat(20_001) })).status, 400);
+});
+
+test("an unknown expression does not prevent a room reply from reaching another resident", async (t) => {
+  const house = await open(t);
+  await house.enter("fern");
+  await house.enter("plant");
+  const response = await house.request("plant", "/reply", "POST", { text: "Unusual expression", expression: "grinning" });
+  assert.equal(response.status, 200);
+  const { id } = await response.json() as HouseReplyResult;
+  const sync = await house.request("fern", "/sync", "POST", { status: awake, protocol: 2 });
+  const { pending } = await sync.json() as HouseConversationSyncResult;
+  const message = pending.find(({ event }) => event.id === id)?.event;
+  assert.ok(message?.kind === "speech");
+  assert.equal(message.expression, undefined);
+});
+
+test("a legacy plugin still gets the legacy room answer hint without expression metadata", async (t) => {
+  const house = await open(t);
+  await house.enter("fern");
+  await house.enter("plant");
+  const response = await house.request("plant", "/reply", "POST", { text: "Hello", to: ["fern"], expression: "happy" });
+  assert.equal(response.status, 200);
+  const { id } = await response.json() as HouseReplyResult;
+  const reply = (await house.sync("fern")).pending.find(({ event }) => event.id === id);
+  assert.ok(reply?.event.kind === "speech");
+  assert.equal(reply.event.expression, undefined);
+  assert.deepEqual(reply.answer_via, { command: "house say" });
 });
 
 test("a room identifier must fit the intake stream format", () => {
