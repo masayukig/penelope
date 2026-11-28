@@ -57,7 +57,6 @@ export class Schedules {
     return this.rows(agent).map(schedule);
   }
 
-  /** The same schedules as `list`, each with when it comes due next, for the UI. */
   entries(agent: AgentId): ScheduleEntry[] {
     return this.rows(agent).map((row) => {
       const { agent: _agent, ...rest } = schedule(row);

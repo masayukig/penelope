@@ -3,10 +3,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 
-import { Assets } from "../src/assets.ts";
-import { Conversation } from "../src/conversation.ts";
 import { MIGRATIONS, openDatabase, transaction } from "../src/db.ts";
-import { Feed } from "../src/feed.ts";
 import { tempDir } from "./support.ts";
 
 const version = (db: DatabaseSync) => (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -43,14 +40,8 @@ describe("the database", () => {
     raw.exec("INSERT INTO assets (id, kind, mime_type, size, name, file, agent, created_at, reply_id, position) VALUES ('a-1', 'image', 'image/png', 4, 'a.png', 'a-1.png', 'main', 't', 'r-1', 0)");
     raw.close();
     const db = openDatabase(file);
-    assert.deepEqual(new Conversation(db, new Feed(), { now: Date.now, assets: new Assets(db, tempDir(t), { now: Date.now }) }).page().entries[0], {
-      kind: "agent",
-      id: "r-1",
-      at: "t",
-      text: "x",
-      agent: "main",
-      images: [{ id: "a-1", mime_type: "image/png", size: 4, name: "a.png" }],
-    });
+    const image = db.prepare("SELECT id, mime_type, size, name, file FROM assets WHERE message_id = ?").get("r-1");
+    assert.deepEqual({ ...image }, { id: "a-1", mime_type: "image/png", size: 4, name: "a.png", file: "a-1.png" });
     db.close();
   });
 

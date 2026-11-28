@@ -1,8 +1,3 @@
-// Her schedules (docs/ui-api.md, "予約"; docs/design/README.md, 12), in the
-// place of the events and the schedules: by when they come next, a day at a
-// time, each with its time, its reason as a lead and the rest, how it comes
-// again, and a button that removes it once the owner confirms. She is not
-// told; nothing here adds one.
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -20,8 +15,6 @@ import { dueOf, rhythmOf, scheduleDayOf, splitReason, timeOf, words } from "./wo
 export type SchedulesProps = {
   api: Api;
   onUnauthorized: () => void;
-  /** Room at the top for what floats over it (the phone's avatar). */
-  topInset?: boolean;
 };
 
 /** A schedule as the screen shows it. */
@@ -45,7 +38,7 @@ function daysOf(schedules: ScheduleEntry[]): Array<{ label: string; rows: Row[] 
   return days;
 }
 
-export function Schedules({ api, onUnauthorized, topInset = false }: SchedulesProps) {
+export function Schedules({ api, onUnauthorized }: SchedulesProps) {
   const [schedules, setSchedules] = useState<ScheduleEntry[] | undefined>(undefined);
   const [failed, setFailed] = useState<string | undefined>(undefined);
   const [asked, setAsked] = useState<Row | undefined>(undefined);
@@ -91,7 +84,7 @@ export function Schedules({ api, onUnauthorized, topInset = false }: SchedulesPr
   const next = days[0]?.rows[0];
 
   return (
-    <div className={topInset ? "page page-inset" : "page"}>
+    <div className="page">
       <section className="page-body schedules-page" aria-labelledby={`${id}-heading`}>
         <div className="schedules-head">
           <Heading level={1}>
