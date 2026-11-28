@@ -93,7 +93,7 @@ function appended(files: PromptFile[]): string {
 
 /** What folding leaves of an ended turn, as the system prompt says it when folding is on (ADR-0015). */
 export const FOLDING =
-  "Once a turn has ended, it is sent to the model folded: the events, your own text and your replies stay, your thinking and the output of the tools are left out, and each other tool call is cut down to one line. The record of the session keeps all of it.";
+  "Ended turns keep their events, your text and your replies, and omit thinking. Other tool calls keep their arguments if they fit within 200 JSON characters. Calls with longer arguments are replaced by a marker naming the original tool. Their results are placeholders. The session record keeps the full turn.";
 
 const escapeXml = (text: string) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
