@@ -79,7 +79,7 @@ export async function startHouse(config: HouseConfig, { now = Date.now, log = co
       const query = new URLSearchParams(raw.length > path.length ? raw.slice(path.length + 1) : "");
       return handlePerson(request, response, path, query);
     }
-    if (!path.startsWith("/v1/") && (method === "GET" || method === "HEAD") && await serveWeb(config.webDir, path, method === "HEAD", response)) return;
+    if (!path.startsWith("/v1/") && (method === "GET" || method === "HEAD") && await serveWeb(config.webDir, path, request, response)) return;
 
     const room = ROOM.exec(path);
     const view = path === "/v1/agent/house" && method === "GET";
@@ -155,7 +155,7 @@ export async function startHouse(config: HouseConfig, { now = Date.now, log = co
           (request.headers.origin && request.headers.origin !== config.auth.github?.origin)) {
         return send(response, 403, { error: "wrong-origin" });
       }
-      return people.connect(session, query.get("peek"), response);
+      return people.connect(session, response);
     }
     if (room?.[2] === "history") return send(response, 200, house.history(room[1]!, query.get("before")));
 

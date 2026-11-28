@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
 
-import type { HouseEvent, HousePersonFloor, HousePersonView, HouseStreamEvents } from "@penelope/contract";
+import type { HousePersonEvent, HousePersonFloor, HousePersonView, HouseStreamEvents } from "@penelope/contract";
 
 import type { Person } from "./config.ts";
-import { Conflict, House, NotFound, type PersonSession } from "./house.ts";
+import { Conflict, House, type PersonSession } from "./house.ts";
 
 const GRACE_MS = 30_000;
 const KEEPALIVE_MS = 25_000;
@@ -12,7 +12,6 @@ const KEEPALIVE_MS = 25_000;
 type Stream = {
   session: PersonSession;
   response: ServerResponse;
-  peek: string | null;
   snapshot: string;
 };
 
@@ -45,9 +44,8 @@ export class People {
     return { ...this.floor(), you: this.house.identity(person) };
   }
 
-  connect(session: PersonSession, peek: string | null, response: ServerResponse): void {
+  connect(session: PersonSession, response: ServerResponse): void {
     if (this.closed) throw new Conflict("house is closing");
-    if (peek !== null && !this.house.hasRoom(peek)) throw new NotFound("room does not exist");
     const { person } = session;
     const now = this.now();
     const events = this.expireDepartures(now);
@@ -65,7 +63,7 @@ export class People {
     }
 
     const connection = randomUUID();
-    const stream = { session, response, peek, snapshot: "" };
+    const stream = { session, response, snapshot: "" };
     this.streams.set(connection, stream);
     response.once("close", () => this.background(() => this.disconnect(connection)));
     response.writeHead(200, {
@@ -93,16 +91,13 @@ export class People {
     this.publish();
   }
 
-  publish(events: HouseEvent[] = []): void {
+  publish(events: HousePersonEvent[] = []): void {
     if (this.streams.size === 0) return;
     const floor = this.floor();
     for (const stream of this.streams.values()) {
       if (!this.active(stream)) continue;
       const { person } = stream.session;
-      const room = floor.rooms.find(({ occupants }) => occupants.some(({ id }) => id === person.actor.id))?.id;
-      for (const event of events) {
-        if (event.actor.id === person.actor.id || event.room.id === room || event.room.id === stream.peek) this.send(stream, "room", event);
-      }
+      for (const event of events) this.send(stream, "room", event);
       const snapshot = JSON.stringify({ ...floor, you: this.house.identity(person) } satisfies HousePersonView);
       if (stream.snapshot === snapshot) continue;
       stream.snapshot = snapshot;
@@ -140,8 +135,8 @@ export class People {
     return this.house.personFloor(this.now(), connected);
   }
 
-  private expireDepartures(now: number): HouseEvent[] {
-    const events: HouseEvent[] = [];
+  private expireDepartures(now: number): HousePersonEvent[] {
+    const events: HousePersonEvent[] = [];
     for (const [person, at] of this.departures) {
       if (now < at) continue;
       events.push(...this.house.leave(person, now));
